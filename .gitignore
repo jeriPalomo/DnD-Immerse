@@ -6,3 +6,4 @@ data/app.db-wal
 data/uploads/
 .env
 *.log
+*.tsbuildinfo

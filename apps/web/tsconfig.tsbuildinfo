@@ -1,1 +1,0 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/components/ui.tsx","./src/lib/api.ts","./src/pages/authpage.tsx","./src/pages/campaigndetail.tsx","./src/pages/campaignlist.tsx","./src/store/auth.ts","./src/store/campaigns.ts"],"version":"5.9.3"}
