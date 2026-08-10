@@ -1,0 +1,59 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-ink-950: #0b0a0f;
+  --color-ink-900: #121017;
+  --color-ink-850: #17151e;
+  --color-ink-800: #1e1b26;
+  --color-ink-700: #2a2635;
+  --color-ink-600: #3a3547;
+  --color-ink-500: #55506a;
+  --color-ink-400: #7d7794;
+  --color-ink-300: #a9a3bd;
+  --color-ink-200: #cec9dd;
+  --color-ink-100: #ebe8f2;
+
+  --color-ember-600: #b4531a;
+  --color-ember-500: #d9691f;
+  --color-ember-400: #e8853f;
+  --color-ember-300: #f2a86b;
+
+  --color-arcane-500: #6d5ce7;
+  --color-arcane-400: #8b7bf0;
+
+  --font-display: 'Cinzel', ui-serif, Georgia, serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-ink-950);
+  color: var(--color-ink-200);
+  font-feature-settings: 'kern', 'liga';
+}
+
+/* A faint arcane wash so large empty panels do not read as flat black. */
+.bg-vellum {
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(109, 92, 231, 0.14), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 90% 100%, rgba(217, 105, 31, 0.08), transparent 55%);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-ink-900);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink-700);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-600);
+}

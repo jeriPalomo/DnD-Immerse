@@ -1,0 +1,29 @@
+{
+  "name": "dnd-immerse",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@dnd/server & npm run dev --workspace=@dnd/web",
+    "dev:server": "npm run dev --workspace=@dnd/server",
+    "dev:web": "npm run dev --workspace=@dnd/web",
+    "build": "npm run build --workspace=@dnd/shared && npm run build --workspace=@dnd/web && npm run build --workspace=@dnd/server",
+    "db:generate": "npm run db:generate --workspace=@dnd/server",
+    "db:migrate": "npm run db:migrate --workspace=@dnd/server",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "allowScripts": {
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "better-sqlite3@12.11.1": true,
+    "sharp@0.34.5": true
+  }
+}
