@@ -40,6 +40,33 @@ certificate. Invite your friends to your tailnet and send them the URL.
 
 Set `SECURE_COOKIES=true` once you are serving over HTTPS.
 
+## Working across two machines
+
+The **desktop is the server of record**: it holds the real campaign database and
+hosts game nights. The laptop is a development machine with its own throwaway
+local data.
+
+Picking the project up anywhere:
+
+```bash
+git clone https://github.com/jeriPalomo/DnD-Immerse.git
+cd DnD-Immerse
+npm install     # native builds are pre-approved via allowScripts in package.json
+npm run dev
+```
+
+Requires Node 20 or newer. Nothing else needs to move by hand — no build state,
+no generated files, no credentials. Just `git pull` before you start and
+`git push` when you stop.
+
+**`data/` deliberately does not sync.** The SQLite file and uploaded maps are
+gitignored and belong to whichever machine is hosting. Never sync a live SQLite
+file between two running servers — concurrent writers will corrupt it. If data
+genuinely needs to move, stop both servers and copy the folder explicitly.
+
+That also makes `data/` the one thing here that cannot be rebuilt from git, so
+once you have a real campaign in it, back it up.
+
 ## Layout
 
 ```
@@ -84,6 +111,7 @@ Phases 0 and 1 are done: workspace, shared rules and grid math, the full
 database schema, Argon2 session auth, and campaigns with invite codes.
 
 Next up is Phase 2 — the Actor/Item document model on screen, the 5e character
-sheet, and the SRD 5.1 compendium import. See the plan for the full sequence;
-the short version is that Phase 3 gets you a playable game night and Phase 4 a
-working battle map, with walls and vision after that.
+sheet, and the SRD 5.1 compendium import. See [docs/PLAN.md](docs/PLAN.md) for
+the full architecture and phase sequence; the short version is that Phase 3 gets
+you a playable game night and Phase 4 a working battle map, with walls and vision
+after that.
