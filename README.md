@@ -67,6 +67,12 @@ genuinely needs to move, stop both servers and copy the folder explicitly.
 That also makes `data/` the one thing here that cannot be rebuilt from git, so
 once you have a real campaign in it, back it up.
 
+## Credits
+
+Compendium content is the **System Reference Document 5.1** by Wizards of the
+Coast, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/),
+sourced via [5e-bits/5e-database](https://github.com/5e-bits/5e-database).
+
 ## Layout
 
 ```
@@ -112,7 +118,8 @@ database schema, Argon2 session auth, campaigns with invite codes, the
 Actor/Item document model, the 5e character sheet, and the SRD 5.1 compendium
 (319 spells, 334 monsters, 599 items).
 
-Run `npm run srd:import` once to seed the compendium.
+Run `npm run srd:import` once to seed the compendium. It downloads on first
+run and caches under `data/srd/`, so later imports work offline.
 
 Next up is Phase 3 — realtime chat, presence, and the server-authoritative dice
 engine, which is the point the site becomes playable for a real session. See

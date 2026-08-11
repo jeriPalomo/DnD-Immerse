@@ -4,6 +4,7 @@ data/app.db
 data/app.db-shm
 data/app.db-wal
 data/uploads/
+data/srd/
 .env
 *.log
 *.tsbuildinfo
