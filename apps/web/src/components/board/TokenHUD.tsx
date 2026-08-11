@@ -1,0 +1,187 @@
+import { useState } from 'react';
+import { CONDITIONS } from '@dnd/shared';
+import type { WireToken } from '@dnd/shared';
+
+/**
+ * Quick controls for the selected token: damage and healing, conditions, and
+ * the DM's hide/lock toggles.
+ *
+ * A linked token writes HP straight through to its actor, so editing here and
+ * editing the sheet cannot disagree.
+ */
+export function TokenHUD({
+  token,
+  isDM,
+  canEdit,
+  onUpdate,
+  onDelete,
+}: {
+  token: WireToken;
+  isDM: boolean;
+  canEdit: boolean;
+  onUpdate: (fields: Record<string, unknown>) => void;
+  onDelete: () => void;
+}) {
+  const [delta, setDelta] = useState('');
+  const [showConditions, setShowConditions] = useState(false);
+
+  function applyDelta(sign: 1 | -1) {
+    const amount = Math.abs(Number(delta) || 0);
+    if (!amount || token.maxHp === null) return;
+
+    const next = Math.max(0, Math.min(token.maxHp, (token.hp ?? 0) + sign * amount));
+    onUpdate({ hp: next });
+    setDelta('');
+  }
+
+  function toggleCondition(condition: string) {
+    const active = token.conditions.includes(condition);
+    onUpdate({
+      conditions: active
+        ? token.conditions.filter((c) => c !== condition)
+        : [...token.conditions, condition],
+    });
+  }
+
+  const hpPercent = token.maxHp ? Math.max(0, Math.min(100, ((token.hp ?? 0) / token.maxHp) * 100)) : 0;
+
+  return (
+    <div className="rounded-xl border border-arcane-500/40 bg-ink-900 p-4">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="truncate font-display text-ink-100">{token.name || 'Token'}</h3>
+          <p className="text-[11px] text-ink-500">
+            {token.w}×{token.h} squares · {token.disposition}
+            {token.actorLinked ? ' · linked' : token.actorId ? ' · unlinked copy' : ''}
+          </p>
+        </div>
+        {token.ac !== null && (
+          <span className="shrink-0 rounded bg-ink-800 px-2 py-0.5 text-xs text-ink-300">
+            AC {token.ac}
+          </span>
+        )}
+      </div>
+
+      {token.maxHp !== null && (
+        <>
+          <div className="flex items-baseline justify-between text-xs text-ink-400">
+            <span>
+              {token.hp}/{token.maxHp} HP
+            </span>
+            {(token.hp ?? 0) <= 0 && <span className="text-red-400">Down</span>}
+          </div>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-950">
+            <div
+              className={`h-full ${hpPercent <= 50 ? 'bg-ember-500' : 'bg-emerald-600'}`}
+              style={{ width: `${hpPercent}%` }}
+            />
+          </div>
+
+          {canEdit && (
+            <div className="mt-2 flex gap-1.5">
+              <input
+                type="number"
+                min={0}
+                value={delta}
+                onChange={(e) => setDelta(e.target.value)}
+                placeholder="0"
+                aria-label="Hit point change"
+                className="w-16 rounded border border-ink-600 bg-ink-850 px-2 py-1 text-center text-sm text-ink-100 focus:border-arcane-400 focus:outline-none"
+              />
+              <button
+                onClick={() => applyDelta(-1)}
+                className="flex-1 rounded border border-red-900/60 bg-red-950/40 px-2 py-1 text-xs text-red-200 hover:bg-red-900/40"
+              >
+                Damage
+              </button>
+              <button
+                onClick={() => applyDelta(1)}
+                className="flex-1 rounded border border-emerald-900/60 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-900/40"
+              >
+                Heal
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {token.conditions.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {token.conditions.map((condition) => (
+            <span
+              key={condition}
+              className="rounded bg-arcane-500/20 px-1.5 py-0.5 text-[10px] text-arcane-400 capitalize"
+            >
+              {condition}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {canEdit && (
+        <div className="mt-3 space-y-2">
+          <button
+            onClick={() => setShowConditions(!showConditions)}
+            className="w-full rounded border border-ink-700 px-2 py-1 text-xs text-ink-300 hover:border-ink-600"
+          >
+            {showConditions ? 'Hide conditions' : 'Conditions'}
+          </button>
+
+          {showConditions && (
+            <div className="flex flex-wrap gap-1">
+              {CONDITIONS.map((condition) => {
+                const active = token.conditions.includes(condition);
+                return (
+                  <button
+                    key={condition}
+                    onClick={() => toggleCondition(condition)}
+                    className={`rounded px-1.5 py-0.5 text-[10px] capitalize transition-colors ${
+                      active
+                        ? 'bg-arcane-500/30 text-arcane-400'
+                        : 'bg-ink-850 text-ink-500 hover:text-ink-300'
+                    }`}
+                  >
+                    {condition}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {isDM && (
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => onUpdate({ hidden: !token.hidden })}
+                className={`flex-1 rounded border px-2 py-1 text-xs transition-colors ${
+                  token.hidden
+                    ? 'border-arcane-400 bg-arcane-500/20 text-arcane-400'
+                    : 'border-ink-700 text-ink-400 hover:text-ink-200'
+                }`}
+                title="Hidden tokens are not sent to players at all"
+              >
+                {token.hidden ? 'Hidden' : 'Visible'}
+              </button>
+              <button
+                onClick={() => onUpdate({ locked: !token.locked })}
+                className={`flex-1 rounded border px-2 py-1 text-xs transition-colors ${
+                  token.locked
+                    ? 'border-ember-400 bg-ember-500/20 text-ember-300'
+                    : 'border-ink-700 text-ink-400 hover:text-ink-200'
+                }`}
+              >
+                {token.locked ? 'Locked' : 'Unlocked'}
+              </button>
+              <button
+                onClick={onDelete}
+                className="rounded border border-red-900/60 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40"
+                aria-label="Delete token"
+              >
+                Remove
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

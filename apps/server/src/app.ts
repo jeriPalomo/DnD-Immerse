@@ -8,6 +8,7 @@ import { authRoutes } from './routes/auth.js';
 import { actorRoutes } from './routes/actors.js';
 import { campaignRoutes } from './routes/campaigns.js';
 import { itemRoutes } from './routes/items.js';
+import { sceneRoutes } from './routes/scenes.js';
 import { env, paths } from './env.js';
 
 export async function buildApp() {
@@ -59,6 +60,7 @@ export async function buildApp() {
   await app.register(campaignRoutes);
   await app.register(actorRoutes);
   await app.register(itemRoutes);
+  await app.register(sceneRoutes);
 
   return app;
 }

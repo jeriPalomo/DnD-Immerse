@@ -9,13 +9,14 @@ choices below. Keep it updated in the same commit as the work it describes.
 
 ## Status
 
-Phases 0–3 done. The site is **playable for a real session**: accounts,
-campaigns, 5e character sheets, the SRD compendium, and a live table with
-presence, chat, whispers, server-rolled dice and item cards.
+Phases 0–4 done. There is a **working battle map**: scenes with uploaded maps
+and grid calibration, sized tokens dragged in realtime, linked/unlinked HP, the
+token HUD, and the targeting action panel — on top of sheets, the compendium
+and the live chat/dice table.
 
-**Next: Phase 4** — scenes, map upload, grid calibration, sized tokens with
-parity snapping, linked/unlinked tokens, the token HUD, and the targeting
-action panel. That phase ends at a working battle map.
+**Next: Phase 5** — walls, doors, lights, server-side vision and bitmap fog
+exploration. See docs/PLAN.md; the vision polygon is computed on the server and
+wall geometry is never sent to players.
 
 ## Commands
 
@@ -67,6 +68,11 @@ the participants' personal socket rooms - never to the campaign room carrying a
 "private" flag, which a modified client could ignore. Secrecy is also persisted
 (a secret roll is stored as a whisper to the DM) so it survives a history
 reload.
+
+**Token drag never touches the database.** `token:move` streams position at
+~30Hz and is rebroadcast without a write; `token:commit` persists once on drop
+and applies the authoritative snap. A rejected move rebroadcasts the real
+position so the client corrects rather than sitting desynced.
 
 **NPCs are absent from a player's roster, not redacted.** A row reading
 "Ancient Red Dragon — sheet not shared" spoils the encounter just as thoroughly

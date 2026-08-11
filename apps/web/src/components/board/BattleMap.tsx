@@ -1,0 +1,380 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
+import {
+  TOKEN_MOVE_THROTTLE_MS,
+  gridToPixel,
+  pixelToGrid,
+  snapTokenPosition,
+  tokenDistanceInFeet,
+} from '@dnd/shared';
+import type Konva from 'konva';
+import type { WireScene, WireToken } from '@dnd/shared';
+import { useTable } from '../../store/table.js';
+import { useAuth } from '../../store/auth.js';
+
+/** Loads an image for Konva, re-resolving when the URL changes. */
+function useImage(url: string | null): HTMLImageElement | null {
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    if (!url) {
+      setImage(null);
+      return;
+    }
+    const element = new window.Image();
+    element.src = url;
+    element.onload = () => setImage(element);
+    return () => {
+      element.onload = null;
+    };
+  }, [url]);
+
+  return image;
+}
+
+const DISPOSITION_COLOR: Record<string, string> = {
+  friendly: '#34d399',
+  neutral: '#a9a3bd',
+  hostile: '#f87171',
+};
+
+export function BattleMap({ isDM }: { isDM: boolean }) {
+  const { scene, tokens, selectedTokenId, targetTokenId, pings, select, target, moveToken, commitToken, pingMap } =
+    useTable();
+  const { user } = useAuth();
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Zero until the container is measured; fitting against a placeholder size
+  // leaves the map stuck off-centre.
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+
+  const mapImage = useImage(scene?.mapImageUrl ?? null);
+
+  // Track the container so the stage fills it responsively.
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const observer = new ResizeObserver(([entry]) => {
+      setSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  // Fit the map when it first loads or the scene changes.
+  useEffect(() => {
+    if (!scene?.mapWidth || !scene.mapHeight || !size.width || !size.height) return;
+    const scale = Math.min(size.width / scene.mapWidth, size.height / scene.mapHeight, 1);
+    setView({
+      scale,
+      x: (size.width - scene.mapWidth * scale) / 2,
+      y: (size.height - scene.mapHeight * scale) / 2,
+    });
+  }, [scene?.id, scene?.mapWidth, scene?.mapHeight, size.width, size.height]);
+
+  const onWheel = useCallback((event: Konva.KonvaEventObject<WheelEvent>) => {
+    event.evt.preventDefault();
+    const stage = event.target.getStage();
+    const pointer = stage?.getPointerPosition();
+    if (!stage || !pointer) return;
+
+    const oldScale = stage.scaleX();
+    // Zoom toward the cursor rather than the origin.
+    const mousePoint = {
+      x: (pointer.x - stage.x()) / oldScale,
+      y: (pointer.y - stage.y()) / oldScale,
+    };
+    const direction = event.evt.deltaY > 0 ? -1 : 1;
+    const scale = Math.max(0.1, Math.min(5, oldScale * (direction > 0 ? 1.1 : 1 / 1.1)));
+
+    setView({
+      scale,
+      x: pointer.x - mousePoint.x * scale,
+      y: pointer.y - mousePoint.y * scale,
+    });
+  }, []);
+
+  if (!scene) {
+    return (
+      <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-ink-700 bg-ink-900">
+        <p className="max-w-xs text-center text-sm text-ink-500">
+          {isDM
+            ? 'No active scene. Create one and upload a map to get started.'
+            : 'The DM has not opened a map yet.'}
+        </p>
+      </div>
+    );
+  }
+
+  const grid = { gridSize: scene.gridSize, offsetX: scene.gridOffsetX, offsetY: scene.gridOffsetY };
+  const selected = tokens.find((t) => t.id === selectedTokenId) ?? null;
+  const targeted = tokens.find((t) => t.id === targetTokenId) ?? null;
+
+  return (
+    <div ref={containerRef} className="relative h-full overflow-hidden rounded-xl border border-ink-700 bg-ink-950">
+      <Stage
+        width={size.width}
+        height={size.height}
+        scaleX={view.scale}
+        scaleY={view.scale}
+        x={view.x}
+        y={view.y}
+        draggable
+        onWheel={onWheel}
+        onDragEnd={(e) => setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }))}
+        onClick={(e) => {
+          // Clicking empty map clears the selection; alt-click drops a ping.
+          if (e.target === e.target.getStage() || e.target.name() === 'map') {
+            const stage = e.target.getStage();
+            const pointer = stage?.getPointerPosition();
+            if (e.evt.altKey && pointer && stage) {
+              const point = pixelToGrid(
+                { x: (pointer.x - stage.x()) / stage.scaleX(), y: (pointer.y - stage.y()) / stage.scaleY() },
+                grid,
+              );
+              pingMap(point.x, point.y);
+            } else {
+              select(null);
+              target(null);
+            }
+          }
+        }}
+      >
+        <Layer>
+          {mapImage && (
+            <KonvaImage image={mapImage} name="map" width={scene.mapWidth} height={scene.mapHeight} />
+          )}
+          {!mapImage && (
+            <Rect width={scene.mapWidth || 1400} height={scene.mapHeight || 900} fill="#121017" />
+          )}
+        </Layer>
+
+        {scene.gridVisible && (
+          <Layer listening={false}>
+            <GridLines scene={scene} />
+          </Layer>
+        )}
+
+        <Layer>
+          {tokens
+            .filter((t) => t.layer !== 'gm' || isDM)
+            .map((token) => (
+              <TokenShape
+                key={token.id}
+                token={token}
+                grid={grid}
+                selected={token.id === selectedTokenId}
+                targeted={token.id === targetTokenId}
+                // A player may drag only their own tokens; the DM drags anything.
+                draggable={isDM || (token.ownerUserId === user?.id && !token.locked)}
+                onSelect={(withShift) => {
+                  if (withShift) target(token.id === targetTokenId ? null : token.id);
+                  else select(token.id);
+                }}
+                onMove={moveToken}
+                onCommit={commitToken}
+              />
+            ))}
+        </Layer>
+
+        <Layer listening={false}>
+          {/* Reach readout while a target is chosen. */}
+          {selected && targeted && selected.id !== targeted.id && (
+            <ReachLine from={selected} to={targeted} scene={scene} grid={grid} />
+          )}
+          {pings.map((ping) => {
+            const point = gridToPixel({ x: ping.x, y: ping.y }, grid);
+            return (
+              <Circle
+                key={ping.id}
+                x={point.x}
+                y={point.y}
+                radius={scene.gridSize * 0.6}
+                stroke={ping.color}
+                strokeWidth={3}
+                opacity={0.9}
+              />
+            );
+          })}
+        </Layer>
+      </Stage>
+
+      <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-ink-950/80 px-2 py-1 text-[10px] text-ink-500">
+        scroll to zoom · drag to pan · alt-click to ping · shift-click a token to target
+      </div>
+    </div>
+  );
+}
+
+function GridLines({ scene }: { scene: WireScene }) {
+  const lines = useMemo(() => {
+    const width = scene.mapWidth || 1400;
+    const height = scene.mapHeight || 900;
+    const out: number[][] = [];
+
+    for (let x = scene.gridOffsetX; x <= width; x += scene.gridSize) out.push([x, 0, x, height]);
+    for (let y = scene.gridOffsetY; y <= height; y += scene.gridSize) out.push([0, y, width, y]);
+    return out;
+  }, [scene.mapWidth, scene.mapHeight, scene.gridSize, scene.gridOffsetX, scene.gridOffsetY]);
+
+  return (
+    <>
+      {lines.map((points, index) => (
+        <Line key={index} points={points} stroke="#ffffff" strokeWidth={1} opacity={0.12} />
+      ))}
+    </>
+  );
+}
+
+function ReachLine({
+  from,
+  to,
+  scene,
+  grid,
+}: {
+  from: WireToken;
+  to: WireToken;
+  scene: WireScene;
+  grid: { gridSize: number; offsetX: number; offsetY: number };
+}) {
+  // Footprint to footprint, so a Gargantuan target reads its true reach.
+  const feet = tokenDistanceInFeet(from, to, 'standard', scene.feetPerSquare);
+
+  const a = gridToPixel({ x: from.x + from.w / 2, y: from.y + from.h / 2 }, grid);
+  const b = gridToPixel({ x: to.x + to.w / 2, y: to.y + to.h / 2 }, grid);
+
+  return (
+    <>
+      <Line points={[a.x, a.y, b.x, b.y]} stroke="#e8853f" strokeWidth={2} dash={[8, 6]} opacity={0.8} />
+      <Text
+        x={(a.x + b.x) / 2}
+        y={(a.y + b.y) / 2 - scene.gridSize * 0.35}
+        text={`${feet} ft`}
+        fontSize={scene.gridSize * 0.32}
+        fill="#f2a86b"
+        align="center"
+      />
+    </>
+  );
+}
+
+function TokenShape({
+  token,
+  grid,
+  selected,
+  targeted,
+  draggable,
+  onSelect,
+  onMove,
+  onCommit,
+}: {
+  token: WireToken;
+  grid: { gridSize: number; offsetX: number; offsetY: number };
+  selected: boolean;
+  targeted: boolean;
+  draggable: boolean;
+  onSelect: (withShift: boolean) => void;
+  onMove: (id: string, x: number, y: number) => void;
+  onCommit: (id: string, x: number, y: number) => void;
+}) {
+  const image = useImage(token.imageUrl);
+  const lastEmit = useRef(0);
+
+  const position = gridToPixel({ x: token.x, y: token.y }, grid);
+  const width = token.w * grid.gridSize;
+  const height = token.h * grid.gridSize;
+  const ring = DISPOSITION_COLOR[token.disposition] ?? '#a9a3bd';
+
+  const hpPercent = token.maxHp && token.maxHp > 0 ? Math.max(0, (token.hp ?? 0) / token.maxHp) : null;
+
+  return (
+    <Group
+      x={position.x}
+      y={position.y}
+      draggable={draggable}
+      opacity={token.hidden ? 0.45 : 1}
+      onClick={(e) => {
+        e.cancelBubble = true;
+        onSelect(e.evt.shiftKey);
+      }}
+      onDragMove={(e) => {
+        // Throttled to ~30Hz: the wire carries position only, and the server
+        // rebroadcasts without touching the database.
+        const now = Date.now();
+        if (now - lastEmit.current < TOKEN_MOVE_THROTTLE_MS) return;
+        lastEmit.current = now;
+
+        const point = pixelToGrid({ x: e.target.x(), y: e.target.y() }, grid);
+        onMove(token.id, point.x, point.y);
+      }}
+      onDragEnd={(e) => {
+        const raw = pixelToGrid({ x: e.target.x(), y: e.target.y() }, grid);
+        const snapped = snapTokenPosition(raw, token.w, token.h);
+        // Settle locally on the snapped position so it does not visibly jump
+        // when the server's authoritative value arrives.
+        const pixel = gridToPixel(snapped, grid);
+        e.target.position(pixel);
+        onCommit(token.id, snapped.x, snapped.y);
+      }}
+    >
+      {image ? (
+        <KonvaImage image={image} width={width} height={height} cornerRadius={width / 2} />
+      ) : (
+        <Circle
+          x={width / 2}
+          y={height / 2}
+          radius={Math.min(width, height) / 2 - 2}
+          fill="#2a2635"
+          stroke={ring}
+          strokeWidth={2}
+        />
+      )}
+
+      <Circle
+        x={width / 2}
+        y={height / 2}
+        radius={Math.min(width, height) / 2 - 1}
+        stroke={targeted ? '#e8853f' : selected ? '#8b7bf0' : ring}
+        strokeWidth={targeted || selected ? 3.5 : 2}
+        dash={targeted ? [6, 4] : undefined}
+      />
+
+      {!image && (
+        <Text
+          width={width}
+          y={height / 2 - grid.gridSize * 0.16}
+          text={token.name.slice(0, 2).toUpperCase()}
+          fontSize={grid.gridSize * 0.32}
+          fill="#cec9dd"
+          align="center"
+        />
+      )}
+
+      {hpPercent !== null && (
+        <>
+          <Rect y={height - 6} width={width} height={5} fill="#0b0a0f" opacity={0.75} cornerRadius={2} />
+          <Rect
+            y={height - 6}
+            width={width * hpPercent}
+            height={5}
+            fill={hpPercent <= 0.5 ? '#d9691f' : '#059669'}
+            cornerRadius={2}
+          />
+        </>
+      )}
+
+      {token.hidden && (
+        <Text
+          width={width}
+          y={-grid.gridSize * 0.28}
+          text="hidden"
+          fontSize={grid.gridSize * 0.2}
+          fill="#7d7794"
+          align="center"
+        />
+      )}
+    </Group>
+  );
+}

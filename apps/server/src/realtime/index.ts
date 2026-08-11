@@ -5,6 +5,7 @@ import type { ClientToServerEvents, ServerToClientEvents, WirePresence } from '@
 import { SESSION_COOKIE, validateSession } from '../auth/session.js';
 import { getMembership } from '../auth/guards.js';
 import { registerChatHandlers } from './chat.js';
+import { broadcastSceneState, registerSceneHandlers } from './scene.js';
 import type { MemberRole } from '@dnd/shared';
 import type { User } from '../db/schema.js';
 
@@ -127,6 +128,7 @@ export function attachRealtime(app: FastifyInstance): IOServer {
       addPresence(campaignId, user.id);
 
       await broadcastPresence(io, campaignId);
+      await broadcastSceneState(io, campaignId);
     });
 
     socket.on('campaign:leave', async ({ campaignId }) => {
@@ -141,6 +143,7 @@ export function attachRealtime(app: FastifyInstance): IOServer {
     });
 
     registerChatHandlers(io, socket);
+    registerSceneHandlers(io, socket);
 
     socket.on('disconnect', async () => {
       for (const campaignId of socket.data.rooms.keys()) {

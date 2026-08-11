@@ -36,6 +36,9 @@ export interface WireToken {
   layer: TokenLayer;
   ownerUserId: string | null;
   actorId: string | null;
+  /** Linked tokens share HP with their actor; unlinked keep a private copy. */
+  actorLinked: boolean;
+  disposition: 'friendly' | 'neutral' | 'hostile';
   hp: number | null;
   maxHp: number | null;
   ac: number | null;
@@ -50,16 +53,18 @@ export interface WireScene {
   campaignId: string;
   name: string;
   mapImageUrl: string | null;
+  /** Natural pixel dimensions of the map image. */
   mapWidth: number;
   mapHeight: number;
+  /** Pixel size of one grid square on the source image. */
   gridSize: number;
   gridOffsetX: number;
   gridOffsetY: number;
   gridVisible: boolean;
-  fogEnabled: boolean;
   feetPerSquare: number;
-  /** Polygons in grid units marking the revealed (un-fogged) area. */
-  revealedPolygons: { x: number; y: number }[][];
+  visionEnabled: boolean;
+  globalIllumination: boolean;
+  darkness: number;
 }
 
 export interface WireCard {
@@ -144,12 +149,6 @@ export const tokenCreateSchema = tokenInputSchema.extend({ sceneId: z.string() }
 
 export const tokenUpdateSchema = tokenInputSchema.partial().extend({ tokenId: z.string() });
 
-export const fogUpdateSchema = z.object({
-  sceneId: z.string(),
-  /** Full replacement of the revealed set; simplest correct model at this scale. */
-  revealedPolygons: z.array(z.array(z.object({ x: z.number(), y: z.number() }))),
-});
-
 export const pingSchema = z.object({
   sceneId: z.string(),
   x: z.number(),
@@ -181,7 +180,6 @@ export type TokenMovePayload = z.infer<typeof tokenMoveSchema>;
 export type TokenCommitPayload = z.infer<typeof tokenCommitSchema>;
 export type TokenCreatePayload = z.infer<typeof tokenCreateSchema>;
 export type TokenUpdatePayload = z.infer<typeof tokenUpdateSchema>;
-export type FogUpdatePayload = z.infer<typeof fogUpdateSchema>;
 export type PingPayload = z.infer<typeof pingSchema>;
 export type AudioControlPayload = z.infer<typeof audioControlSchema>;
 export type InitiativeUpdatePayload = z.infer<typeof initiativeUpdateSchema>;
@@ -190,6 +188,7 @@ export type InitiativeUpdatePayload = z.infer<typeof initiativeUpdateSchema>;
 
 export interface ServerToClientEvents {
   'scene:state': (payload: { scene: WireScene | null; tokens: WireToken[] }) => void;
+  'scene:list': (payload: { scenes: { id: string; name: string; mapImageUrl: string | null }[] }) => void;
   'scene:changed': (payload: { sceneId: string }) => void;
   'scene:updated': (payload: { scene: WireScene }) => void;
 
@@ -197,8 +196,6 @@ export interface ServerToClientEvents {
   'token:created': (payload: { token: WireToken }) => void;
   'token:updated': (payload: { token: WireToken }) => void;
   'token:deleted': (payload: { tokenId: string }) => void;
-
-  'fog:updated': (payload: FogUpdatePayload) => void;
 
   'chat:message': (payload: { message: WireChatMessage }) => void;
   'chat:history': (payload: { messages: WireChatMessage[] }) => void;
@@ -225,8 +222,6 @@ export interface ClientToServerEvents {
   'token:create': (payload: TokenCreatePayload) => void;
   'token:update': (payload: TokenUpdatePayload) => void;
   'token:delete': (payload: { tokenId: string }) => void;
-
-  'fog:update': (payload: FogUpdatePayload) => void;
 
   'chat:send': (payload: z.infer<typeof sendMessageSchema>) => void;
   'chat:roll': (payload: z.infer<typeof rollRequestSchema>) => void;
