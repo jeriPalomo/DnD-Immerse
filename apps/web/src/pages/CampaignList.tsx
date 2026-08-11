@@ -1,10 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, Spinner, Textarea } from '../components/ui.js';
+import { AvatarUpload } from '../components/AvatarUpload.js';
 import { useCampaigns } from '../store/campaigns.js';
+import { useAuth } from '../store/auth.js';
 
 export default function CampaignList() {
   const { campaigns, loading, load, create, join } = useCampaigns();
+  const { user, refresh } = useAuth();
   const [panel, setPanel] = useState<'none' | 'create' | 'join'>('none');
 
   useEffect(() => {
@@ -14,11 +17,20 @@ export default function CampaignList() {
   return (
     <div className="mx-auto max-w-5xl px-4 py-10">
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        <div>
+        <div className="flex items-center gap-4">
+          <AvatarUpload
+            url={user?.avatarUrl ?? null}
+            endpoint="/api/auth/me/avatar"
+            field="avatarUrl"
+            label="Your avatar"
+            onUploaded={() => void refresh()}
+          />
+          <div>
           <h1 className="font-display text-2xl font-bold text-ink-100">Your campaigns</h1>
           <p className="mt-1 text-sm text-ink-400">
             Run a story as Dungeon Master, or join one with an invite code.
           </p>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => setPanel(panel === 'join' ? 'none' : 'join')}>

@@ -14,8 +14,7 @@ tracking, damage with resistances read off the sheet, and automatic
 concentration saves.
 
 **Next: Phase 7** — playlists and positional ambient sounds, journal with map
-pins, AoE templates. Also still open: avatar and campaign banner upload have
-server routes but no UI.
+pins, AoE templates.
 
 ## Commands
 
@@ -78,6 +77,12 @@ computes vision in the browser and therefore ships every wall to every client.
 over base numbers and is never stored — the same rule as ability modifiers.
 Modes apply multiply before add, so a +2 bonus is not itself doubled, and
 `applied` names every effect that contributed so a total is explainable.
+
+**No dead code.** Two audits found helpers that were written, tested, and never
+called — `movementBlocked` let players walk through walls, `deriveActor` made
+conditions decorative. Before adding a feature, check that the last one is
+actually reachable: `grep` the export and see whether anything outside its own
+module and tests uses it.
 
 **Enemy hit points are redacted from players in the tracker.** Knowing the boss
 is on 7 HP changes how a table plays; that is the DM's to reveal.

@@ -7,6 +7,8 @@ import {
   concentrationDC,
   concentrationSave,
   damageApplySchema,
+  expiredEffects,
+  initiativeExpression,
   initiativeAddSchema,
   initiativeUpdateSchema,
   rewindTurn,
@@ -21,7 +23,7 @@ import type {
   WireInitiativeEntry,
 } from '@dnd/shared';
 import { db } from '../db/index.js';
-import { actors, encounters, initiativeEntries, tokens } from '../db/schema.js';
+import { activeEffects, actors, encounters, initiativeEntries, tokens } from '../db/schema.js';
 import { getMembership } from '../auth/guards.js';
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
@@ -205,13 +207,15 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       // Rolled on the server, like every other die in the app.
       let initiative = 0;
       if (input.roll) {
-        let dexModifier = 0;
+        let scores: AbilityScores = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
         if (token.actorId) {
           const found = await db.select().from(actors).where(eq(actors.id, token.actorId)).limit(1);
-          if (found[0]) dexModifier = Math.floor((found[0].dex - 10) / 2);
+          if (found[0]) scores = scoresOfToken(found[0]);
         }
-        const expression = dexModifier >= 0 ? `1d20+${dexModifier}` : `1d20${dexModifier}`;
-        initiative = rollExpression(expression, `${token.name} initiative`).total;
+        initiative = rollExpression(
+          initiativeExpression(scores),
+          `${token.name} initiative`,
+        ).total;
       }
 
       await db.insert(initiativeEntries).values({
@@ -289,6 +293,20 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
         .update(encounters)
         .set({ activeIndex: next.activeIndex, round: next.round })
         .where(eq(encounters.id, encounter.id));
+
+      // Timed effects fall off at the top of the round they expire in,
+      // rather than lingering until someone remembers them.
+      if (next.round !== encounter.round) {
+        const expired = await expireEffectsFor(ctx.campaignId, next.round);
+        if (expired.length > 0) {
+          await postSystemMessage(
+            io, ctx.campaignId, user.id,
+            `Round ${next.round}: ${expired.join(', ')} ${expired.length === 1 ? 'expires' : 'expire'}.`,
+          );
+          const { broadcastSceneState } = await import('./scene.js');
+          await broadcastSceneState(io, ctx.campaignId);
+        }
+      }
 
       await broadcastEncounter(io, ctx.campaignId);
     });
@@ -380,6 +398,33 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
     await broadcastSceneState(io, ctx.campaignId);
     await broadcastEncounter(io, ctx.campaignId);
   });
+}
+
+/**
+ * Removes effects whose duration has elapsed, returning their names so the
+ * table is told what wore off rather than silently losing a buff.
+ */
+async function expireEffectsFor(campaignId: string, round: number): Promise<string[]> {
+  const rows = await db
+    .select({ effect: activeEffects, token: tokens })
+    .from(activeEffects)
+    .innerJoin(tokens, eq(activeEffects.ownerTokenId, tokens.id));
+
+  const candidates = rows.map(({ effect }) => ({
+    id: effect.id,
+    name: effect.name,
+    changes: effect.changes,
+    disabled: effect.disabled,
+    duration: effect.duration as { rounds: number | null; startRound: number | null } | null,
+    statusId: effect.statusId,
+  }));
+
+  const expired = expiredEffects(candidates, round);
+  for (const effect of expired) {
+    await db.delete(activeEffects).where(eq(activeEffects.id, effect.id));
+  }
+
+  return expired.map((effect) => effect.name);
 }
 
 /** Resistances and immunities come from the token's actor sheet. */

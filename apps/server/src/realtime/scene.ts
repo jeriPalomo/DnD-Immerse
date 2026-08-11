@@ -2,6 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import {
   campaignDmRoom,
   campaignRoom,
+  clampToMap,
   movementBlocked,
   snapTokenPosition,
   tokenCenter,
@@ -403,8 +404,20 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
     const w = input.w ?? token.w;
     const h = input.h ?? token.h;
-    // Snapping is applied server-side so every client agrees on the position.
-    const snapped = snapTokenPosition({ x: input.x, y: input.y }, w, h);
+    const scene = await sceneOf(token.sceneId);
+
+    // Kept on the map, then snapped - server-side, so every client agrees.
+    const bounded =
+      scene && scene.gridSize > 0 && scene.mapWidth > 0
+        ? clampToMap(
+            { x: input.x, y: input.y },
+            w,
+            h,
+            scene.mapWidth / scene.gridSize,
+            scene.mapHeight / scene.gridSize,
+          )
+        : { x: input.x, y: input.y };
+    const snapped = snapTokenPosition(bounded, w, h);
 
     // Walls stop players, not the DM - who needs to place things anywhere,
     // including inside walls.

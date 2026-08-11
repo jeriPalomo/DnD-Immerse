@@ -34,6 +34,8 @@ interface TableState {
   /** DM wall-drawing mode. */
   wallTool: 'off' | 'wall' | 'door';
   encounter: WireEncounter | null;
+  /** Most recent damage results, shown briefly then cleared. */
+  lastDamage: { tokenId: string; name: string; before: number; after: number; reason: string }[] | null;
   selectedTokenId: string | null;
   /** The token a player has targeted, which drives the action panel. */
   targetTokenId: string | null;
@@ -105,6 +107,7 @@ export const useTable = create<TableState>((set, get) => ({
   walls: [],
   wallTool: 'off',
   encounter: null,
+  lastDamage: null,
 
   setActiveActor(actorId) {
     set({ activeActorId: actorId });
@@ -150,6 +153,14 @@ export const useTable = create<TableState>((set, get) => ({
       set({ doors: get().doors.map((d) => (d.id === door.id ? door : d)) }),
     );
     socket.on('initiative:state', ({ encounter }) => set({ encounter }));
+    // Surfaced as a short-lived banner so the DM sees resistances being applied
+    // without having to read the chat log mid-combat.
+    socket.on('damage:applied', ({ results }) => {
+      set({ lastDamage: results });
+      setTimeout(() => {
+        if (get().lastDamage === results) set({ lastDamage: null });
+      }, 6000);
+    });
     socket.on('wall:created', ({ wall }) => set({ walls: [...get().walls, wall] }));
     socket.on('wall:updated', ({ wall }) =>
       set({ walls: get().walls.map((w) => (w.id === wall.id ? wall : w)) }),

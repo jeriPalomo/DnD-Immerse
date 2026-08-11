@@ -11,7 +11,7 @@ import { useTable } from '../../store/table.js';
  */
 export function InitiativeTracker({ isDM }: { isDM: boolean }) {
   const {
-    encounter, tokens, selectedTokenId,
+    encounter, tokens, selectedTokenId, lastDamage,
     startEncounter, endEncounter, addToInitiative, removeFromInitiative,
     nextTurn, previousTurn, select,
   } = useTable();
@@ -58,6 +58,23 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
           </div>
         )}
       </div>
+
+      {lastDamage && lastDamage.length > 0 && (
+        <div className="mb-2 space-y-0.5 rounded border border-ink-700 bg-ink-950/60 px-2 py-1.5">
+          {lastDamage.map((result) => (
+            <div key={result.tokenId} className="text-[10px] text-ink-300">
+              {result.name}{' '}
+              <span className="font-mono text-ink-500">
+                {result.before} → {result.after}
+              </span>
+              {result.reason !== 'normal' && result.reason !== 'healing' && (
+                // Naming the reason is the point: silent halving looks like a bug.
+                <span className="ml-1 text-ember-400">{result.reason}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {encounter.entries.length === 0 ? (
         <p className="text-xs text-ink-500">No combatants yet.</p>

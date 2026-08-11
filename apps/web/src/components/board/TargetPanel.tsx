@@ -1,5 +1,6 @@
 import { tokenDistanceInFeet } from '@dnd/shared';
 import type { WireScene, WireToken } from '@dnd/shared';
+import { attackModeAgainst } from '../../lib/derive.js';
 import type { Actor, Item } from '../../store/sheet.js';
 
 /**
@@ -143,6 +144,8 @@ export function TargetPanel({
 
   const distance = tokenDistanceInFeet(self, target, 'standard', scene.feetPerSquare);
   const options = evaluateOptions({ items, actor, self, target, scene });
+  // 5e cancels advantage against disadvantage rather than stacking them.
+  const attack = attackModeAgainst(self, target);
 
   return (
     <div className="rounded-xl border border-ember-500/40 bg-ink-900 p-4">
@@ -161,6 +164,23 @@ export function TargetPanel({
           ✕
         </button>
       </div>
+
+      {attack.mode !== 'normal' && (
+        <div
+          className={`mb-2 rounded border px-2 py-1 text-[11px] ${
+            attack.mode === 'advantage'
+              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+              : 'border-red-500/40 bg-red-500/10 text-red-300'
+          }`}
+        >
+          Attacks at {attack.mode} — {attack.reasons.join('; ')}
+        </div>
+      )}
+      {attack.mode === 'normal' && attack.reasons.length > 0 && (
+        <div className="mb-2 rounded border border-ink-700 px-2 py-1 text-[11px] text-ink-400">
+          {attack.reasons.join('; ')}
+        </div>
+      )}
 
       {options.length === 0 ? (
         <p className="text-sm text-ink-500">No weapons or spells on this sheet.</p>

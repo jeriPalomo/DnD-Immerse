@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { carryingCapacity } from '@dnd/shared';
 import { Button } from '../ui.js';
 import type { Item } from '../../store/sheet.js';
 
@@ -125,11 +126,14 @@ function Detail({ label, value }: { label: string; value: string }) {
 export function InventoryPanel({
   items,
   editable,
+  strength,
   onToggleEquipped,
   onRemove,
 }: {
   items: Item[];
   editable: boolean;
+  /** Carrying capacity is STR x 15, so an overloaded pack can be flagged. */
+  strength: number;
   onToggleEquipped: (id: string, equipped: boolean) => void;
   onRemove: (id: string) => void;
 }) {
@@ -141,6 +145,8 @@ export function InventoryPanel({
     (sum, i) => sum + (i.system.weight ?? 0) * (i.system.quantity ?? 1),
     0,
   );
+  const capacity = carryingCapacity({ str: strength, dex: 10, con: 10, int: 10, wis: 10, cha: 10 });
+  const overloaded = totalWeight > capacity;
 
   return (
     <div>
@@ -180,7 +186,13 @@ export function InventoryPanel({
           </li>
         ))}
       </ul>
-      <p className="mt-1.5 text-right text-xs text-ink-500">Total {totalWeight.toFixed(1)} lb</p>
+      <p className="mt-1.5 text-right text-xs">
+        <span className={overloaded ? 'text-ember-400' : 'text-ink-500'}>
+          Total {totalWeight.toFixed(1)} lb
+        </span>
+        <span className="text-ink-600"> / {capacity} lb</span>
+        {overloaded && <span className="ml-1 text-ember-400">encumbered</span>}
+      </p>
     </div>
   );
 }

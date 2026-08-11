@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { CONDITIONS } from '@dnd/shared';
 import type { WireToken } from '@dnd/shared';
+import { deriveToken } from '../../lib/derive.js';
 
 /**
  * Quick controls for the selected token: damage and healing, conditions, and
@@ -45,6 +46,10 @@ export function TokenHUD({
   }
 
   const hpPercent = token.maxHp ? Math.max(0, Math.min(100, ((token.hp ?? 0) / token.maxHp) * 100)) : 0;
+
+  // Conditions are applied, not merely listed: prone really does halve speed.
+  const derived = deriveToken(token);
+  const speedChanged = derived.speed !== 30;
 
   return (
     <div className="rounded-xl border border-arcane-500/40 bg-ink-900 p-4">
@@ -107,16 +112,41 @@ export function TokenHUD({
       )}
 
       {token.conditions.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {token.conditions.map((condition) => (
-            <span
-              key={condition}
-              className="rounded bg-arcane-500/20 px-1.5 py-0.5 text-[10px] text-arcane-400 capitalize"
-            >
-              {condition}
-            </span>
-          ))}
-        </div>
+        <>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {token.conditions.map((condition) => (
+              <span
+                key={condition}
+                className="rounded bg-arcane-500/20 px-1.5 py-0.5 text-[10px] text-arcane-400 capitalize"
+              >
+                {condition}
+              </span>
+            ))}
+          </div>
+
+          {/* What those conditions actually do, rather than leaving the DM to
+              remember. */}
+          <div className="mt-1.5 space-y-0.5 rounded border border-arcane-500/20 bg-arcane-500/5 px-2 py-1.5">
+            {speedChanged && (
+              <div className="text-[10px] text-ink-300">
+                Speed <span className="text-arcane-400">{derived.speed} ft</span>
+                <span className="text-ink-600"> (was 30)</span>
+              </div>
+            )}
+            {derived.hasDisadvantage && (
+              <div className="text-[10px] text-red-400">Disadvantage on attack rolls</div>
+            )}
+            {derived.hasAdvantage && (
+              <div className="text-[10px] text-emerald-400">Attacks against this token have advantage</div>
+            )}
+            {derived.incapacitated && (
+              <div className="text-[10px] text-red-400">Incapacitated — no actions or reactions</div>
+            )}
+            {!speedChanged && !derived.hasDisadvantage && !derived.hasAdvantage && !derived.incapacitated && (
+              <div className="text-[10px] text-ink-600">No mechanical effect</div>
+            )}
+          </div>
+        </>
       )}
 
       {canEdit && (

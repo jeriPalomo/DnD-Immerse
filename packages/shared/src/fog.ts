@@ -67,12 +67,6 @@ export function markVisible(fog: FogBitmap, polygons: Polygon[]): number {
   return marked;
 }
 
-/** Merges another player's exploration in. Union is a bitwise OR. */
-export function mergeFog(into: FogBitmap, other: FogBitmap): void {
-  if (into.width !== other.width || into.height !== other.height) return;
-  for (let i = 0; i < into.bits.length; i++) into.bits[i] |= other.bits[i];
-}
-
 export function encodeFog(fog: FogBitmap): string {
   // btoa is browser-only and Buffer is Node-only; this works in both.
   let binary = '';
@@ -115,15 +109,3 @@ export function exploredCells(fog: FogBitmap): [number, number][] {
   return cells;
 }
 
-export function exploredCount(fog: FogBitmap): number {
-  let total = 0;
-  for (const byte of fog.bits) {
-    // Brian Kernighan's popcount: clears the lowest set bit each pass.
-    let b = byte;
-    while (b) {
-      b &= b - 1;
-      total++;
-    }
-  }
-  return total;
-}

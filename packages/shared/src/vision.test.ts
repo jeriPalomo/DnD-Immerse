@@ -8,15 +8,7 @@ import {
   type VisionWall,
 } from './vision.js';
 import { pointInPolygon } from './grid.js';
-import {
-  createFog,
-  decodeFog,
-  encodeFog,
-  exploredCount,
-  isExplored,
-  markVisible,
-  mergeFog,
-} from './fog.js';
+import { createFog, decodeFog, encodeFog, isExplored, markVisible } from './fog.js';
 
 function wall(x1: number, y1: number, x2: number, y2: number, over: Partial<VisionWall> = {}): VisionWall {
   return { x1, y1, x2, y2, blocksSight: 1, blocksMovement: 1, door: 0, doorState: 0, ...over };
@@ -126,7 +118,6 @@ describe('movementBlocked', () => {
 describe('fog bitmap', () => {
   it('starts entirely unexplored', () => {
     const fog = createFog(20, 20);
-    expect(exploredCount(fog)).toBe(0);
     expect(isExplored(fog, 5, 5)).toBe(false);
   });
 
@@ -144,13 +135,12 @@ describe('fog bitmap', () => {
   it('accumulates rather than replacing, so exploration persists', () => {
     const fog = createFog(30, 30);
     markVisible(fog, [computeVisibility({ x: 2.5, y: 2.5 }, [], 2)]);
-    const first = exploredCount(fog);
 
     markVisible(fog, [computeVisibility({ x: 20.5, y: 20.5 }, [], 2)]);
 
-    expect(exploredCount(fog)).toBeGreaterThan(first);
-    // The first room is still remembered.
+    // Both rooms are remembered, not just the most recent.
     expect(isExplored(fog, 2, 2)).toBe(true);
+    expect(isExplored(fog, 20, 20)).toBe(true);
   });
 
   it('round-trips through base64 unchanged', () => {
@@ -158,26 +148,14 @@ describe('fog bitmap', () => {
     markVisible(fog, [computeVisibility({ x: 10.5, y: 10.5 }, [], 4)]);
 
     const restored = decodeFog(encodeFog(fog), 40, 25);
-    expect(exploredCount(restored)).toBe(exploredCount(fog));
     expect(isExplored(restored, 10, 10)).toBe(true);
+    expect(isExplored(restored, 39, 24)).toBe(false);
   });
 
   it('survives a corrupt payload by starting fresh', () => {
     const fog = decodeFog('!!!not base64!!!', 10, 10);
     expect(fog.width).toBe(10);
-    expect(exploredCount(fog)).toBe(0);
-  });
-
-  it('merges two players exploration with a bitwise OR', () => {
-    const alice = createFog(30, 30);
-    const bob = createFog(30, 30);
-
-    markVisible(alice, [computeVisibility({ x: 2.5, y: 2.5 }, [], 2)]);
-    markVisible(bob, [computeVisibility({ x: 25.5, y: 25.5 }, [], 2)]);
-
-    mergeFog(alice, bob);
-    expect(isExplored(alice, 2, 2)).toBe(true);
-    expect(isExplored(alice, 25, 25)).toBe(true);
+    expect(isExplored(fog, 5, 5)).toBe(false);
   });
 
   it('ignores writes outside the bitmap', () => {

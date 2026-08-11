@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { OWNERSHIP, type AbilityKey, type ProficiencyLevel, type SkillKey } from '@dnd/shared';
+import {
+  ABILITIES,
+  ABILITY_ROLL,
+  OWNERSHIP,
+  levelFromXP,
+  type AbilityKey,
+  type ProficiencyLevel,
+  type SkillKey,
+} from '@dnd/shared';
 import { Alert, Badge, Button, Card, Spinner } from '../components/ui.js';
 import { CompendiumPicker } from '../components/CompendiumPicker.js';
 import {
@@ -12,6 +20,7 @@ import {
 import { AttackList, CombatStats, SpellcastingHeader } from '../components/sheet/Combat.js';
 import { FeaturePanel, InventoryPanel, SpellPanel } from '../components/sheet/ItemPanels.js';
 import { useSheet } from '../store/sheet.js';
+import { useTable } from '../store/table.js';
 import { api } from '../lib/api.js';
 
 export default function CharacterSheet() {
@@ -73,6 +82,22 @@ export default function CharacterSheet() {
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
         {/* Left rail: the derived numbers */}
         <div className="space-y-4">
+          {editable && (
+            <button
+              onClick={() => {
+                // Rolled in chat rather than locally, so the table can see the
+                // stats were genuinely rolled and not chosen.
+                for (const ability of ABILITIES) {
+                  useTable.getState().roll(ABILITY_ROLL, `${actor.name} — ${ability.toUpperCase()}`);
+                }
+              }}
+              className="w-full rounded-lg border border-ink-700 px-2 py-1.5 text-xs text-ink-400 transition-colors hover:border-ember-500 hover:text-ember-300"
+              title="Rolls 4d6 drop lowest for each ability, in the table chat"
+            >
+              Roll ability scores ({ABILITY_ROLL})
+            </button>
+          )}
+
           <AbilityScoresBlock
             actor={actor}
             editable={editable}
@@ -150,6 +175,7 @@ export default function CharacterSheet() {
             <InventoryPanel
               items={gear}
               editable={editable}
+              strength={actor.str}
               onToggleEquipped={(itemId, equipped) =>
                 void sheet.patchItem(itemId, { system: { equipped } })
               }
@@ -298,6 +324,18 @@ function Identity({
             onChange={(e) => onChange({ level: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })}
             className={`w-14 ${field}`}
           />
+          {/* Experience is already tracked, so say when it has earned a level
+              rather than leaving the player to check the table. */}
+          {actor.experience > 0 && levelFromXP(actor.experience) > actor.level && (
+            <button
+              type="button"
+              disabled={!editable}
+              onClick={() => onChange({ level: levelFromXP(actor.experience) })}
+              className="rounded border border-ember-500/50 bg-ember-500/10 px-1.5 py-0.5 text-[10px] text-ember-300"
+            >
+              Level up to {levelFromXP(actor.experience)}
+            </button>
+          )}
           <input
             disabled={!editable}
             value={actor.background}

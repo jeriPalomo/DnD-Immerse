@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Alert, Badge, Button, Card, Spinner } from '../components/ui.js';
+import { AvatarUpload } from '../components/AvatarUpload.js';
 import { api } from '../lib/api.js';
 import type { Campaign, Member } from '../store/campaigns.js';
 
@@ -67,6 +68,29 @@ export default function CampaignDetail() {
           </Link>
         </div>
       </header>
+
+      {campaign.bannerUrl && !isDM && (
+        <img
+          src={campaign.bannerUrl}
+          alt=""
+          className="mb-6 h-40 w-full rounded-xl border border-ink-700 object-cover"
+        />
+      )}
+
+      {isDM && (
+        <Card className="mb-6 p-5">
+          <h2 className="mb-1 font-display text-lg text-ink-100">Campaign banner</h2>
+          <p className="mb-3 text-sm text-ink-400">Sets the mood on the campaign page.</p>
+          <AvatarUpload
+            url={campaign.bannerUrl}
+            endpoint={`/api/campaigns/${campaign.id}/banner`}
+            field="bannerUrl"
+            label="Campaign banner"
+            shape="banner"
+            onUploaded={(bannerUrl) => setCampaign({ ...campaign, bannerUrl })}
+          />
+        </Card>
+      )}
 
       {isDM && campaign.inviteCode && (
         <InviteCard campaignId={campaign.id} initialCode={campaign.inviteCode} />

@@ -269,10 +269,6 @@ export function parseItemSystem(type: ItemType, system: unknown): ItemSystem {
   return itemSystemSchemas[type].parse(system ?? {}) as ItemSystem;
 }
 
-export function emptyItemSystem(type: ItemType): ItemSystem {
-  return parseItemSystem(type, {});
-}
-
 /* ----------------------------------------------------------------- actor */
 
 export const actorTypeSchema = z.enum(['character', 'npc']);

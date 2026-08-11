@@ -198,22 +198,3 @@ export const rollResultSchema = z.object({
 
 export type RollResult = z.infer<typeof rollResultSchema>;
 
-/* ------------------------------------------------------------ world docs */
-
-export const worldPageInputSchema = z.object({
-  title: z.string().min(1).max(120).trim(),
-  bodyMarkdown: z.string().max(100000).default(''),
-  visibility: visibilitySchema.default('dm_only'),
-  parentId: z.string().nullable().default(null),
-});
-
-export const handoutInputSchema = z.object({
-  title: z.string().min(1).max(120).trim(),
-  visibility: visibilitySchema.default('dm_only'),
-  description: z.string().max(4000).default(''),
-});
-
-export type SkillProficiencies = z.infer<typeof skillProficienciesSchema>;
-export type SaveProficiencies = z.infer<typeof saveProficienciesSchema>;
-export type SpellSlots = z.infer<typeof spellSlotsSchema>;
-export type Currency = z.infer<typeof currencySchema>;
