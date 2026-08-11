@@ -30,6 +30,12 @@ export function AudioPlayer({ isDM = false }: { isDM?: boolean }) {
 
   const musicRef = useRef<HTMLAudioElement | null>(null);
   const ambientRefs = useRef(new Map<string, HTMLAudioElement>());
+  // Extra elements used when a playlist is layered rather than sequential.
+  const layerRefs = useRef(new Map<string, HTMLAudioElement>());
+  const fadeRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const activePlaylist = playlists.find((list) => list.id === audio?.playlistId) ?? null;
+  const layered = activePlaylist?.mode === 'simultaneous';
 
   /* --------------------------------------------------------------- music */
 
@@ -42,7 +48,19 @@ export function AudioPlayer({ isDM = false }: { isDM?: boolean }) {
       return;
     }
 
-    if (!element.src.endsWith(audio.trackUrl)) element.src = audio.trackUrl;
+    if (layered) {
+      // A simultaneous playlist layers every track at once - rain over wind
+      // over a distant bell - so the single-track element stays silent.
+      element.pause();
+      return;
+    }
+
+    if (!element.src.endsWith(audio.trackUrl)) {
+      // Fade the outgoing track rather than cutting it dead.
+      const fadeMs = activePlaylist?.fadeMs ?? 0;
+      if (fadeMs > 0 && element.src && !element.paused) crossfade(element, audio.trackUrl, fadeMs);
+      else element.src = audio.trackUrl;
+    }
     element.loop = audio.loop;
 
     const expected = playbackOffsetSeconds(audio, Date.now(), element.duration || undefined);
@@ -69,7 +87,7 @@ export function AudioPlayer({ isDM = false }: { isDM?: boolean }) {
    */
   useEffect(() => {
     const element = musicRef.current;
-    if (!element || !isDM || !audio?.playlistId) return;
+    if (!element || !isDM || !audio?.playlistId || layered) return;
 
     const onEnded = () => {
       const playlist = playlists.find((list) => list.id === audio.playlistId);
@@ -82,7 +100,71 @@ export function AudioPlayer({ isDM = false }: { isDM?: boolean }) {
 
     element.addEventListener('ended', onEnded);
     return () => element.removeEventListener('ended', onEnded);
-  }, [audio, playlists, isDM, playTrack]);
+  }, [audio, playlists, isDM, playTrack, layered]);
+
+  /**
+   * Fades the current track out, swaps the source, and fades back in.
+   *
+   * Cheaper and steadier than two overlapping elements, and a hard cut between
+   * ambient beds is the most noticeable thing a soundboard can do wrong.
+   */
+  function crossfade(element: HTMLAudioElement, nextSrc: string, fadeMs: number) {
+    if (fadeRef.current) clearInterval(fadeRef.current);
+
+    const target = element.volume;
+    const steps = Math.max(4, Math.round(fadeMs / 50));
+    let step = 0;
+    let swapped = false;
+
+    fadeRef.current = setInterval(() => {
+      step++;
+      const half = steps / 2;
+
+      if (step <= half) {
+        element.volume = target * (1 - step / half);
+      } else {
+        if (!swapped) {
+          element.src = nextSrc;
+          void element.play().catch(() => undefined);
+          swapped = true;
+        }
+        element.volume = target * ((step - half) / half);
+      }
+
+      if (step >= steps) {
+        element.volume = target;
+        if (fadeRef.current) clearInterval(fadeRef.current);
+        fadeRef.current = null;
+      }
+    }, 50);
+  }
+
+  /** Layered playback: every track in the playlist plays together. */
+  useEffect(() => {
+    if (!enabled || !layered || !audio?.playing || !activePlaylist) {
+      for (const element of layerRefs.current.values()) element.pause();
+      return;
+    }
+
+    const wanted = new Set(activePlaylist.tracks.map((track) => track.id));
+    for (const [id, element] of layerRefs.current) {
+      if (!wanted.has(id)) {
+        element.pause();
+        layerRefs.current.delete(id);
+      }
+    }
+
+    for (const track of activePlaylist.tracks) {
+      let element = layerRefs.current.get(track.id);
+      if (!element) {
+        element = new Audio(track.fileUrl);
+        element.loop = true;
+        layerRefs.current.set(track.id, element);
+      }
+      element.volume = effectiveVolume(track.volume * (audio.volume ?? 0.6), master);
+      void element.play().catch(() => undefined);
+    }
+  }, [layered, activePlaylist, audio, enabled, master]);
 
   /* ------------------------------------------------------------- ambient */
 
@@ -126,9 +208,12 @@ export function AudioPlayer({ isDM = false }: { isDM?: boolean }) {
   // Stop everything on unmount, or leaving the table keeps playing.
   useEffect(() => {
     const elements = ambientRefs.current;
+    const layers = layerRefs.current;
     return () => {
-      for (const element of elements.values()) element.pause();
+      for (const element of [...elements.values(), ...layers.values()]) element.pause();
       elements.clear();
+      layers.clear();
+      if (fadeRef.current) clearInterval(fadeRef.current);
     };
   }, []);
 

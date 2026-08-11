@@ -26,6 +26,11 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
   const [actors, setActors] = useState<PartyActor[]>([]);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<'scenes' | 'tokens' | 'grid' | 'vision'>('scenes');
+  const [localDarkness, setLocalDarkness] = useState(0);
+
+  useEffect(() => {
+    if (scene) setLocalDarkness(scene.darkness);
+  }, [scene?.id, scene?.darkness]);
 
   const load = useCallback(async () => {
     const [sceneRes, actorRes] = await Promise.all([
@@ -168,8 +173,9 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
               {(
                 [
                   ['off', 'Off'],
-                  ['wall', 'Draw wall'],
-                  ['door', 'Draw door'],
+                  ['wall', 'Wall'],
+                  ['door', 'Door'],
+                  ['note', 'Pin'],
                 ] as const
               ).map(([value, label]) => (
                 <button
@@ -200,6 +206,32 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
             />
             Daylight (ignore token light radius)
           </label>
+
+          {scene.globalIllumination && (
+            <label className="block">
+              <div className="mb-1 flex justify-between text-[11px] text-ink-400">
+                <span>Gloom</span>
+                <span className="font-mono text-ink-200">{Math.round(scene.darkness * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={localDarkness}
+                aria-label="Scene gloom"
+                onChange={(e) => setLocalDarkness(Number(e.target.value))}
+                // Committed on release so dragging does not spam the server.
+                onMouseUp={() => void patchScene(scene.id, { darkness: localDarkness })}
+                onTouchEnd={() => void patchScene(scene.id, { darkness: localDarkness })}
+                className="w-full accent-arcane-500"
+              />
+              <p className="mt-1 text-[10px] text-ink-600">
+                Dims sight toward what each token can supply for itself — dusk and fog,
+                without going fully dark.
+              </p>
+            </label>
+          )}
         </div>
       )}
 

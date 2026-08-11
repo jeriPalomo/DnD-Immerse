@@ -42,6 +42,24 @@ certificate. Invite your friends to your tailnet and send them the URL.
 
 Set `SECURE_COOKIES=true` once you are serving over HTTPS.
 
+## How your friends join
+
+One-time, per person:
+
+1. Invite them to your tailnet from the Tailscale admin console
+   (Settings → Invite external users). They get an email link.
+2. They install Tailscale and click the link. No further configuration.
+
+Then, any session:
+
+3. You run `npm run dev` and `tailscale serve --bg 5173`
+4. They open your `https://…ts.net` URL and register — any email and password,
+   since the accounts live only on your machine
+5. You send them the 8-character invite code from the campaign page; they press
+   **Join with code**
+
+Your machine has to be awake and running `npm run dev` for anyone to connect.
+
 ## Working across two machines
 
 The **desktop is the server of record**: it holds the real campaign database and

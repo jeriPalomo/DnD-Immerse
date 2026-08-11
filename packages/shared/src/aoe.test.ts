@@ -213,6 +213,13 @@ describe('positional audio', () => {
     expect(far).toBeGreaterThan(0);
   });
 
+  it('applies wall occlusion on top of distance falloff', () => {
+    const muffled = { ...fountain, occlusion: 0.3 };
+    // Same spot, a third of the volume, because a wall is in the way.
+    expect(ambientVolume(muffled, 0)).toBeCloseTo(0.3);
+    expect(ambientVolume(muffled, 0)).toBeLessThan(ambientVolume(fountain, 0));
+  });
+
   it('respects a hard edge when easing is off', () => {
     const hard = { ...fountain, easing: false };
     expect(ambientVolume(hard, 5)).toBe(1);

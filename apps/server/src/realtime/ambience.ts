@@ -3,7 +3,9 @@ import {
   ambientCreateSchema,
   audioControlSchema,
   campaignRoom,
+  soundOcclusion,
   templateCreateSchema,
+  tokenCenter,
 } from '@dnd/shared';
 import type { Socket } from 'socket.io';
 import type {
@@ -23,6 +25,8 @@ import {
   playlists,
   scenes,
   templates,
+  tokens,
+  walls,
 } from '../db/schema.js';
 import { getMembership } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
@@ -151,24 +155,48 @@ export async function broadcastSounds(io: IOServer, campaignId: string): Promise
   }
 
   const rows = await db.select().from(ambientSounds).where(eq(ambientSounds.sceneId, sceneId));
+  if (rows.length === 0) {
+    io.to(campaignRoom(campaignId)).emit('audio:sounds', { sounds: [] });
+    return;
+  }
 
-  const project = (list: typeof rows): WireAmbientSound[] =>
-    list.map((sound) => ({
-      id: sound.id,
-      sceneId: sound.sceneId,
-      name: sound.name,
-      fileUrl: sound.fileUrl,
-      x: sound.x,
-      y: sound.y,
-      radius: sound.radius,
-      volume: sound.volume,
-      easing: sound.easing,
-    }));
+  const [sceneWalls, sceneTokens] = await Promise.all([
+    db.select().from(walls).where(eq(walls.sceneId, sceneId)),
+    db.select().from(tokens).where(eq(tokens.sceneId, sceneId)),
+  ]);
 
   for (const socket of await io.in(campaignRoom(campaignId)).fetchSockets()) {
     const isDM = socket.data.rooms.get(campaignId) === 'dm';
+    const userId = socket.data.user.id;
+
+    // The listener's own tokens are the ears. A DM without tokens auditions
+    // everything unmuffled so they can hear what they placed.
+    const ears = sceneTokens
+      .filter((token) => token.ownerUserId === userId)
+      .map((token) => tokenCenter(token));
+
+    const visible = isDM ? rows : rows.filter((sound) => !sound.hidden);
+
     socket.emit('audio:sounds', {
-      sounds: project(isDM ? rows : rows.filter((sound) => !sound.hidden)),
+      sounds: visible.map((sound) => ({
+        id: sound.id,
+        sceneId: sound.sceneId,
+        name: sound.name,
+        fileUrl: sound.fileUrl,
+        x: sound.x,
+        y: sound.y,
+        radius: sound.radius,
+        volume: sound.volume,
+        easing: sound.easing,
+        occlusion:
+          sound.blockedByWalls && ears.length > 0
+            ? // Loudest path wins: if any of your tokens has a clear line to
+              // the source, you hear it clearly.
+              Math.max(
+                ...ears.map((ear) => soundOcclusion({ x: sound.x, y: sound.y }, ear, sceneWalls)),
+              )
+            : 1,
+      })),
     });
   }
 }
@@ -273,7 +301,7 @@ export function registerAmbienceHandlers(io: IOServer, socket: AmbienceSocket): 
       y: input.y,
       radius: input.radius,
       volume: input.volume,
-      blockedByWalls: true,
+      blockedByWalls: input.blockedByWalls,
       easing: input.easing,
       hidden: false,
     });

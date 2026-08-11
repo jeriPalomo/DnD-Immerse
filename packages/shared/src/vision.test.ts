@@ -1,17 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+  OCCLUDED_VOLUME,
   blocksMovement,
   blocksSight,
+  blocksSound,
   computeVisibility,
   movementBlocked,
   sightRadiusFeet,
+  soundOcclusion,
   type VisionWall,
 } from './vision.js';
 import { pointInPolygon } from './grid.js';
 import { createFog, decodeFog, encodeFog, isExplored, markVisible } from './fog.js';
 
 function wall(x1: number, y1: number, x2: number, y2: number, over: Partial<VisionWall> = {}): VisionWall {
-  return { x1, y1, x2, y2, blocksSight: 1, blocksMovement: 1, door: 0, doorState: 0, ...over };
+  return { x1, y1, x2, y2, blocksSight: 1, blocksMovement: 1, blocksSound: 1, door: 0, doorState: 0, ...over };
 }
 
 /** A closed 10x10 room with a doorway on the east side at y 4..6. */
@@ -217,8 +220,39 @@ describe('sightRadiusFeet', () => {
     expect(sightRadiusFeet(blindfolded, false, 60, 5)).toBe(5);
   });
 
+  it('lets dim light extend sight past the bright radius', () => {
+    // A torch: 20 ft bright, 20 ft dim beyond it. You can see 40 ft, dimly.
+    const torch = { visionRange: 0, darkvisionRange: 0, lightBright: 20, lightDim: 40 };
+    expect(sightRadiusFeet(torch, false, 60)).toBe(40);
+  });
+
   it('never lets darkness exceed the lit range', () => {
     const owl = { visionRange: 30, darkvisionRange: 120, lightBright: 0 };
     expect(sightRadiusFeet(owl, false, 60)).toBe(30);
+  });
+});
+
+describe('sound occlusion', () => {
+  it('muffles a sound behind a wall rather than silencing it', () => {
+    const wall = [{ x1: 5, y1: -5, x2: 5, y2: 5, blocksSight: 1, blocksMovement: 1, blocksSound: 1, door: 0, doorState: 0 }];
+
+    // Silence would pop in and out as people move; muffling reads as a wall.
+    expect(soundOcclusion({ x: 0, y: 0 }, { x: 10, y: 0 }, wall)).toBe(OCCLUDED_VOLUME);
+    expect(OCCLUDED_VOLUME).toBeGreaterThan(0);
+  });
+
+  it('leaves a clear line of sound alone', () => {
+    expect(soundOcclusion({ x: 0, y: 0 }, { x: 3, y: 0 }, [])).toBe(1);
+  });
+
+  it('lets sound through an open door', () => {
+    const door = [{ x1: 5, y1: -5, x2: 5, y2: 5, blocksSight: 1, blocksMovement: 1, blocksSound: 1, door: 1, doorState: 1 }];
+    expect(soundOcclusion({ x: 0, y: 0 }, { x: 10, y: 0 }, door)).toBe(1);
+    expect(blocksSound(door[0])).toBe(false);
+  });
+
+  it('ignores a wall that does not block sound - a railing or a grate', () => {
+    const railing = [{ x1: 5, y1: -5, x2: 5, y2: 5, blocksSight: 1, blocksMovement: 1, blocksSound: 0, door: 0, doorState: 0 }];
+    expect(soundOcclusion({ x: 0, y: 0 }, { x: 10, y: 0 }, railing)).toBe(1);
   });
 });

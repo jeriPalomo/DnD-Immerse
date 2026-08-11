@@ -1,5 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 import { create } from 'zustand';
+import { api } from '../lib/api.js';
 import type {
   ClientToServerEvents,
   RollMode,
@@ -10,6 +11,7 @@ import type {
   WireAudioState,
   WireDoor,
   WireEncounter,
+  WireMapNote,
   WirePlaylist,
   WireTemplate,
   WireScene,
@@ -33,10 +35,11 @@ interface TableState {
   /** Null when the scene has vision off - everyone sees the whole map. */
   vision: WireVision | null;
   doors: WireDoor[];
+  notes: WireMapNote[];
   /** Only ever populated for the DM; players never receive wall geometry. */
   walls: WireWall[];
   /** DM wall-drawing mode. */
-  wallTool: 'off' | 'wall' | 'door';
+  wallTool: 'off' | 'wall' | 'door' | 'note';
   encounter: WireEncounter | null;
   audio: WireAudioState | null;
   playlists: WirePlaylist[];
@@ -69,7 +72,10 @@ interface TableState {
   updateToken: (tokenId: string, fields: Record<string, unknown>) => void;
   deleteToken: (tokenId: string) => void;
   pingMap: (x: number, y: number) => void;
-  setWallTool: (tool: 'off' | 'wall' | 'door') => void;
+  setWallTool: (tool: 'off' | 'wall' | 'door' | 'note') => void;
+  placeNote: (x: number, y: number) => Promise<void>;
+  toggleNote: (noteId: string, hidden: boolean) => Promise<void>;
+  removeNote: (noteId: string) => Promise<void>;
   createWall: (x1: number, y1: number, x2: number, y2: number, isDoor: boolean) => void;
   deleteWall: (wallId: string) => void;
   toggleDoor: (wallId: string) => void;
@@ -118,6 +124,7 @@ export const useTable = create<TableState>((set, get) => ({
   pings: [],
   vision: null,
   doors: [],
+  notes: [],
   walls: [],
   wallTool: 'off',
   encounter: null,
@@ -153,9 +160,16 @@ export const useTable = create<TableState>((set, get) => ({
     });
     socket.on('presence', ({ members }) => set({ members }));
 
-    socket.on('scene:state', ({ scene, tokens, vision, doors, walls }) =>
+    socket.on('scene:state', ({ scene, tokens, vision, doors, notes, walls }) =>
       // `walls` is absent for players, so it collapses to an empty array here.
-      set({ scene, tokens, vision: vision ?? null, doors: doors ?? [], walls: walls ?? [] }),
+      set({
+        scene,
+        tokens,
+        vision: vision ?? null,
+        doors: doors ?? [],
+        notes: notes ?? [],
+        walls: walls ?? [],
+      }),
     );
     // Live sight during a drag: polygons and tokens only. Explored cells are
     // carried over from the last full scene:state, since fog exploration is
@@ -217,7 +231,7 @@ export const useTable = create<TableState>((set, get) => ({
     });
     socket.on('error', ({ message }) => set({ error: message }));
 
-    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null, sounds: [], templates: [], audio: null });
+    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null, sounds: [], templates: [], audio: null, notes: [] });
   },
 
   disconnect() {
@@ -365,6 +379,22 @@ export const useTable = create<TableState>((set, get) => ({
 
   removeAmbient(soundId) {
     get().socket?.emit('ambient:delete', { soundId });
+  },
+
+  // Pins go over REST but the server pushes a scene refresh, so every client
+  // sees one appear without reloading.
+  async placeNote(x, y) {
+    const sceneId = get().scene?.id;
+    if (!sceneId) return;
+    await api.post(`/api/scenes/${sceneId}/notes`, { label: 'Note', x, y, hidden: true });
+  },
+
+  async toggleNote(noteId, hidden) {
+    await api.patch(`/api/notes/${noteId}`, { hidden });
+  },
+
+  async removeNote(noteId) {
+    await api.delete(`/api/notes/${noteId}`);
   },
 
   applyDamage(tokenIds, amount, damageType, healing = false, halved = false) {

@@ -166,6 +166,23 @@ export interface WireAmbientSound {
   radius: number;
   volume: number;
   easing: boolean;
+  /**
+   * How much walls between this sound and the listener muffle it, 0..1.
+   * Computed per listener on the server, because players never receive walls.
+   */
+  occlusion: number;
+}
+
+/** A pin on the map. Hidden pins are absent from a player's payload. */
+export interface WireMapNote {
+  id: string;
+  sceneId: string;
+  label: string;
+  icon: string;
+  x: number;
+  y: number;
+  journalPageId: string | null;
+  hidden: boolean;
 }
 
 export interface WireTemplate {
@@ -255,7 +272,7 @@ export const wallCreateSchema = z.object({
   y2: z.number(),
   blocksMovement: z.number().int().min(0).max(1).default(1),
   blocksSight: z.number().int().min(0).max(2).default(1),
-  blocksSound: z.number().int().min(0).max(1).default(0),
+  blocksSound: z.number().int().min(0).max(1).default(1),
   door: z.number().int().min(0).max(2).default(0),
   doorState: z.number().int().min(0).max(2).default(0),
 });
@@ -321,6 +338,8 @@ export const ambientCreateSchema = z.object({
   radius: z.number().min(1).max(200).default(10),
   volume: z.number().min(0).max(1).default(0.7),
   easing: z.boolean().default(true),
+  /** Whether walls between the source and a listener muffle it. */
+  blockedByWalls: z.boolean().default(true),
 });
 
 export type TemplateCreatePayload = z.infer<typeof templateCreateSchema>;
@@ -359,6 +378,7 @@ export interface ServerToClientEvents {
     vision: WireVision | null;
     /** Doors are shown to players so they can be opened; walls are not. */
     doors: WireDoor[];
+    notes: WireMapNote[];
     /** DM only. Absent from every player payload. */
     walls?: WireWall[];
   }) => void;

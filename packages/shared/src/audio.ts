@@ -63,6 +63,11 @@ export interface AmbientSource {
   volume: number;
   /** Smooth falloff rather than a hard edge at the radius. */
   easing: boolean;
+  /**
+   * How much walls between this source and the listener muffle it, 0..1.
+   * Computed on the server, because players never receive wall geometry.
+   */
+  occlusion?: number;
 }
 
 /**
@@ -75,11 +80,13 @@ export interface AmbientSource {
 export function ambientVolume(source: AmbientSource, distanceInSquares: number): number {
   if (source.radius <= 0) return 0;
   if (distanceInSquares >= source.radius) return 0;
-  if (!source.easing) return source.volume;
+
+  const muffle = source.occlusion ?? 1;
+  if (!source.easing) return source.volume * muffle;
 
   // Inverse-square-ish rolloff, which sounds more natural than linear.
   const proximity = 1 - distanceInSquares / source.radius;
-  return source.volume * proximity * proximity;
+  return source.volume * proximity * proximity * muffle;
 }
 
 /**

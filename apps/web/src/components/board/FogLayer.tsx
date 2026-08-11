@@ -1,4 +1,4 @@
-import { Group, Line, Shape } from 'react-konva';
+import { Circle, Group, Line, Rect, Shape, Text } from 'react-konva';
 import type Konva from 'konva';
 import { gridToPixel } from '@dnd/shared';
 import type { WireScene, WireVision } from '@dnd/shared';
@@ -173,6 +173,86 @@ export function WallLayer({
             />
           );
         })}
+    </Group>
+  );
+}
+
+/**
+ * Map pins. The DM sees hidden ones at reduced opacity so they can find the
+ * secret door they placed; players only ever receive revealed pins.
+ */
+export function NoteLayer({
+  notes,
+  grid,
+  isDM,
+  onToggle,
+  onRemove,
+}: {
+  notes: { id: string; label: string; x: number; y: number; hidden: boolean }[];
+  grid: { gridSize: number; offsetX: number; offsetY: number };
+  isDM: boolean;
+  onToggle: (noteId: string, hidden: boolean) => void;
+  onRemove: (noteId: string) => void;
+}) {
+  return (
+    <Group>
+      {notes.map((note) => {
+        const point = gridToPixel({ x: note.x, y: note.y }, grid);
+        const radius = grid.gridSize * 0.22;
+
+        return (
+          <Group
+            key={note.id}
+            x={point.x}
+            y={point.y}
+            opacity={note.hidden ? 0.5 : 1}
+            onClick={(e) => {
+              e.cancelBubble = true;
+              if (!isDM) return;
+              // Alt-click removes; a plain click reveals or hides.
+              if (e.evt.altKey) onRemove(note.id);
+              else onToggle(note.id, !note.hidden);
+            }}
+            onMouseEnter={(e) => {
+              const stage = e.target.getStage();
+              if (stage && isDM) stage.container().style.cursor = 'pointer';
+            }}
+            onMouseLeave={(e) => {
+              const stage = e.target.getStage();
+              if (stage) stage.container().style.cursor = 'default';
+            }}
+          >
+            <Circle
+              radius={radius}
+              fill={note.hidden ? '#3a3547' : '#e8853f'}
+              stroke={note.hidden ? '#7d7794' : '#f2a86b'}
+              strokeWidth={2}
+              dash={note.hidden ? [4, 3] : undefined}
+            />
+            <Text
+              x={-radius}
+              y={-radius * 0.45}
+              width={radius * 2}
+              text="i"
+              fontSize={radius * 1.1}
+              fontStyle="bold"
+              fill="#0b0a0f"
+              align="center"
+            />
+            {note.label && (
+              <Text
+                x={-grid.gridSize}
+                y={radius + 2}
+                width={grid.gridSize * 2}
+                text={note.label}
+                fontSize={grid.gridSize * 0.2}
+                fill="#f2a86b"
+                align="center"
+              />
+            )}
+          </Group>
+        );
+      })}
     </Group>
   );
 }

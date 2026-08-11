@@ -20,7 +20,7 @@ import type {
 } from '@dnd/shared';
 import { wallCreateSchema, wallUpdateSchema } from '@dnd/shared';
 import { db } from '../db/index.js';
-import { actors, campaigns, scenes, tokens, walls as wallsTable } from '../db/schema.js';
+import { actors, campaigns, mapNotes, scenes, tokens, walls as wallsTable } from '../db/schema.js';
 import {
   computeLivePolygons,
   computePlayerView,
@@ -175,6 +175,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
       tokens: [],
       vision: null,
       doors: [],
+      notes: [],
     });
     return;
   }
@@ -191,6 +192,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
   const wireScene = toWireScene(scene);
   const sceneWalls = await wallsOf(sceneId);
   const doors = sceneWalls.filter((w) => w.door > 0).map(toWireDoor);
+  const notes = await db.select().from(mapNotes).where(eq(mapNotes.sceneId, sceneId));
 
   // Per-socket, because both "hidden unless you own it" and line of sight
   // differ between players.
@@ -204,6 +206,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
         tokens: filterTokensFor(all, true, userId),
         vision: null,
         doors,
+        notes,
         walls: sceneWalls.map(toWireWall),
       });
       continue;
@@ -225,6 +228,8 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
       tokens: filterTokensFor(sighted, false, userId),
       vision: view?.vision ?? null,
       doors,
+      // A pin the DM has not revealed is absent, like a hidden token.
+      notes: notes.filter((note) => !note.hidden),
       // No `walls` key at all for a player - not an empty array, absent.
     });
   }
@@ -442,6 +447,10 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     invalidateDragCache(token.sceneId);
     const updated = await tokenOf(input.tokenId);
     if (updated) await broadcastToken(io, ctx.campaignId, updated);
+
+    // Sound occlusion depends on where the listener is standing.
+    const { broadcastSounds } = await import('./ambience.js');
+    await broadcastSounds(io, ctx.campaignId);
   });
 
   socket.on('token:create', async (payload) => {
@@ -655,8 +664,11 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     io.to(campaignRoom(ctx.campaignId)).emit('door:updated', {
       door: toWireDoor({ ...wall, doorState }),
     });
-    // Everyone's sight changes the moment a door swings.
+    // Everyone's sight - and hearing - changes the moment a door swings.
     await broadcastSceneState(io, ctx.campaignId);
+
+    const { broadcastSounds } = await import('./ambience.js');
+    await broadcastSounds(io, ctx.campaignId);
   });
 
   socket.on('ping:map', async ({ sceneId, x, y }) => {

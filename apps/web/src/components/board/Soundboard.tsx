@@ -102,7 +102,21 @@ export function Soundboard({ campaignId }: { campaignId: string }) {
         {lists.map((playlist) => (
           <div key={playlist.id} className="rounded-lg border border-ink-800 p-2">
             <div className="mb-1 flex items-center justify-between gap-2">
-              <span className="truncate text-xs text-ink-200">{playlist.name}</span>
+              <span className="min-w-0 flex-1 truncate text-xs text-ink-200">{playlist.name}</span>
+              <select
+                value={playlist.mode}
+                aria-label={`${playlist.name} mode`}
+                onChange={async (e) => {
+                  await api.patch(`/api/playlists/${playlist.id}`, { mode: e.target.value });
+                  await load();
+                }}
+                title="Layered plays every track at once, for stacking ambience"
+                className="shrink-0 rounded border border-ink-700 bg-ink-850 px-1 text-[10px] text-ink-400 focus:outline-none"
+              >
+                <option value="sequential">in order</option>
+                <option value="shuffle">shuffle</option>
+                <option value="simultaneous">layered</option>
+              </select>
               <label className="shrink-0 cursor-pointer text-[10px] text-arcane-400 hover:underline">
                 + track
                 <input

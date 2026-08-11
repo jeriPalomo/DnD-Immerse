@@ -12,6 +12,7 @@ import {
 } from '../db/schema.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
+import { storeImage } from '../lib/uploads.js';
 
 /**
  * The campaign journal and the map pins that open its pages.
@@ -71,7 +72,6 @@ export async function journalRoutes(app: FastifyInstance): Promise<void> {
       id: newId(),
       campaignId,
       title: input.title,
-      folder: '',
       sortOrder: 0,
       createdAt: Date.now(),
     };
@@ -124,6 +124,62 @@ export async function journalRoutes(app: FastifyInstance): Promise<void> {
 
     const updated = await db.select().from(journalPages).where(eq(journalPages.id, id)).limit(1);
     return { page: updated[0] };
+  });
+
+  /**
+   * Adds an image page - a map fragment, a portrait, a letter. Sharing works
+   * exactly as it does for text, so a handout is revealed deliberately.
+   */
+  app.post('/api/journal/:id/pages/image', async (request) => {
+    const user = assertUser(request);
+    const { id } = request.params as { id: string };
+
+    const rows = await db.select().from(journalEntries).where(eq(journalEntries.id, id)).limit(1);
+    if (!rows[0]) throw new HttpError(404, 'Entry not found');
+    await requireDM(rows[0].campaignId, user.id);
+
+    const file = await request.file();
+    if (!file) throw new HttpError(400, 'No file uploaded');
+
+    const stored = await storeImage(await file.toBuffer(), 'handouts', { maxDimension: 2048 });
+
+    const existing = await db
+      .select({ id: journalPages.id })
+      .from(journalPages)
+      .where(eq(journalPages.entryId, id));
+
+    const page = {
+      id: newId(),
+      entryId: id,
+      title: (file.filename ?? 'Image').replace(/\.[^.]+$/, ''),
+      type: 'image' as const,
+      bodyMarkdown: '',
+      fileUrl: stored.url,
+      sortOrder: existing.length,
+      updatedAt: Date.now(),
+    };
+
+    await db.insert(journalPages).values(page);
+    return { page };
+  });
+
+  app.delete('/api/journal/pages/:id', async (request) => {
+    const user = assertUser(request);
+    const { id } = request.params as { id: string };
+
+    const rows = await db.select().from(journalPages).where(eq(journalPages.id, id)).limit(1);
+    if (!rows[0]) throw new HttpError(404, 'Page not found');
+
+    const entry = await db
+      .select()
+      .from(journalEntries)
+      .where(eq(journalEntries.id, rows[0].entryId))
+      .limit(1);
+    if (!entry[0]) throw new HttpError(404, 'Page not found');
+    await requireDM(entry[0].campaignId, user.id);
+
+    await db.delete(journalPages).where(eq(journalPages.id, id));
+    return { ok: true };
   });
 
   app.delete('/api/journal/:id', async (request) => {
@@ -215,6 +271,7 @@ export async function journalRoutes(app: FastifyInstance): Promise<void> {
 
     const note = { id: newId(), sceneId, icon: 'pin', ...input };
     await db.insert(mapNotes).values(note);
+    await refreshScene(app, scene.campaignId);
     return { note };
   });
 
@@ -241,6 +298,7 @@ export async function journalRoutes(app: FastifyInstance): Promise<void> {
       await db.update(mapNotes).set(patch).where(eq(mapNotes.id, id));
     }
 
+    await refreshScene(app, scene.campaignId);
     const updated = await db.select().from(mapNotes).where(eq(mapNotes.id, id)).limit(1);
     return { note: updated[0] };
   });
@@ -256,8 +314,16 @@ export async function journalRoutes(app: FastifyInstance): Promise<void> {
     await requireDM(scene.campaignId, user.id);
 
     await db.delete(mapNotes).where(eq(mapNotes.id, id));
+    await refreshScene(app, scene.campaignId);
     return { ok: true };
   });
+}
+
+/** Pushes the scene to every client, so a pin appears without a reload. */
+async function refreshScene(app: FastifyInstance, campaignId: string): Promise<void> {
+  if (!app.io) return;
+  const { broadcastSceneState } = await import('../realtime/scene.js');
+  await broadcastSceneState(app.io, campaignId);
 }
 
 async function loadScene(sceneId: string) {

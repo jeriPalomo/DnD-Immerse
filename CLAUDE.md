@@ -76,6 +76,12 @@ over base numbers and is never stored — the same rule as ability modifiers.
 Modes apply multiply before add, so a +2 bonus is not itself doubled, and
 `applied` names every effect that contributed so a total is explainable.
 
+**Sound occlusion is computed server-side, like vision.** Volume falloff is
+client-side from the listener's own tokens, but a wall between the source and
+the ear can only be judged where the walls are — so the server sends a per-
+listener `occlusion` multiplier. Muffled, not silenced: sound popping in and
+out as people move reads as a bug.
+
 **Audio is synced by timestamp, never streamed.** The server records which
 track started and when; each client seeks its own copy. Positional volume is
 computed client-side from the listener's own tokens, so the server never sends

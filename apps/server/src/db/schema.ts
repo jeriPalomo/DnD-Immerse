@@ -335,23 +335,6 @@ export const walls = sqliteTable(
   (t) => [index('walls_scene_idx').on(t.sceneId)],
 );
 
-export const lights = sqliteTable(
-  'lights',
-  {
-    id: id(),
-    sceneId: text('scene_id')
-      .notNull()
-      .references(() => scenes.id, { onDelete: 'cascade' }),
-    x: real('x').notNull(),
-    y: real('y').notNull(),
-    brightRadius: real('bright_radius').notNull().default(0),
-    dimRadius: real('dim_radius').notNull().default(0),
-    color: text('color').notNull().default('#ffffff'),
-    hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
-  },
-  (t) => [index('lights_scene_idx').on(t.sceneId)],
-);
-
 /**
  * Persistent per-player fog exploration, as a coarse bitmap of one bit per
  * grid square, base64-encoded. Unioning accumulated polygons would grow
@@ -569,7 +552,6 @@ export const journalEntries = sqliteTable(
       .notNull()
       .references(() => campaigns.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
-    folder: text('folder').notNull().default(''),
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: epoch('created_at'),
   },
@@ -693,7 +675,6 @@ export type Ownership = typeof ownership.$inferSelect;
 export type Scene = typeof scenes.$inferSelect;
 export type Token = typeof tokens.$inferSelect;
 export type Wall = typeof walls.$inferSelect;
-export type Light = typeof lights.$inferSelect;
 export type FogExploration = typeof fogExploration.$inferSelect;
 export type Template = typeof templates.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;

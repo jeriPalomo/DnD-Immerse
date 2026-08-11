@@ -5,7 +5,9 @@ import { api } from '../../lib/api.js';
 interface Page {
   id: string;
   title: string;
+  type: 'text' | 'image' | 'pdf';
   bodyMarkdown: string;
+  fileUrl: string | null;
 }
 
 interface Entry {
@@ -71,6 +73,16 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
     await api.post(`/api/journal/${entryId}/share`, { shared: next });
   }
 
+  async function addImage(entryId: string, file: File) {
+    await api.upload(`/api/journal/${entryId}/pages/image`, file);
+    await load();
+  }
+
+  async function removePage(pageId: string) {
+    await api.delete(`/api/journal/pages/${pageId}`);
+    await load();
+  }
+
   async function remove(entryId: string) {
     await api.delete(`/api/journal/${entryId}`);
     if (openId === entryId) setOpenId(null);
@@ -98,7 +110,6 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
         <ul className="space-y-1">
           {entries.map((entry) => {
             const isOpen = openId === entry.id;
-            const page = entry.pages[0];
 
             return (
               <li key={entry.id} className="rounded-lg border border-ink-800">
@@ -134,21 +145,60 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
                   )}
                 </div>
 
-                {isOpen && page && (
-                  <div className="border-t border-ink-800 p-2">
-                    {isDM ? (
-                      <textarea
-                        value={page.bodyMarkdown}
-                        onChange={(e) => editPage(page.id, e.target.value)}
-                        rows={6}
-                        placeholder="Names, clues, whatever you need to remember…"
-                        aria-label={`${entry.title} body`}
-                        className="w-full resize-y rounded border border-ink-700 bg-ink-850 px-2 py-1.5 text-xs text-ink-200 placeholder:text-ink-600 focus:border-arcane-400 focus:outline-none"
-                      />
-                    ) : (
-                      <p className="text-xs whitespace-pre-wrap text-ink-300">
-                        {page.bodyMarkdown || <span className="text-ink-600">Empty.</span>}
-                      </p>
+                {isOpen && (
+                  <div className="space-y-2 border-t border-ink-800 p-2">
+                    {entry.pages.map((p) =>
+                      p.type === 'image' && p.fileUrl ? (
+                        <figure key={p.id}>
+                          <img
+                            src={p.fileUrl}
+                            alt={p.title}
+                            className="w-full rounded border border-ink-700"
+                          />
+                          <figcaption className="mt-0.5 flex items-center justify-between text-[10px] text-ink-500">
+                            <span className="truncate">{p.title}</span>
+                            {isDM && (
+                              <button
+                                onClick={() => void removePage(p.id)}
+                                className="text-ink-700 hover:text-red-400"
+                                aria-label={`Remove ${p.title}`}
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </figcaption>
+                        </figure>
+                      ) : isDM ? (
+                        <textarea
+                          key={p.id}
+                          value={p.bodyMarkdown}
+                          onChange={(e) => editPage(p.id, e.target.value)}
+                          rows={6}
+                          placeholder="Names, clues, whatever you need to remember…"
+                          aria-label={`${entry.title} body`}
+                          className="w-full resize-y rounded border border-ink-700 bg-ink-850 px-2 py-1.5 text-xs text-ink-200 placeholder:text-ink-600 focus:border-arcane-400 focus:outline-none"
+                        />
+                      ) : (
+                        <p key={p.id} className="text-xs whitespace-pre-wrap text-ink-300">
+                          {p.bodyMarkdown || <span className="text-ink-600">Empty.</span>}
+                        </p>
+                      ),
+                    )}
+
+                    {isDM && (
+                      <label className="block cursor-pointer text-[10px] text-arcane-400 hover:underline">
+                        + add an image handout
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="sr-only"
+                          aria-label={`Add image to ${entry.title}`}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) void addImage(entry.id, file);
+                          }}
+                        />
+                      </label>
                     )}
                   </div>
                 )}

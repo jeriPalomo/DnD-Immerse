@@ -9,7 +9,7 @@ import {
 } from '@dnd/shared';
 import type Konva from 'konva';
 import type { WireScene, WireToken } from '@dnd/shared';
-import { DoorLayer, FogLayer, WallLayer } from './FogLayer.js';
+import { DoorLayer, FogLayer, NoteLayer, WallLayer } from './FogLayer.js';
 import { TemplateLayer } from './TemplateLayer.js';
 import { useTable } from '../../store/table.js';
 import { useAuth } from '../../store/auth.js';
@@ -42,8 +42,9 @@ const DISPOSITION_COLOR: Record<string, string> = {
 
 export function BattleMap({ isDM }: { isDM: boolean }) {
   const {
-    scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool, templates,
+    scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool, templates, notes,
     select, target, moveToken, commitToken, pingMap, createWall, deleteWall, toggleDoor, clearTemplate,
+    placeNote, toggleNote, removeNote,
   } = useTable();
 
   // Where the DM clicked first while drawing a wall segment.
@@ -156,6 +157,11 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
             grid,
           );
 
+          if (wallTool === 'note') {
+            void placeNote(Math.round(point.x * 2) / 2, Math.round(point.y * 2) / 2);
+            return;
+          }
+
           if (wallTool !== 'off') {
             // Walls snap to grid corners so they line up with the map's own
             // architecture rather than landing at arbitrary fractions.
@@ -202,6 +208,13 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
 
         <Layer>
           <DoorLayer doors={doors} grid={grid} onToggle={toggleDoor} />
+          <NoteLayer
+            notes={notes}
+            grid={grid}
+            isDM={isDM}
+            onToggle={(id, hidden) => void toggleNote(id, hidden)}
+            onRemove={(id) => void removeNote(id)}
+          />
         </Layer>
 
         {/* Below the tokens, so an outline never hides who is standing in it. */}
@@ -268,7 +281,9 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
 
       <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-ink-950/80 px-2 py-1 text-[10px] text-ink-500">
         {wallTool !== 'off'
-          ? `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
+          ? wallTool === 'note'
+            ? 'click to drop a pin — click a pin to reveal it, alt-click to delete'
+            : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
           : 'scroll to zoom · drag to pan · alt-click to ping · shift-click a token to target'}
       </div>
 

@@ -90,6 +90,13 @@ export async function broadcastPresence(io: IOServer, campaignId: string): Promi
   io.to(campaignRoom(campaignId)).emit('presence', { members });
 }
 
+declare module 'fastify' {
+  interface FastifyInstance {
+    /** Lets REST routes push a live refresh after they mutate scene data. */
+    io: IOServer;
+  }
+}
+
 export function attachRealtime(app: FastifyInstance): IOServer {
   const io: IOServer = new Server(app.server, {
     path: '/socket.io',
@@ -112,6 +119,8 @@ export function attachRealtime(app: FastifyInstance): IOServer {
       next(err as Error);
     }
   });
+
+  app.decorate('io', io);
 
   io.on('connection', (socket) => {
     const user = socket.data.user;
