@@ -1,19 +1,13 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { db } from './index.js';
-import { env, paths } from '../env.js';
+import { ensureDataDirs } from '../env.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export async function runMigrations(): Promise<void> {
-  for (const dir of [env.dataDir, paths.uploads, paths.srd]) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  for (const sub of ['maps', 'tokens', 'avatars', 'audio', 'handouts']) {
-    fs.mkdirSync(path.join(paths.uploads, sub), { recursive: true });
-  }
+  ensureDataDirs();
 
   await migrate(db, { migrationsFolder: path.resolve(here, '../../drizzle') });
 }
