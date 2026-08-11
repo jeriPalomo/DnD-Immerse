@@ -10,6 +10,7 @@ import {
 import type Konva from 'konva';
 import type { WireScene, WireToken } from '@dnd/shared';
 import { DoorLayer, FogLayer, WallLayer } from './FogLayer.js';
+import { TemplateLayer } from './TemplateLayer.js';
 import { useTable } from '../../store/table.js';
 import { useAuth } from '../../store/auth.js';
 
@@ -41,8 +42,8 @@ const DISPOSITION_COLOR: Record<string, string> = {
 
 export function BattleMap({ isDM }: { isDM: boolean }) {
   const {
-    scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool,
-    select, target, moveToken, commitToken, pingMap, createWall, deleteWall, toggleDoor,
+    scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool, templates,
+    select, target, moveToken, commitToken, pingMap, createWall, deleteWall, toggleDoor, clearTemplate,
   } = useTable();
 
   // Where the DM clicked first while drawing a wall segment.
@@ -201,6 +202,16 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
 
         <Layer>
           <DoorLayer doors={doors} grid={grid} onToggle={toggleDoor} />
+        </Layer>
+
+        {/* Below the tokens, so an outline never hides who is standing in it. */}
+        <Layer>
+          <TemplateLayer
+            templates={templates}
+            grid={grid}
+            feetPerSquare={scene.feetPerSquare}
+            onClear={clearTemplate}
+          />
         </Layer>
 
         <Layer>

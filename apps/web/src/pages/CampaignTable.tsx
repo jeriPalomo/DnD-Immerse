@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { OWNERSHIP, abilityModifier, formatModifier } from '@dnd/shared';
+import { OWNERSHIP, abilityModifier, formatModifier, templateForSpell } from '@dnd/shared';
 import { Alert, Badge, Card, Spinner } from '../components/ui.js';
 import { ChatPanel } from '../components/ChatPanel.js';
 import { BattleMap } from '../components/board/BattleMap.js';
+import { AudioPlayer } from '../components/board/AudioPlayer.js';
 import { InitiativeTracker } from '../components/board/InitiativeTracker.js';
+import { JournalPanel } from '../components/board/JournalPanel.js';
+import { Soundboard } from '../components/board/Soundboard.js';
 import { SceneManager } from '../components/board/SceneManager.js';
 import { TargetPanel } from '../components/board/TargetPanel.js';
 import { TokenHUD } from '../components/board/TokenHUD.js';
@@ -99,9 +102,15 @@ export default function CampaignTable() {
 
         {/* Contextual column */}
         <div className="space-y-3 overflow-y-auto xl:h-[calc(100vh-8rem)]">
+          <AudioPlayer isDM={Boolean(isDM)} />
+
           <InitiativeTracker isDM={Boolean(isDM)} />
 
           {isDM && id && <SceneManager campaignId={id} />}
+
+          {isDM && id && <Soundboard campaignId={id} />}
+
+          {id && <JournalPanel campaignId={id} isDM={Boolean(isDM)} />}
 
           {targeted && scene && (
             <TargetPanel
@@ -111,7 +120,29 @@ export default function CampaignTable() {
               actor={myActor}
               items={myItems}
               onUse={(item) => {
-                if (activeActorId) table.postCard(item.id, activeActorId);
+                if (!activeActorId) return;
+                table.postCard(item.id, activeActorId);
+
+                // An area spell also drops its own outline on the target, built
+                // from the spell's own area so Fireball is a 20 ft circle
+                // without anyone configuring one.
+                const built = templateForSpell(
+                  item.system.areaOfEffect as { shape?: string; size?: number; width?: number | null } | null,
+                  { x: targeted.x + targeted.w / 2, y: targeted.y + targeted.h / 2 },
+                  myToken
+                    ? (Math.atan2(targeted.y - myToken.y, targeted.x - myToken.x) * 180) / Math.PI
+                    : 0,
+                );
+                if (built) {
+                  table.placeTemplate({
+                    shape: built.shape,
+                    x: built.x,
+                    y: built.y,
+                    direction: built.direction,
+                    distance: built.distance,
+                    width: built.width,
+                  });
+                }
               }}
               onClear={() => table.target(null)}
             />

@@ -6,8 +6,12 @@ import type {
   ServerToClientEvents,
   WireChatMessage,
   WirePresence,
+  WireAmbientSound,
+  WireAudioState,
   WireDoor,
   WireEncounter,
+  WirePlaylist,
+  WireTemplate,
   WireScene,
   WireToken,
   WireVision,
@@ -34,6 +38,10 @@ interface TableState {
   /** DM wall-drawing mode. */
   wallTool: 'off' | 'wall' | 'door';
   encounter: WireEncounter | null;
+  audio: WireAudioState | null;
+  playlists: WirePlaylist[];
+  sounds: WireAmbientSound[];
+  templates: WireTemplate[];
   /** Most recent damage results, shown briefly then cleared. */
   lastDamage: { tokenId: string; name: string; before: number; after: number; reason: string }[] | null;
   selectedTokenId: string | null;
@@ -72,6 +80,12 @@ interface TableState {
   removeFromInitiative: (entryId: string) => void;
   nextTurn: () => void;
   previousTurn: () => void;
+  playTrack: (playlistId: string, trackId: string | null, playing: boolean) => void;
+  setMusicVolume: (volume: number) => void;
+  placeTemplate: (payload: Record<string, unknown>) => void;
+  clearTemplate: (templateId: string) => void;
+  placeAmbient: (payload: Record<string, unknown>) => void;
+  removeAmbient: (soundId: string) => void;
   applyDamage: (
     tokenIds: string[],
     amount: number,
@@ -108,6 +122,10 @@ export const useTable = create<TableState>((set, get) => ({
   wallTool: 'off',
   encounter: null,
   lastDamage: null,
+  audio: null,
+  playlists: [],
+  sounds: [],
+  templates: [],
 
   setActiveActor(actorId) {
     set({ activeActorId: actorId });
@@ -153,6 +171,10 @@ export const useTable = create<TableState>((set, get) => ({
       set({ doors: get().doors.map((d) => (d.id === door.id ? door : d)) }),
     );
     socket.on('initiative:state', ({ encounter }) => set({ encounter }));
+    socket.on('audio:state', (audio) => set({ audio }));
+    socket.on('audio:playlists', ({ playlists }) => set({ playlists }));
+    socket.on('audio:sounds', ({ sounds }) => set({ sounds }));
+    socket.on('template:state', ({ templates }) => set({ templates }));
     // Surfaced as a short-lived banner so the DM sees resistances being applied
     // without having to read the chat log mid-combat.
     socket.on('damage:applied', ({ results }) => {
@@ -195,7 +217,7 @@ export const useTable = create<TableState>((set, get) => ({
     });
     socket.on('error', ({ message }) => set({ error: message }));
 
-    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null });
+    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null, sounds: [], templates: [], audio: null });
   },
 
   disconnect() {
@@ -304,6 +326,45 @@ export const useTable = create<TableState>((set, get) => ({
 
   previousTurn() {
     get().socket?.emit('turn:previous', {});
+  },
+
+  playTrack(playlistId, trackId, playing) {
+    get().socket?.emit('audio:control', {
+      playlistId,
+      trackId,
+      playing,
+      loop: true,
+      volume: get().audio?.volume ?? 0.6,
+    });
+  },
+
+  setMusicVolume(volume) {
+    const audio = get().audio;
+    get().socket?.emit('audio:control', {
+      playlistId: audio?.playlistId ?? null,
+      trackId: audio?.trackId ?? null,
+      playing: audio?.playing ?? false,
+      loop: true,
+      volume,
+    });
+  },
+
+  placeTemplate(payload) {
+    const sceneId = get().scene?.id;
+    if (sceneId) get().socket?.emit('template:create', { sceneId, ...payload } as never);
+  },
+
+  clearTemplate(templateId) {
+    get().socket?.emit('template:delete', { templateId });
+  },
+
+  placeAmbient(payload) {
+    const sceneId = get().scene?.id;
+    if (sceneId) get().socket?.emit('ambient:create', { sceneId, ...payload } as never);
+  },
+
+  removeAmbient(soundId) {
+    get().socket?.emit('ambient:delete', { soundId });
   },
 
   applyDamage(tokenIds, amount, damageType, healing = false, halved = false) {

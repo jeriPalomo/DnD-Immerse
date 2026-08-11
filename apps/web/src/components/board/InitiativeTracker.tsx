@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { tokensInTemplate } from '@dnd/shared';
 import { Button } from '../ui.js';
 import { useTable } from '../../store/table.js';
 
@@ -11,7 +12,7 @@ import { useTable } from '../../store/table.js';
  */
 export function InitiativeTracker({ isDM }: { isDM: boolean }) {
   const {
-    encounter, tokens, selectedTokenId, lastDamage,
+    encounter, tokens, selectedTokenId, lastDamage, templates, scene, clearTemplate,
     startEncounter, endEncounter, addToInitiative, removeFromInitiative,
     nextTurn, previousTurn, select,
   } = useTable();
@@ -33,6 +34,14 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
 
   const active = encounter.entries[encounter.activeIndex] ?? null;
   const onBoard = tokens.filter((t) => !encounter.entries.some((e) => e.tokenId === t.id));
+
+  // Everyone standing in the most recent area effect, from the same geometry
+  // that draws it - so the outline and the target list cannot disagree.
+  const template = templates[templates.length - 1] ?? null;
+  const caught =
+    template && scene
+      ? tokensInTemplate(template, tokens, { feetPerSquare: scene.feetPerSquare })
+      : [];
 
   return (
     <div className="rounded-xl border border-ember-500/40 bg-ink-900 p-4">
@@ -188,6 +197,47 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
                     + roll all
                   </button>
                 )}
+              </div>
+            </div>
+          )}
+
+          {caught.length > 0 && template && (
+            <div className="rounded-lg border border-arcane-500/40 bg-arcane-500/5 p-2">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-[10px] tracking-wide text-arcane-400 uppercase">
+                  In the {template.shape} — {caught.length}
+                </span>
+                <button
+                  onClick={() => clearTemplate(template.id)}
+                  className="text-[10px] text-ink-500 hover:text-ink-300"
+                >
+                  clear
+                </button>
+              </div>
+              <div className="mb-1.5 flex flex-wrap gap-1">
+                {caught.map((token) => (
+                  <span key={token.id} className="rounded bg-ink-800 px-1.5 text-[10px] text-ink-300">
+                    {token.name || 'token'}
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-1">
+                {([['All', false], ['Half (saved)', true]] as const).map(([label, halved]) => (
+                  <button
+                    key={label}
+                    onClick={() => {
+                      const amount = Number(damage) || 0;
+                      if (!amount) return;
+                      useTable
+                        .getState()
+                        .applyDamage(caught.map((t) => t.id), amount, damageType, false, halved);
+                      setDamage('');
+                    }}
+                    className="flex-1 rounded border border-red-900/60 bg-red-950/40 px-1.5 py-1 text-[10px] text-red-200 hover:bg-red-900/40"
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
           )}

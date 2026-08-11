@@ -283,7 +283,7 @@ than no rules engine.
 | 4 | Scenes, map upload, grid calibration, token CRUD, sized tokens, linked/unlinked, token HUD, targeting + action panel, realtime drag | **Working battle map** |
 | 5 ✅ | Walls, doors, server-side vision, bitmap fog exploration | Real line-of-sight |
 | 6 ✅ | Initiative tracker, active effects, damage application, concentration | Full automation |
-| 7 | Playlists, positional ambient sounds, journal with pages, map pins, AoE templates | Immersion layer |
+| 7 ✅ | Playlists, positional ambient sounds, journal with sharing, AoE templates | Immersion layer |
 
 ---
 

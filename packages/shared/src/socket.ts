@@ -122,7 +122,26 @@ export interface WireEncounter {
   entries: WireInitiativeEntry[];
 }
 
+export interface WireTrack {
+  id: string;
+  playlistId: string;
+  name: string;
+  fileUrl: string;
+  volume: number;
+  loop: boolean;
+  sortOrder: number;
+}
+
+export interface WirePlaylist {
+  id: string;
+  name: string;
+  mode: 'sequential' | 'shuffle' | 'simultaneous';
+  fadeMs: number;
+  tracks: WireTrack[];
+}
+
 export interface WireAudioState {
+  playlistId: string | null;
   trackId: string | null;
   trackUrl: string | null;
   trackName: string | null;
@@ -131,6 +150,35 @@ export interface WireAudioState {
   /** Server epoch ms when playback started; clients derive their own seek. */
   startedAt: number | null;
   volume: number;
+}
+
+/**
+ * A sound placed on the map. Volume is computed by each client from its own
+ * tokens' distance, which is why the server never sends per-listener levels.
+ */
+export interface WireAmbientSound {
+  id: string;
+  sceneId: string;
+  name: string;
+  fileUrl: string;
+  x: number;
+  y: number;
+  radius: number;
+  volume: number;
+  easing: boolean;
+}
+
+export interface WireTemplate {
+  id: string;
+  sceneId: string;
+  ownerUserId: string | null;
+  shape: 'circle' | 'cone' | 'ray' | 'rect';
+  x: number;
+  y: number;
+  direction: number;
+  distance: number;
+  width: number;
+  color: string;
 }
 
 /** Sent only to the DM. Wall geometry is a map of the dungeon. */
@@ -245,10 +293,38 @@ export type DamageApplyPayload = z.infer<typeof damageApplySchema>;
 export type InitiativeAddPayload = z.infer<typeof initiativeAddSchema>;
 
 export const audioControlSchema = z.object({
+  playlistId: z.string().nullable().default(null),
   trackId: z.string().nullable(),
   playing: z.boolean(),
   loop: z.boolean().default(true),
+  volume: z.number().min(0).max(1).optional(),
 });
+
+export const templateCreateSchema = z.object({
+  sceneId: z.string(),
+  shape: z.enum(['circle', 'cone', 'ray', 'rect']),
+  x: z.number(),
+  y: z.number(),
+  direction: z.number().default(0),
+  /** Radius or length, in feet. */
+  distance: z.number().min(0).max(1000),
+  width: z.number().min(0).max(200).default(5),
+  color: z.string().max(20).default('#4a9eff'),
+});
+
+export const ambientCreateSchema = z.object({
+  sceneId: z.string(),
+  name: z.string().max(60).default(''),
+  fileUrl: z.string().max(500),
+  x: z.number(),
+  y: z.number(),
+  radius: z.number().min(1).max(200).default(10),
+  volume: z.number().min(0).max(1).default(0.7),
+  easing: z.boolean().default(true),
+});
+
+export type TemplateCreatePayload = z.infer<typeof templateCreateSchema>;
+export type AmbientCreatePayload = z.infer<typeof ambientCreateSchema>;
 
 export const initiativeUpdateSchema = z.object({
   encounterId: z.string(),
@@ -305,6 +381,9 @@ export interface ServerToClientEvents {
   }) => void;
 
   'audio:state': (payload: WireAudioState) => void;
+  'audio:playlists': (payload: { playlists: WirePlaylist[] }) => void;
+  'audio:sounds': (payload: { sounds: WireAmbientSound[] }) => void;
+  'template:state': (payload: { templates: WireTemplate[] }) => void;
 
   'ping:map': (payload: PingPayload & { byUserId: string; color: string }) => void;
 
@@ -352,6 +431,10 @@ export interface ClientToServerEvents {
   'damage:apply': (payload: DamageApplyPayload) => void;
 
   'audio:control': (payload: AudioControlPayload) => void;
+  'template:create': (payload: TemplateCreatePayload) => void;
+  'template:delete': (payload: { templateId: string }) => void;
+  'ambient:create': (payload: AmbientCreatePayload) => void;
+  'ambient:delete': (payload: { soundId: string }) => void;
 
   'ping:map': (payload: PingPayload) => void;
 

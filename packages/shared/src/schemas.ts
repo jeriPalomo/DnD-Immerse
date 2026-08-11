@@ -198,3 +198,7 @@ export const rollResultSchema = z.object({
 
 export type RollResult = z.infer<typeof rollResultSchema>;
 
+export type SkillProficiencies = z.infer<typeof skillProficienciesSchema>;
+export type SaveProficiencies = z.infer<typeof saveProficienciesSchema>;
+export type SpellSlots = z.infer<typeof spellSlotsSchema>;
+export type Currency = z.infer<typeof currencySchema>;

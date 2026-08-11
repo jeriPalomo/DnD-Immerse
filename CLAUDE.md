@@ -9,12 +9,10 @@ choices below. Keep it updated in the same commit as the work it describes.
 
 ## Status
 
-Phases 0–6 done. Combat runs: initiative rolled server-side, turn and round
-tracking, damage with resistances read off the sheet, and automatic
-concentration saves.
-
-**Next: Phase 7** — playlists and positional ambient sounds, journal with map
-pins, AoE templates.
+**All seven phases are done.** Accounts, campaigns, 5e sheets, the SRD
+compendium, a live table with chat and server-rolled dice, a battle map with
+sized tokens, wall-based dynamic vision with three-state fog, initiative and
+rules automation, and ambient audio with a journal and AoE templates.
 
 ## Commands
 
@@ -77,6 +75,15 @@ computes vision in the browser and therefore ships every wall to every client.
 over base numbers and is never stored — the same rule as ability modifiers.
 Modes apply multiply before add, so a +2 bonus is not itself doubled, and
 `applied` names every effect that contributed so a total is explainable.
+
+**Audio is synced by timestamp, never streamed.** The server records which
+track started and when; each client seeks its own copy. Positional volume is
+computed client-side from the listener's own tokens, so the server never sends
+a different mix per player. Only the DM's client advances the playlist — every
+browser firing `ended` would skip several tracks at once.
+
+**AoE outlines and target lists come from the same geometry.** `templateCovers`
+decides both what is drawn and who is caught, so they cannot disagree.
 
 **No dead code.** Two audits found helpers that were written, tested, and never
 called — `movementBlocked` let players walk through walls, `deriveActor` made

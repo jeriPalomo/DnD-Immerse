@@ -1,0 +1,334 @@
+import { asc, eq } from 'drizzle-orm';
+import {
+  ambientCreateSchema,
+  audioControlSchema,
+  campaignRoom,
+  templateCreateSchema,
+} from '@dnd/shared';
+import type { Socket } from 'socket.io';
+import type {
+  ClientToServerEvents,
+  ServerToClientEvents,
+  WireAmbientSound,
+  WireAudioState,
+  WirePlaylist,
+  WireTemplate,
+} from '@dnd/shared';
+import { db } from '../db/index.js';
+import {
+  ambientSounds,
+  audioState,
+  campaigns,
+  playlistTracks,
+  playlists,
+  scenes,
+  templates,
+} from '../db/schema.js';
+import { getMembership } from '../auth/guards.js';
+import { newId } from '../lib/id.js';
+import type { IOServer, SocketData } from './index.js';
+
+type AmbienceSocket = Socket<ClientToServerEvents, ServerToClientEvents, object, SocketData>;
+
+/**
+ * Ambient audio and area-of-effect templates.
+ *
+ * Playback is synchronised by timestamp, not streamed: the server records which
+ * track started and when, and each client seeks its own copy. That keeps audio
+ * entirely out of the server's bandwidth and means one person buffering never
+ * stutters anyone else.
+ */
+
+/* ----------------------------------------------------------------- audio */
+
+export async function playlistsOf(campaignId: string): Promise<WirePlaylist[]> {
+  const lists = await db
+    .select()
+    .from(playlists)
+    .where(eq(playlists.campaignId, campaignId))
+    .orderBy(asc(playlists.createdAt));
+
+  if (lists.length === 0) return [];
+
+  const tracks = await db
+    .select()
+    .from(playlistTracks)
+    .orderBy(asc(playlistTracks.sortOrder), asc(playlistTracks.name));
+
+  return lists.map((list) => ({
+    id: list.id,
+    name: list.name,
+    mode: list.mode,
+    fadeMs: list.fadeMs,
+    tracks: tracks
+      .filter((track) => track.playlistId === list.id)
+      .map((track) => ({
+        id: track.id,
+        playlistId: track.playlistId,
+        name: track.name,
+        fileUrl: track.fileUrl,
+        volume: track.volume,
+        loop: track.loop,
+        sortOrder: track.sortOrder,
+      })),
+  }));
+}
+
+async function currentAudio(campaignId: string): Promise<WireAudioState> {
+  const rows = await db
+    .select()
+    .from(audioState)
+    .where(eq(audioState.campaignId, campaignId))
+    .limit(1);
+
+  const state = rows[0];
+  if (!state?.trackId) {
+    return {
+      playlistId: state?.playlistId ?? null,
+      trackId: null,
+      trackUrl: null,
+      trackName: null,
+      playing: false,
+      loop: true,
+      startedAt: null,
+      volume: state?.volume ?? 0.6,
+    };
+  }
+
+  const found = await db
+    .select()
+    .from(playlistTracks)
+    .where(eq(playlistTracks.id, state.trackId))
+    .limit(1);
+  const track = found[0];
+
+  return {
+    playlistId: state.playlistId,
+    trackId: state.trackId,
+    trackUrl: track?.fileUrl ?? null,
+    trackName: track?.name ?? null,
+    playing: state.playing,
+    loop: track?.loop ?? true,
+    startedAt: state.startedAt,
+    volume: state.volume,
+  };
+}
+
+export async function broadcastAudio(io: IOServer, campaignId: string): Promise<void> {
+  const state = await currentAudio(campaignId);
+  io.to(campaignRoom(campaignId)).emit('audio:state', state);
+}
+
+export async function broadcastPlaylists(io: IOServer, campaignId: string): Promise<void> {
+  io.to(campaignRoom(campaignId)).emit('audio:playlists', {
+    playlists: await playlistsOf(campaignId),
+  });
+}
+
+/* ----------------------------------------------------- scene-scoped state */
+
+async function activeSceneId(campaignId: string): Promise<string | null> {
+  const rows = await db
+    .select({ activeSceneId: campaigns.activeSceneId })
+    .from(campaigns)
+    .where(eq(campaigns.id, campaignId))
+    .limit(1);
+  return rows[0]?.activeSceneId ?? null;
+}
+
+/**
+ * Ambient sounds for the active scene.
+ *
+ * Hidden emitters are filtered out for players, on the same principle as
+ * hidden tokens: a sound the DM has not revealed should not be inferable from
+ * the payload.
+ */
+export async function broadcastSounds(io: IOServer, campaignId: string): Promise<void> {
+  const sceneId = await activeSceneId(campaignId);
+  if (!sceneId) {
+    io.to(campaignRoom(campaignId)).emit('audio:sounds', { sounds: [] });
+    return;
+  }
+
+  const rows = await db.select().from(ambientSounds).where(eq(ambientSounds.sceneId, sceneId));
+
+  const project = (list: typeof rows): WireAmbientSound[] =>
+    list.map((sound) => ({
+      id: sound.id,
+      sceneId: sound.sceneId,
+      name: sound.name,
+      fileUrl: sound.fileUrl,
+      x: sound.x,
+      y: sound.y,
+      radius: sound.radius,
+      volume: sound.volume,
+      easing: sound.easing,
+    }));
+
+  for (const socket of await io.in(campaignRoom(campaignId)).fetchSockets()) {
+    const isDM = socket.data.rooms.get(campaignId) === 'dm';
+    socket.emit('audio:sounds', {
+      sounds: project(isDM ? rows : rows.filter((sound) => !sound.hidden)),
+    });
+  }
+}
+
+export async function broadcastTemplates(io: IOServer, campaignId: string): Promise<void> {
+  const sceneId = await activeSceneId(campaignId);
+  if (!sceneId) {
+    io.to(campaignRoom(campaignId)).emit('template:state', { templates: [] });
+    return;
+  }
+
+  const rows = await db.select().from(templates).where(eq(templates.sceneId, sceneId));
+
+  const wire: WireTemplate[] = rows.map((template) => ({
+    id: template.id,
+    sceneId: template.sceneId,
+    ownerUserId: template.ownerUserId,
+    shape: template.shape,
+    x: template.x,
+    y: template.y,
+    direction: template.direction,
+    distance: template.distance,
+    width: template.width,
+    color: template.color,
+  }));
+
+  io.to(campaignRoom(campaignId)).emit('template:state', { templates: wire });
+}
+
+/* -------------------------------------------------------------- handlers */
+
+export function registerAmbienceHandlers(io: IOServer, socket: AmbienceSocket): void {
+  const user = socket.data.user;
+
+  async function context(): Promise<{ campaignId: string; isDM: boolean } | null> {
+    const [campaignId] = socket.data.rooms.keys();
+    if (!campaignId) return null;
+
+    const membership = await getMembership(campaignId, user.id);
+    if (!membership) {
+      socket.emit('error', { message: 'You are not in that campaign', code: 'NOT_A_MEMBER' });
+      return null;
+    }
+    return { campaignId, isDM: membership.isDM };
+  }
+
+  socket.on('audio:control', async (payload) => {
+    const ctx = await context();
+    if (!ctx) return;
+    if (!ctx.isDM) {
+      socket.emit('error', { message: 'Only the DM controls the music' });
+      return;
+    }
+
+    const input = audioControlSchema.parse(payload);
+
+    // startedAt is the sync point every client seeks against, so it is stamped
+    // here rather than taken from whichever browser pressed play.
+    const startedAt = input.playing ? Date.now() : null;
+
+    await db
+      .insert(audioState)
+      .values({
+        campaignId: ctx.campaignId,
+        playlistId: input.playlistId,
+        trackId: input.trackId,
+        playing: input.playing,
+        startedAt,
+        volume: input.volume ?? 0.6,
+      })
+      .onConflictDoUpdate({
+        target: audioState.campaignId,
+        set: {
+          playlistId: input.playlistId,
+          trackId: input.trackId,
+          playing: input.playing,
+          startedAt,
+          ...(input.volume !== undefined ? { volume: input.volume } : {}),
+        },
+      });
+
+    await broadcastAudio(io, ctx.campaignId);
+  });
+
+  socket.on('ambient:create', async (payload) => {
+    const ctx = await context();
+    if (!ctx || !ctx.isDM) {
+      socket.emit('error', { message: 'Only the DM can place sounds' });
+      return;
+    }
+
+    const input = ambientCreateSchema.parse(payload);
+    const scene = await db.select().from(scenes).where(eq(scenes.id, input.sceneId)).limit(1);
+    if (scene[0]?.campaignId !== ctx.campaignId) return;
+
+    await db.insert(ambientSounds).values({
+      id: newId(),
+      sceneId: input.sceneId,
+      name: input.name,
+      fileUrl: input.fileUrl,
+      x: input.x,
+      y: input.y,
+      radius: input.radius,
+      volume: input.volume,
+      blockedByWalls: true,
+      easing: input.easing,
+      hidden: false,
+    });
+
+    await broadcastSounds(io, ctx.campaignId);
+  });
+
+  socket.on('ambient:delete', async ({ soundId }) => {
+    const ctx = await context();
+    if (!ctx || !ctx.isDM) return;
+
+    await db.delete(ambientSounds).where(eq(ambientSounds.id, soundId));
+    await broadcastSounds(io, ctx.campaignId);
+  });
+
+  /** Templates are placed by players too — aiming a fireball is their job. */
+  socket.on('template:create', async (payload) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const input = templateCreateSchema.parse(payload);
+    const scene = await db.select().from(scenes).where(eq(scenes.id, input.sceneId)).limit(1);
+    if (scene[0]?.campaignId !== ctx.campaignId) return;
+
+    await db.insert(templates).values({
+      id: newId(),
+      sceneId: input.sceneId,
+      ownerUserId: user.id,
+      shape: input.shape,
+      x: input.x,
+      y: input.y,
+      direction: input.direction,
+      distance: input.distance,
+      width: input.width,
+      color: input.color,
+    });
+
+    await broadcastTemplates(io, ctx.campaignId);
+  });
+
+  socket.on('template:delete', async ({ templateId }) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const rows = await db.select().from(templates).where(eq(templates.id, templateId)).limit(1);
+    const template = rows[0];
+    if (!template) return;
+
+    // You may clear your own template; the DM may clear anyone's.
+    if (!ctx.isDM && template.ownerUserId !== user.id) {
+      socket.emit('error', { message: 'That is not your template' });
+      return;
+    }
+
+    await db.delete(templates).where(eq(templates.id, templateId));
+    await broadcastTemplates(io, ctx.campaignId);
+  });
+}
