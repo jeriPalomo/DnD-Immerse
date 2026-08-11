@@ -7,6 +7,7 @@ import type {
   WireChatMessage,
   WirePresence,
   WireDoor,
+  WireEncounter,
   WireScene,
   WireToken,
   WireVision,
@@ -32,6 +33,7 @@ interface TableState {
   walls: WireWall[];
   /** DM wall-drawing mode. */
   wallTool: 'off' | 'wall' | 'door';
+  encounter: WireEncounter | null;
   selectedTokenId: string | null;
   /** The token a player has targeted, which drives the action panel. */
   targetTokenId: string | null;
@@ -61,6 +63,20 @@ interface TableState {
   createWall: (x1: number, y1: number, x2: number, y2: number, isDoor: boolean) => void;
   deleteWall: (wallId: string) => void;
   toggleDoor: (wallId: string) => void;
+
+  startEncounter: () => void;
+  endEncounter: () => void;
+  addToInitiative: (tokenIds: string[]) => void;
+  removeFromInitiative: (entryId: string) => void;
+  nextTurn: () => void;
+  previousTurn: () => void;
+  applyDamage: (
+    tokenIds: string[],
+    amount: number,
+    damageType: string,
+    healing?: boolean,
+    halved?: boolean,
+  ) => void;
   cardAction: (
     itemId: string,
     actorId: string,
@@ -88,6 +104,7 @@ export const useTable = create<TableState>((set, get) => ({
   doors: [],
   walls: [],
   wallTool: 'off',
+  encounter: null,
 
   setActiveActor(actorId) {
     set({ activeActorId: actorId });
@@ -132,6 +149,7 @@ export const useTable = create<TableState>((set, get) => ({
     socket.on('door:updated', ({ door }) =>
       set({ doors: get().doors.map((d) => (d.id === door.id ? door : d)) }),
     );
+    socket.on('initiative:state', ({ encounter }) => set({ encounter }));
     socket.on('wall:created', ({ wall }) => set({ walls: [...get().walls, wall] }));
     socket.on('wall:updated', ({ wall }) =>
       set({ walls: get().walls.map((w) => (w.id === wall.id ? wall : w)) }),
@@ -166,7 +184,7 @@ export const useTable = create<TableState>((set, get) => ({
     });
     socket.on('error', ({ message }) => set({ error: message }));
 
-    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null });
+    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null });
   },
 
   disconnect() {
@@ -250,6 +268,35 @@ export const useTable = create<TableState>((set, get) => ({
 
   toggleDoor(wallId) {
     get().socket?.emit('door:toggle', { wallId });
+  },
+
+  startEncounter() {
+    get().socket?.emit('encounter:start', { sceneId: get().scene?.id ?? null });
+  },
+
+  endEncounter() {
+    get().socket?.emit('encounter:end', {});
+  },
+
+  addToInitiative(tokenIds) {
+    // Rolled on the server, like every other die.
+    get().socket?.emit('initiative:add', { tokenIds, roll: true });
+  },
+
+  removeFromInitiative(entryId) {
+    get().socket?.emit('initiative:remove', { entryId });
+  },
+
+  nextTurn() {
+    get().socket?.emit('turn:next', {});
+  },
+
+  previousTurn() {
+    get().socket?.emit('turn:previous', {});
+  },
+
+  applyDamage(tokenIds, amount, damageType, healing = false, halved = false) {
+    get().socket?.emit('damage:apply', { tokenIds, amount, damageType, healing, halved });
   },
 
   cardAction(itemId, actorId, action, mode = 'normal') {

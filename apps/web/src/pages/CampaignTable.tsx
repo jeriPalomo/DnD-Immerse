@@ -4,6 +4,7 @@ import { OWNERSHIP, abilityModifier, formatModifier } from '@dnd/shared';
 import { Alert, Badge, Card, Spinner } from '../components/ui.js';
 import { ChatPanel } from '../components/ChatPanel.js';
 import { BattleMap } from '../components/board/BattleMap.js';
+import { InitiativeTracker } from '../components/board/InitiativeTracker.js';
 import { SceneManager } from '../components/board/SceneManager.js';
 import { TargetPanel } from '../components/board/TargetPanel.js';
 import { TokenHUD } from '../components/board/TokenHUD.js';
@@ -98,6 +99,8 @@ export default function CampaignTable() {
 
         {/* Contextual column */}
         <div className="space-y-3 overflow-y-auto xl:h-[calc(100vh-8rem)]">
+          <InitiativeTracker isDM={Boolean(isDM)} />
+
           {isDM && id && <SceneManager campaignId={id} />}
 
           {targeted && scene && (

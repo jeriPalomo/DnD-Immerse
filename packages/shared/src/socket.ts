@@ -105,6 +105,12 @@ export interface WireInitiativeEntry {
   name: string;
   initiative: number;
   sortOrder: number;
+  /** Shown in the tracker so the DM can see who is hurt at a glance. */
+  hp: number | null;
+  maxHp: number | null;
+  conditions: string[];
+  /** Players do not see enemy hit points, only a rough state. */
+  hpRedacted: boolean;
 }
 
 export interface WireEncounter {
@@ -219,6 +225,25 @@ export const pingSchema = z.object({
   y: z.number(),
 });
 
+export const damageApplySchema = z.object({
+  tokenIds: z.array(z.string()).min(1).max(50),
+  amount: z.number().int().min(0).max(1000),
+  damageType: z.string().max(30).default(''),
+  /** Healing shares the path so one flow covers both directions. */
+  healing: z.boolean().default(false),
+  /** Half on a successful save, for area spells. */
+  halved: z.boolean().default(false),
+});
+
+export const initiativeAddSchema = z.object({
+  tokenIds: z.array(z.string()).min(1).max(50),
+  /** Roll initiative automatically rather than entering it by hand. */
+  roll: z.boolean().default(true),
+});
+
+export type DamageApplyPayload = z.infer<typeof damageApplySchema>;
+export type InitiativeAddPayload = z.infer<typeof initiativeAddSchema>;
+
 export const audioControlSchema = z.object({
   trackId: z.string().nullable(),
   playing: z.boolean(),
@@ -274,6 +299,10 @@ export interface ServerToClientEvents {
   'chat:history': (payload: { messages: WireChatMessage[] }) => void;
 
   'initiative:state': (payload: { encounter: WireEncounter | null }) => void;
+  /** Result of applying damage, so chat can explain resistances. */
+  'damage:applied': (payload: {
+    results: { tokenId: string; name: string; before: number; after: number; reason: string }[];
+  }) => void;
 
   'audio:state': (payload: WireAudioState) => void;
 
@@ -314,6 +343,13 @@ export interface ClientToServerEvents {
   'chat:cardAction': (payload: z.infer<typeof cardActionSchema>) => void;
 
   'initiative:update': (payload: InitiativeUpdatePayload) => void;
+  'encounter:start': (payload: { sceneId: string | null }) => void;
+  'encounter:end': (payload: Record<string, never>) => void;
+  'initiative:add': (payload: InitiativeAddPayload) => void;
+  'initiative:remove': (payload: { entryId: string }) => void;
+  'turn:next': (payload: Record<string, never>) => void;
+  'turn:previous': (payload: Record<string, never>) => void;
+  'damage:apply': (payload: DamageApplyPayload) => void;
 
   'audio:control': (payload: AudioControlPayload) => void;
 

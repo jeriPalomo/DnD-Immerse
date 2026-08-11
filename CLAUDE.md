@@ -9,12 +9,13 @@ choices below. Keep it updated in the same commit as the work it describes.
 
 ## Status
 
-Phases 0–5 done. The board has **real line of sight**: the DM draws walls and
-doors, each player sees only what their tokens can see, and fog remembers
-explored ground across sessions.
+Phases 0–6 done. Combat runs: initiative rolled server-side, turn and round
+tracking, damage with resistances read off the sheet, and automatic
+concentration saves.
 
-**Next: Phase 6** — initiative tracker, active effects, damage application with
-resistances, concentration saves. See docs/PLAN.md.
+**Next: Phase 7** — playlists and positional ambient sounds, journal with map
+pins, AoE templates. Also still open: avatar and campaign banner upload have
+server routes but no UI.
 
 ## Commands
 
@@ -72,6 +73,14 @@ produces each player's polygon and sends them the polygon plus the tokens inside
 it. Wall geometry is never in a player payload — doors are, because a door is a
 thing you can see and open. This is a deliberate divergence from Foundry, which
 computes vision in the browser and therefore ships every wall to every client.
+
+**Derived actor data is a pure function.** `effects.ts` folds active effects
+over base numbers and is never stored — the same rule as ability modifiers.
+Modes apply multiply before add, so a +2 bonus is not itself doubled, and
+`applied` names every effect that contributed so a total is explainable.
+
+**Enemy hit points are redacted from players in the tracker.** Knowing the boss
+is on 7 HP changes how a table plays; that is the DM's to reveal.
 
 **Walls block sight and movement independently.** `blocksSight` and
 `blocksMovement` are separate flags, so a railing can be seen over but not

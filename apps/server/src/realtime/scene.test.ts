@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { io as connect, type Socket } from 'socket.io-client';
-import type { WireScene, WireToken } from '@dnd/shared';
+import type { WireEncounter, WireScene, WireToken } from '@dnd/shared';
 
 /**
  * Token permission and visibility tests.
@@ -313,5 +313,140 @@ describe('linked tokens write through to the sheet', () => {
     );
     // The board and the sheet must not be able to disagree.
     expect(sheet.actor.hpCurrent).toBe(12);
+  });
+});
+
+describe('initiative and damage', () => {
+  let pcTokenId: string;
+  let orcTokenId: string;
+
+  beforeAll(async () => {
+    // A resistant, concentrating orc, so both automation paths get exercised.
+    const orc = await api<{ actor: { id: string } }>(
+      'POST',
+      '/api/actors',
+      {
+        name: 'Orc',
+        type: 'npc',
+        hpMax: 30,
+        hpCurrent: 30,
+        dex: 12,
+        damageModifiers: { resistances: ['fire'], vulnerabilities: [], immunities: ['poison'], conditionImmunities: [] },
+      },
+      dm.cookie,
+    );
+
+    const a = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, actorId: aliceActorId, x: 1, y: 12, ownerUserId: alice.userId, name: 'Alice PC',
+    } as never);
+    pcTokenId = (await a)!.token.id;
+
+    const b = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, actorId: orc.actor.id, x: 3, y: 12, name: 'Orc', conditions: ['concentrating'],
+    } as never);
+    orcTokenId = (await b)!.token.id;
+  });
+
+  it('starts an encounter and rolls initiative server-side', async () => {
+    const started = next<{ encounter: WireEncounter | null }>(dmSocket, 'initiative:state');
+    dmSocket.emit('encounter:start', { sceneId });
+    expect((await started)?.encounter?.round).toBe(1);
+
+    const added = next<{ encounter: WireEncounter | null }>(dmSocket, 'initiative:state');
+    dmSocket.emit('initiative:add', { tokenIds: [pcTokenId, orcTokenId], roll: true });
+
+    const encounter = (await added)?.encounter;
+    expect(encounter?.entries.length).toBe(2);
+    // Rolled, not zero, and within 1d20 + a small modifier.
+    for (const entry of encounter!.entries) {
+      expect(entry.initiative).toBeGreaterThan(0);
+      expect(entry.initiative).toBeLessThanOrEqual(30);
+    }
+    // Sorted highest first.
+    expect(encounter!.entries[0].initiative).toBeGreaterThanOrEqual(encounter!.entries[1].initiative);
+  });
+
+  it('refuses to let a player drive the turn order', async () => {
+    const failure = next<{ message: string }>(aliceSocket, 'error');
+    aliceSocket.emit('turn:next', {});
+    expect((await failure)?.message).toMatch(/only the dm/i);
+  });
+
+  it('advances turns and rolls into the next round', async () => {
+    const first = next<{ encounter: WireEncounter | null }>(dmSocket, 'initiative:state');
+    dmSocket.emit('turn:next', {});
+    expect((await first)?.encounter?.activeIndex).toBe(1);
+
+    const second = next<{ encounter: WireEncounter | null }>(dmSocket, 'initiative:state');
+    dmSocket.emit('turn:next', {});
+    const wrapped = (await second)?.encounter;
+    expect(wrapped?.activeIndex).toBe(0);
+    expect(wrapped?.round).toBe(2);
+  });
+
+  it('redacts enemy hit points from players but not from the DM', async () => {
+    const forDm = next<{ encounter: WireEncounter | null }>(dmSocket, 'initiative:state');
+    const forPlayer = next<{ encounter: WireEncounter | null }>(aliceSocket, 'initiative:state');
+    dmSocket.emit('turn:next', {});
+
+    const dmOrc = (await forDm)?.encounter?.entries.find((e) => e.name === 'Orc');
+    const playerOrc = (await forPlayer)?.encounter?.entries.find((e) => e.name === 'Orc');
+
+    expect(dmOrc?.hp).toBe(30);
+    // Knowing the boss is nearly dead changes how a table plays.
+    expect(playerOrc?.hp).toBeNull();
+    expect(playerOrc?.hpRedacted).toBe(true);
+    // The name is still shown - the player can see something is in the order.
+    expect(playerOrc?.name).toBe('Orc');
+  });
+
+  it('halves damage the target resists', async () => {
+    const applied = next<{ results: { name: string; before: number; after: number; reason: string }[] }>(
+      dmSocket, 'damage:applied',
+    );
+    dmSocket.emit('damage:apply', {
+      tokenIds: [orcTokenId], amount: 13, damageType: 'fire', healing: false, halved: false,
+    });
+
+    const result = (await applied)?.results[0];
+    // 13 fire, resisted, halves to 6 rounding down.
+    expect(result?.before).toBe(30);
+    expect(result?.after).toBe(24);
+    expect(result?.reason).toBe('resistant');
+  });
+
+  it('ignores damage the target is immune to', async () => {
+    const applied = next<{ results: { after: number; reason: string }[] }>(dmSocket, 'damage:applied');
+    dmSocket.emit('damage:apply', {
+      tokenIds: [orcTokenId], amount: 20, damageType: 'poison', healing: false, halved: false,
+    });
+
+    const result = (await applied)?.results[0];
+    expect(result?.reason).toBe('immune');
+    expect(result?.after).toBe(24);
+  });
+
+  it('writes damage through to a linked sheet', async () => {
+    const applied = next<{ results: { after: number }[] }>(dmSocket, 'damage:applied');
+    dmSocket.emit('damage:apply', {
+      tokenIds: [pcTokenId], amount: 5, damageType: 'slashing', healing: false, halved: false,
+    });
+    await applied;
+
+    const sheet = await api<{ actor: { hpCurrent: number } }>(
+      'GET', `/api/actors/${aliceActorId}`, undefined, alice.cookie,
+    );
+    // The board and the sheet must not be able to disagree.
+    expect(sheet.actor.hpCurrent).toBeLessThan(30);
+  });
+
+  it('refuses to let a player apply damage', async () => {
+    const failure = next<{ message: string }>(aliceSocket, 'error');
+    aliceSocket.emit('damage:apply', {
+      tokenIds: [orcTokenId], amount: 999, damageType: 'slashing', healing: false, halved: false,
+    });
+    expect((await failure)?.message).toMatch(/only the dm/i);
   });
 });
