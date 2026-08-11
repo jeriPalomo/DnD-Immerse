@@ -4,6 +4,8 @@ import { Button, Spinner } from './components/ui.js';
 import AuthPage from './pages/AuthPage.js';
 import CampaignDetail from './pages/CampaignDetail.js';
 import CampaignList from './pages/CampaignList.js';
+import CharacterList from './pages/CharacterList.js';
+import CharacterSheet from './pages/CharacterSheet.js';
 import { useAuth } from './store/auth.js';
 import type { ReactNode } from 'react';
 
@@ -48,6 +50,26 @@ export default function App() {
           </RequireAuth>
         }
       />
+      <Route
+        path="/characters"
+        element={
+          <RequireAuth>
+            <Shell>
+              <CharacterList />
+            </Shell>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/characters/:id"
+        element={
+          <RequireAuth>
+            <Shell>
+              <CharacterSheet />
+            </Shell>
+          </RequireAuth>
+        }
+      />
       <Route path="*" element={<Navigate to="/campaigns" replace />} />
     </Routes>
   );
@@ -63,6 +85,19 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function NavLink({ to, children }: { to: string; children: ReactNode }) {
+  const location = useLocation();
+  const active = location.pathname.startsWith(to);
+  return (
+    <Link
+      to={to}
+      className={active ? 'text-ink-100' : 'text-ink-400 transition-colors hover:text-ink-200'}
+    >
+      {children}
+    </Link>
+  );
+}
+
 function Shell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
 
@@ -70,9 +105,15 @@ function Shell({ children }: { children: ReactNode }) {
     <div className="bg-vellum min-h-full">
       <header className="border-b border-ink-800 bg-ink-950/80 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-          <Link to="/campaigns" className="font-display text-lg font-bold text-ink-100">
-            DnD <span className="text-ember-400">Immerse</span>
-          </Link>
+          <div className="flex items-center gap-6">
+            <Link to="/campaigns" className="font-display text-lg font-bold text-ink-100">
+              DnD <span className="text-ember-400">Immerse</span>
+            </Link>
+            <nav className="flex gap-4 text-sm">
+              <NavLink to="/campaigns">Campaigns</NavLink>
+              <NavLink to="/characters">Characters</NavLink>
+            </nav>
+          </div>
           <div className="flex items-center gap-3">
             <span className="hidden text-sm text-ink-400 sm:inline">{user?.displayName}</span>
             <Button variant="ghost" size="sm" onClick={() => void logout()}>

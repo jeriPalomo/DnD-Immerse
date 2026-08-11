@@ -107,11 +107,14 @@ nobody can fudge.
 
 ## Status
 
-Phases 0 and 1 are done: workspace, shared rules and grid math, the full
-database schema, Argon2 session auth, and campaigns with invite codes.
+Phases 0 through 2 are done: workspace, shared rules and grid math, the full
+database schema, Argon2 session auth, campaigns with invite codes, the
+Actor/Item document model, the 5e character sheet, and the SRD 5.1 compendium
+(319 spells, 334 monsters, 599 items).
 
-Next up is Phase 2 — the Actor/Item document model on screen, the 5e character
-sheet, and the SRD 5.1 compendium import. See [docs/PLAN.md](docs/PLAN.md) for
-the full architecture and phase sequence; the short version is that Phase 3 gets
-you a playable game night and Phase 4 a working battle map, with walls and vision
-after that.
+Run `npm run srd:import` once to seed the compendium.
+
+Next up is Phase 3 — realtime chat, presence, and the server-authoritative dice
+engine, which is the point the site becomes playable for a real session. See
+[docs/PLAN.md](docs/PLAN.md) for the full architecture and phase sequence;
+Phase 4 brings the battle map, with walls and vision after that.

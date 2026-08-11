@@ -9,11 +9,13 @@ choices below. Keep it updated in the same commit as the work it describes.
 
 ## Status
 
-Phases 0–1 done: workspace, shared rules/grid math, full DB schema (23 tables),
-Argon2 session auth, campaigns with invite codes.
+Phases 0–2 done: workspace, shared rules/grid math, full DB schema, Argon2
+session auth, campaigns with invite codes, the Actor/Item document model, the
+5e character sheet, and the SRD 5.1 compendium.
 
-**Next: Phase 2** — Actor/Item UI, the 5e character sheet, SRD 5.1 compendium
-import.
+**Next: Phase 3** — Socket.IO infrastructure, presence, chat, the
+server-authoritative dice engine, and chat cards with action buttons. That
+phase ends at a fully playable game night.
 
 ## Commands
 
@@ -21,7 +23,10 @@ import.
 npm run dev          # API :3001 + client :5173
 npm test             # Vitest: rules5e + grid math
 npm run db:generate  # New migration after editing schema.ts
+npm run srd:import   # Seed the compendium (downloads once, then cached)
 ```
+
+The SRD import is idempotent — re-running replaces the compendium in place.
 
 ## Invariants
 
@@ -75,6 +80,11 @@ back.
 **`ensureDataDirs()` must run before the libsql client is constructed.**
 `data/` is gitignored, and opening a SQLite file does not create its parent
 directory — a fresh clone crashes with `SQLITE_CANTOPEN` otherwise.
+
+**UI changes can be verified for real.** `playwright` is a dev dependency and
+drives installed Chrome via `channel: 'chrome'` — no browser download needed.
+Screenshot the page and look at it; a sheet that renders is not the same as a
+sheet whose numbers are right.
 
 **`data/` does not sync between machines.** The desktop is the server of record
 and holds the real campaign database; other machines keep throwaway local data.

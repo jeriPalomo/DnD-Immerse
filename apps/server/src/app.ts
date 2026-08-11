@@ -5,7 +5,9 @@ import Fastify from 'fastify';
 import { ZodError } from 'zod';
 import { HttpError, attachUser } from './auth/guards.js';
 import { authRoutes } from './routes/auth.js';
+import { actorRoutes } from './routes/actors.js';
 import { campaignRoutes } from './routes/campaigns.js';
+import { itemRoutes } from './routes/items.js';
 import { env, paths } from './env.js';
 
 export async function buildApp() {
@@ -55,6 +57,8 @@ export async function buildApp() {
 
   await app.register(authRoutes);
   await app.register(campaignRoutes);
+  await app.register(actorRoutes);
+  await app.register(itemRoutes);
 
   return app;
 }
