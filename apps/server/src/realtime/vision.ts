@@ -6,6 +6,7 @@ import {
   exploredCells,
   markVisible,
   pointInAnyPolygon,
+  sightRadiusFeet,
   tokenCenter,
 } from '@dnd/shared';
 import type { Polygon, WireDoor, WireVision, WireWall } from '@dnd/shared';
@@ -22,8 +23,8 @@ import type { Scene, Token, Wall } from '../db/schema.js';
  * is a readable map of the dungeon.
  */
 
-/** Default sight when a token has none configured, in grid squares. */
-const DEFAULT_VISION_SQUARES = 12;
+/** Default sight when a token has none configured, in feet. */
+const DEFAULT_VISION_FEET = 60;
 
 /**
  * Fog extent for a scene with no map uploaded yet. Without a fallback the
@@ -80,17 +81,22 @@ export async function wallsOf(sceneId: string): Promise<Wall[]> {
   return db.select().from(wallsTable).where(eq(wallsTable.sceneId, sceneId));
 }
 
-/** The tokens a given user controls, which are the origins of their sight. */
-function sightSources(tokens: Token[], userId: string, feetPerSquare: number) {
+/**
+ * The tokens a given user controls, which are the origins of their sight.
+ *
+ * With global illumination off, a token sees only as far as its own darkvision
+ * or the light it carries - which is what makes turning daylight off actually
+ * change the board rather than just flipping a stored flag.
+ */
+function sightSources(tokens: Token[], userId: string, scene: Scene) {
   return tokens
     .filter((token) => token.ownerUserId === userId && token.layer !== 'gm')
     .map((token) => ({
       point: tokenCenter(token),
-      // Vision is stored in feet; the geometry works in grid units.
+      // Vision is configured in feet; the geometry works in grid units.
       radius:
-        token.visionRange > 0
-          ? token.visionRange / feetPerSquare
-          : Math.max(token.darkvisionRange / feetPerSquare, DEFAULT_VISION_SQUARES),
+        sightRadiusFeet(token, scene.globalIllumination, DEFAULT_VISION_FEET, scene.feetPerSquare) /
+        scene.feetPerSquare,
     }));
 }
 
@@ -113,7 +119,7 @@ export async function computePlayerView(
 
   const { gridWidth, gridHeight } = gridExtent(scene);
 
-  const sources = sightSources(tokens, userId, scene.feetPerSquare);
+  const sources = sightSources(tokens, userId, scene);
   const polygons = combinedVisibility(sources, walls);
 
   // Load, extend and persist this player's exploration.

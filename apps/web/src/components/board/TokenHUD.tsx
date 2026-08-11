@@ -24,6 +24,7 @@ export function TokenHUD({
 }) {
   const [delta, setDelta] = useState('');
   const [showConditions, setShowConditions] = useState(false);
+  const [showSight, setShowSight] = useState(false);
 
   function applyDelta(sign: 1 | -1) {
     const amount = Math.abs(Number(delta) || 0);
@@ -149,6 +150,48 @@ export function TokenHUD({
           )}
 
           {isDM && (
+            <>
+              <button
+                onClick={() => setShowSight(!showSight)}
+                className="w-full rounded border border-ink-700 px-2 py-1 text-xs text-ink-300 hover:border-ink-600"
+              >
+                {showSight ? 'Hide sight' : 'Sight & light'}
+              </button>
+
+              {showSight && (
+                <div className="space-y-2 rounded-lg border border-ink-800 bg-ink-950/60 p-2">
+                  {(
+                    [
+                      ['visionRange', 'Vision', 'Feet seen in light. 0 uses the default 60 ft.'],
+                      ['darkvisionRange', 'Darkvision', 'Feet seen with no light at all.'],
+                      ['lightBright', 'Light carried', 'Feet this token illuminates, e.g. a torch at 20.'],
+                    ] as const
+                  ).map(([field, label, hint]) => (
+                    <label key={field} className="block">
+                      <div className="flex items-center justify-between text-[11px] text-ink-400">
+                        <span>{label}</span>
+                        <span className="font-mono text-ink-200">{token[field]} ft</span>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={500}
+                        step={5}
+                        value={token[field]}
+                        aria-label={`${label} range in feet`}
+                        title={hint}
+                        onChange={(e) => onUpdate({ [field]: Math.max(0, Number(e.target.value) || 0) })}
+                        className="mt-0.5 w-full rounded border border-ink-600 bg-ink-850 px-2 py-1 text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
+                      />
+                    </label>
+                  ))}
+                  <p className="text-[10px] text-ink-600">
+                    Darkvision and carried light only matter when the scene's daylight
+                    is switched off.
+                  </p>
+                </div>
+              )}
+
             <div className="flex gap-1.5">
               <button
                 onClick={() => onUpdate({ hidden: !token.hidden })}
@@ -179,6 +222,7 @@ export function TokenHUD({
                 Remove
               </button>
             </div>
+            </>
           )}
         </div>
       )}

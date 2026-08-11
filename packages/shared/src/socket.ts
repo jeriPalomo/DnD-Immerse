@@ -39,6 +39,11 @@ export interface WireToken {
   /** Linked tokens share HP with their actor; unlinked keep a private copy. */
   actorLinked: boolean;
   disposition: 'friendly' | 'neutral' | 'hostile';
+  /** Sight and light, all in feet. Drive the vision computation server-side. */
+  visionRange: number;
+  darkvisionRange: number;
+  lightBright: number;
+  lightDim: number;
   hp: number | null;
   maxHp: number | null;
   ac: number | null;

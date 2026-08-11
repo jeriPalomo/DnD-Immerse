@@ -325,3 +325,62 @@ describe('door permissions', () => {
     expect((await failure)?.message).toMatch(/locked/i);
   });
 });
+
+describe('walls stop movement', () => {
+  let aliceTokenId: string;
+
+  beforeAll(async () => {
+    // Make sure the door is shut before testing collision through it.
+    dmSocket.emit('wall:update', { wallId: doorId, doorState: 0 });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const state = await refresh(dmSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    aliceTokenId = state.tokens.find((t) => t.name === 'Alice PC')!.id;
+  });
+
+  it('refuses to let a player walk through a wall, and snaps them back', async () => {
+    const failure = next<{ message: string }>(aliceSocket, 'error');
+    const correction = next<{ token: WireToken }>(dmSocket, 'token:updated');
+
+    // From inside the sealed room, straight out through the east wall.
+    aliceSocket.emit('token:commit', { tokenId: aliceTokenId, x: 20, y: 8 });
+
+    expect((await failure)?.message).toMatch(/wall blocks/i);
+
+    const corrected = await correction;
+    // Still inside the room, at the position it started from.
+    expect(corrected?.token.x).toBeLessThan(10);
+  });
+
+  it('allows movement within the room', async () => {
+    const moved = next<{ token: WireToken }>(dmSocket, 'token:updated');
+    aliceSocket.emit('token:commit', { tokenId: aliceTokenId, x: 8, y: 8 });
+
+    expect((await moved)?.token.x).toBe(8);
+  });
+
+  it('lets the DM place a token anywhere, walls included', async () => {
+    const moved = next<{ token: WireToken }>(dmSocket, 'token:updated');
+    dmSocket.emit('token:commit', { tokenId: aliceTokenId, x: 25, y: 8 });
+
+    // The DM needs to place things inside and beyond walls.
+    expect((await moved)?.token.x).toBe(25);
+  });
+
+  it('opens the way once the door is opened', async () => {
+    dmSocket.emit('token:commit', { tokenId: aliceTokenId, x: 5, y: 5 });
+    await new Promise((r) => setTimeout(r, 300));
+
+    await waitForScene(
+      aliceSocket,
+      () => aliceSocket.emit('door:toggle', { wallId: doorId }),
+      (payload) => payload.doors.some((d) => d.doorState === 1),
+    );
+
+    const moved = next<{ token: WireToken }>(dmSocket, 'token:updated');
+    // Straight through the open doorway at y=5.
+    aliceSocket.emit('token:commit', { tokenId: aliceTokenId, x: 15, y: 5 });
+
+    expect((await moved)?.token.x).toBe(15);
+  });
+});

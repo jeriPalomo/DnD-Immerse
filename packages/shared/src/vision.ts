@@ -17,6 +17,8 @@ export interface VisionWall {
   y2: number;
   /** 0 none, 1 blocks, 2 terrain (blocks only from beyond one square). */
   blocksSight: number;
+  /** 0 none, 1 blocks. */
+  blocksMovement: number;
   /** 0 wall, 1 door, 2 secret door. */
   door: number;
   /** 0 closed, 1 open, 2 locked. */
@@ -166,7 +168,19 @@ export function combinedVisibility(
 
 /* ------------------------------------------------------------- movement */
 
-/** Whether a straight move from a to b crosses a movement-blocking wall. */
+/** An open door lets you through; a closed or locked one does not. */
+export function blocksMovement(wall: VisionWall): boolean {
+  if (!wall.blocksMovement) return false;
+  if (wall.door > 0 && wall.doorState === 1) return false;
+  return true;
+}
+
+/**
+ * Whether a straight move from a to b crosses a movement-blocking wall.
+ *
+ * Tested against `blocksMovement`, not `blocksSight`: a railing blocks movement
+ * without blocking sight, and a curtain does the reverse.
+ */
 export function movementBlocked(a: Point, b: Point, walls: VisionWall[]): boolean {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -174,9 +188,7 @@ export function movementBlocked(a: Point, b: Point, walls: VisionWall[]): boolea
   if (length < EPSILON) return false;
 
   for (const wall of walls) {
-    if (!wall.blocksSight && wall.door === 0) continue;
-    // An open door does not block movement either.
-    if (wall.door > 0 && wall.doorState === 1) continue;
+    if (!blocksMovement(wall)) continue;
 
     const t = rayHitsSegment(
       a,
@@ -189,4 +201,37 @@ export function movementBlocked(a: Point, b: Point, walls: VisionWall[]): boolea
   }
 
   return false;
+}
+
+/* ------------------------------------------------------------ lighting */
+
+export interface SightConfig {
+  /** Feet the token can see in light. 0 falls back to the caller's default. */
+  visionRange: number;
+  /** Feet the token can see in darkness. */
+  darkvisionRange: number;
+  /** Feet the token's own light illuminates. */
+  lightBright: number;
+}
+
+/**
+ * How far a token can actually see, in feet.
+ *
+ * Under global illumination (daylight) that is simply its vision range. In an
+ * unlit scene it is limited to what the token can supply for itself: darkvision
+ * or the light it carries. A creature with neither still sees its own square,
+ * so a player is never left with a completely black screen and no explanation.
+ */
+export function sightRadiusFeet(
+  token: SightConfig,
+  globalIllumination: boolean,
+  defaultVisionFeet: number,
+  feetPerSquare = 5,
+): number {
+  const lit = token.visionRange > 0 ? token.visionRange : defaultVisionFeet;
+  if (globalIllumination) return lit;
+
+  const unlit = Math.max(token.darkvisionRange, token.lightBright);
+  // One square, so an unlit token is not blind - it just cannot see far.
+  return unlit > 0 ? Math.min(unlit, lit) : feetPerSquare;
 }

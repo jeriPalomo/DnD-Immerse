@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { blocksSight, computeVisibility, movementBlocked, type VisionWall } from './vision.js';
+import {
+  blocksMovement,
+  blocksSight,
+  computeVisibility,
+  movementBlocked,
+  sightRadiusFeet,
+  type VisionWall,
+} from './vision.js';
 import { pointInPolygon } from './grid.js';
 import {
   createFog,
@@ -12,7 +19,7 @@ import {
 } from './fog.js';
 
 function wall(x1: number, y1: number, x2: number, y2: number, over: Partial<VisionWall> = {}): VisionWall {
-  return { x1, y1, x2, y2, blocksSight: 1, door: 0, doorState: 0, ...over };
+  return { x1, y1, x2, y2, blocksSight: 1, blocksMovement: 1, door: 0, doorState: 0, ...over };
 }
 
 /** A closed 10x10 room with a doorway on the east side at y 4..6. */
@@ -182,5 +189,58 @@ describe('fog bitmap', () => {
   it('stays small: a 100x100 scene fits in about 1.25KB', () => {
     const fog = createFog(100, 100);
     expect(fog.bits.length).toBe(1250);
+  });
+});
+
+describe('sight and movement are separate properties', () => {
+  it('lets a railing block movement without blocking sight', () => {
+    const railing = wall(0, 0, 5, 0, { blocksSight: 0, blocksMovement: 1 });
+
+    expect(blocksSight(railing)).toBe(false);
+    expect(blocksMovement(railing)).toBe(true);
+    // You can see over it but not walk through it.
+    expect(movementBlocked({ x: 2, y: -2 }, { x: 2, y: 2 }, [railing])).toBe(true);
+  });
+
+  it('lets a curtain block sight without blocking movement', () => {
+    const curtain = wall(0, 0, 5, 0, { blocksSight: 1, blocksMovement: 0 });
+
+    expect(blocksSight(curtain)).toBe(true);
+    expect(blocksMovement(curtain)).toBe(false);
+    expect(movementBlocked({ x: 2, y: -2 }, { x: 2, y: 2 }, [curtain])).toBe(false);
+  });
+
+  it('lets an open door through in both senses', () => {
+    const door = wall(0, 0, 5, 0, { door: 1, doorState: 1 });
+    expect(blocksSight(door)).toBe(false);
+    expect(blocksMovement(door)).toBe(false);
+  });
+});
+
+describe('sightRadiusFeet', () => {
+  const torchbearer = { visionRange: 0, darkvisionRange: 0, lightBright: 20 };
+  const dwarf = { visionRange: 0, darkvisionRange: 60, lightBright: 0 };
+  const blindfolded = { visionRange: 0, darkvisionRange: 0, lightBright: 0 };
+
+  it('uses the full vision range in daylight', () => {
+    expect(sightRadiusFeet(dwarf, true, 60)).toBe(60);
+    expect(sightRadiusFeet(torchbearer, true, 60)).toBe(60);
+    expect(sightRadiusFeet({ ...dwarf, visionRange: 120 }, true, 60)).toBe(120);
+  });
+
+  it('falls back to darkvision when the lights go out', () => {
+    // The dwarf keeps 60 ft; the torchbearer sees only as far as the torch.
+    expect(sightRadiusFeet(dwarf, false, 60)).toBe(60);
+    expect(sightRadiusFeet(torchbearer, false, 60)).toBe(20);
+  });
+
+  it('leaves a creature with neither able to see its own square', () => {
+    // Not blind - a fully black screen with no explanation is a bug report.
+    expect(sightRadiusFeet(blindfolded, false, 60, 5)).toBe(5);
+  });
+
+  it('never lets darkness exceed the lit range', () => {
+    const owl = { visionRange: 30, darkvisionRange: 120, lightBright: 0 };
+    expect(sightRadiusFeet(owl, false, 60)).toBe(30);
   });
 });

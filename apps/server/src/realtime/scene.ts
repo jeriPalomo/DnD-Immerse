@@ -2,7 +2,9 @@ import { and, asc, eq } from 'drizzle-orm';
 import {
   campaignDmRoom,
   campaignRoom,
+  movementBlocked,
   snapTokenPosition,
+  tokenCenter,
   tokenCommitSchema,
   tokenCreateSchema,
   tokenMoveSchema,
@@ -63,6 +65,10 @@ function toWireToken(token: Token): WireToken {
     actorId: token.actorId,
     actorLinked: token.actorLinked,
     disposition: token.disposition,
+    visionRange: token.visionRange,
+    darkvisionRange: token.darkvisionRange,
+    lightBright: token.lightBright,
+    lightDim: token.lightDim,
     hp: token.hp,
     maxHp: token.maxHp,
     ac: token.ac,
@@ -336,6 +342,21 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     const h = input.h ?? token.h;
     // Snapping is applied server-side so every client agrees on the position.
     const snapped = snapTokenPosition({ x: input.x, y: input.y }, w, h);
+
+    // Walls stop players, not the DM - who needs to place things anywhere,
+    // including inside walls.
+    if (!ctx.isDM) {
+      const sceneWalls = await wallsOf(token.sceneId);
+      const from = tokenCenter(token);
+      const to = tokenCenter({ x: snapped.x, y: snapped.y, w, h });
+
+      if (movementBlocked(from, to, sceneWalls)) {
+        socket.emit('error', { message: 'A wall blocks the way' });
+        // Send the authoritative position back so the client snaps home.
+        await broadcastToken(io, ctx.campaignId, token);
+        return;
+      }
+    }
 
     await db
       .update(tokens)

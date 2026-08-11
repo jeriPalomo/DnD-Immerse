@@ -73,6 +73,11 @@ it. Wall geometry is never in a player payload — doors are, because a door is 
 thing you can see and open. This is a deliberate divergence from Foundry, which
 computes vision in the browser and therefore ships every wall to every client.
 
+**Walls block sight and movement independently.** `blocksSight` and
+`blocksMovement` are separate flags, so a railing can be seen over but not
+crossed and a curtain the reverse. Collision is enforced on `token:commit` for
+players; the DM can place anything anywhere.
+
 **Fog is a bitmap, not accumulated polygons.** One bit per grid square per
 player, base64 in `fog_exploration`. Unioning polygons grows without bound; a
 100×100 scene is 1.25 KB and merges with a bitwise OR.
