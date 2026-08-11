@@ -95,9 +95,25 @@ function sightSources(tokens: Token[], userId: string, scene: Scene) {
       point: tokenCenter(token),
       // Vision is configured in feet; the geometry works in grid units.
       radius:
-        sightRadiusFeet(token, scene.globalIllumination, DEFAULT_VISION_FEET, scene.feetPerSquare) /
-        scene.feetPerSquare,
+        sightRadiusFeet(
+          token,
+          scene.globalIllumination,
+          DEFAULT_VISION_FEET,
+          scene.feetPerSquare,
+          scene.darkness,
+        ) / scene.feetPerSquare,
     }));
+}
+
+/**
+ * Sight polygons only, with no database access at all.
+ *
+ * Used on every drag frame, where persisting fog would mean thousands of
+ * writes per combat. The bitmap catches up on drop, via computePlayerView.
+ */
+export function computeLivePolygons(scene: Scene, walls: Wall[], tokens: Token[], userId: string): Polygon[] {
+  if (!scene.visionEnabled) return [];
+  return combinedVisibility(sightSources(tokens, userId, scene), walls);
 }
 
 export interface PlayerView {

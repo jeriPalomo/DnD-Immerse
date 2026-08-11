@@ -58,7 +58,6 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
       visionEnabled: false,
       globalIllumination: true,
       darkness: 0,
-      revealedPolygons: [],
       sortOrder: 0,
       createdAt: Date.now(),
     };

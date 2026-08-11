@@ -119,6 +119,16 @@ export const useTable = create<TableState>((set, get) => ({
       // `walls` is absent for players, so it collapses to an empty array here.
       set({ scene, tokens, vision: vision ?? null, doors: doors ?? [], walls: walls ?? [] }),
     );
+    // Live sight during a drag: polygons and tokens only. Explored cells are
+    // carried over from the last full scene:state, since fog exploration is
+    // persisted on drop rather than on every frame.
+    socket.on('vision:update', ({ polygons, tokens }) => {
+      const current = get().vision;
+      set({
+        tokens,
+        vision: current ? { ...current, polygons } : null,
+      });
+    });
     socket.on('door:updated', ({ door }) =>
       set({ doors: get().doors.map((d) => (d.id === door.id ? door : d)) }),
     );

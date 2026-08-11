@@ -20,13 +20,48 @@ import type {
 import { wallCreateSchema, wallUpdateSchema } from '@dnd/shared';
 import { db } from '../db/index.js';
 import { actors, campaigns, scenes, tokens, walls as wallsTable } from '../db/schema.js';
-import { computePlayerView, toWireDoor, toWireWall, visibleTokens, wallsOf } from './vision.js';
+import {
+  computeLivePolygons,
+  computePlayerView,
+  toWireDoor,
+  toWireWall,
+  visibleTokens,
+  wallsOf,
+} from './vision.js';
 import { getMembership } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
 import type { IOServer, SocketData } from './index.js';
-import type { Scene, Token } from '../db/schema.js';
+import type { Scene, Token, Wall } from '../db/schema.js';
 
 type SceneSocket = Socket<ClientToServerEvents, ServerToClientEvents, object, SocketData>;
+
+/**
+ * Walls and tokens for the scene currently being dragged over.
+ *
+ * A drag emits ~30 times a second; re-reading the wall table on each frame
+ * would put the database in the hot path of a mouse move. The cache is
+ * invalidated whenever walls change or a token is committed.
+ */
+const dragCache = new Map<string, { walls: Wall[]; tokens: Token[]; at: number }>();
+const DRAG_CACHE_TTL_MS = 5000;
+
+export function invalidateDragCache(sceneId: string): void {
+  dragCache.delete(sceneId);
+}
+
+async function dragState(sceneId: string): Promise<{ walls: Wall[]; tokens: Token[] }> {
+  const cached = dragCache.get(sceneId);
+  if (cached && Date.now() - cached.at < DRAG_CACHE_TTL_MS) return cached;
+
+  const [sceneWalls, sceneTokens] = await Promise.all([
+    wallsOf(sceneId),
+    db.select().from(tokens).where(eq(tokens.sceneId, sceneId)),
+  ]);
+
+  const entry = { walls: sceneWalls, tokens: sceneTokens, at: Date.now() };
+  dragCache.set(sceneId, entry);
+  return entry;
+}
 
 /* ----------------------------------------------------------- projection */
 
@@ -323,6 +358,34 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       : campaignRoom(ctx.campaignId);
 
     socket.broadcast.to(target).emit('token:moved', { ...input, byUserId: user.id });
+
+    const scene = await sceneOf(token.sceneId);
+    if (!scene?.visionEnabled) return;
+
+    // Recompute sight against the dragged position so fog moves with the
+    // token rather than snapping when the mouse is released.
+    const { walls: cachedWalls, tokens: cachedTokens } = await dragState(token.sceneId);
+    const live = cachedTokens.map((t) =>
+      t.id === input.tokenId ? { ...t, x: input.x, y: input.y } : t,
+    );
+
+    for (const s of await io.in(campaignRoom(ctx.campaignId)).fetchSockets()) {
+      if (s.data.rooms.get(ctx.campaignId) === 'dm') continue;
+
+      const viewerId = s.data.user.id;
+      const polygons = computeLivePolygons(scene, cachedWalls, live, viewerId);
+      const permitted = filterTokensFor(live, false, viewerId);
+      const sighted = visibleTokens(
+        live.filter((t) => permitted.some((p) => p.id === t.id)),
+        polygons,
+        viewerId,
+      );
+
+      s.emit('vision:update', {
+        polygons,
+        tokens: filterTokensFor(sighted, false, viewerId),
+      });
+    }
   });
 
   socket.on('token:commit', async (payload) => {
@@ -363,6 +426,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       .set({ x: snapped.x, y: snapped.y, w, h, rotation: input.rotation ?? token.rotation })
       .where(eq(tokens.id, input.tokenId));
 
+    invalidateDragCache(token.sceneId);
     const updated = await tokenOf(input.tokenId);
     if (updated) await broadcastToken(io, ctx.campaignId, updated);
   });
@@ -439,6 +503,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     };
 
     await db.insert(tokens).values(token);
+    invalidateDragCache(input.sceneId);
 
     for (const s of await io.in(campaignRoom(ctx.campaignId)).fetchSockets()) {
       const visible = filterTokensFor([token as Token], s.data.rooms.get(ctx.campaignId) === 'dm', s.data.user.id);
@@ -491,7 +556,9 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       return;
     }
 
+    const doomed = await tokenOf(tokenId);
     await db.delete(tokens).where(eq(tokens.id, tokenId));
+    if (doomed) invalidateDragCache(doomed.sceneId);
     io.to(campaignRoom(ctx.campaignId)).emit('token:deleted', { tokenId });
   });
 
@@ -510,6 +577,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
     const wall = { id: newId(), ...input };
     await db.insert(wallsTable).values(wall);
+    invalidateDragCache(input.sceneId ?? '');
 
     // Walls go to the DM room only. Players never receive the geometry - if it
     // is a door they get it via the door list, which carries no other walls.
@@ -527,6 +595,9 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     const { wallId, ...fields } = wallUpdateSchema.parse(payload);
     await db.update(wallsTable).set(fields).where(eq(wallsTable.id, wallId));
 
+    const changed = await db.select().from(wallsTable).where(eq(wallsTable.id, wallId)).limit(1);
+    if (changed[0]) invalidateDragCache(changed[0].sceneId);
+
     const rows = await db.select().from(wallsTable).where(eq(wallsTable.id, wallId)).limit(1);
     if (rows[0]) io.to(campaignDmRoom(ctx.campaignId)).emit('wall:updated', { wall: toWireWall(rows[0]) });
 
@@ -540,7 +611,9 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       return;
     }
 
+    const removed = await db.select().from(wallsTable).where(eq(wallsTable.id, wallId)).limit(1);
     await db.delete(wallsTable).where(eq(wallsTable.id, wallId));
+    if (removed[0]) invalidateDragCache(removed[0].sceneId);
     io.to(campaignDmRoom(ctx.campaignId)).emit('wall:deleted', { wallId });
     await broadcastSceneState(io, ctx.campaignId);
   });
@@ -564,6 +637,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
     const doorState = wall.doorState === 1 ? 0 : 1;
     await db.update(wallsTable).set({ doorState }).where(eq(wallsTable.id, wallId));
+    invalidateDragCache(wall.sceneId);
 
     io.to(campaignRoom(ctx.campaignId)).emit('door:updated', {
       door: toWireDoor({ ...wall, doorState }),

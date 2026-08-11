@@ -227,11 +227,21 @@ export function sightRadiusFeet(
   globalIllumination: boolean,
   defaultVisionFeet: number,
   feetPerSquare = 5,
+  /** 0 full daylight, 1 pitch dark. Dims sight between the two extremes. */
+  darkness = 0,
 ): number {
   const lit = token.visionRange > 0 ? token.visionRange : defaultVisionFeet;
-  if (globalIllumination) return lit;
-
   const unlit = Math.max(token.darkvisionRange, token.lightBright);
+
+  if (globalIllumination) {
+    // Gloom shades continuously from full sight down to what the token can
+    // supply for itself, so a DM can dim a scene without going pitch black.
+    const level = Math.max(0, Math.min(1, darkness));
+    if (level === 0) return lit;
+    const floor = unlit > 0 ? Math.min(unlit, lit) : feetPerSquare;
+    return Math.max(floor, lit - (lit - floor) * level);
+  }
+
   // One square, so an unlit token is not blind - it just cannot see far.
   return unlit > 0 ? Math.min(unlit, lit) : feetPerSquare;
 }

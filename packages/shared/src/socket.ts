@@ -279,6 +279,13 @@ export interface ServerToClientEvents {
 
   'ping:map': (payload: PingPayload & { byUserId: string; color: string }) => void;
 
+  /**
+   * Live sight during a drag. Carries polygons and the tokens now in view, but
+   * no explored cells - fog exploration is persisted once, on drop, rather than
+   * written thirty times a second.
+   */
+  'vision:update': (payload: { polygons: { x: number; y: number }[][]; tokens: WireToken[] }) => void;
+
   'wall:created': (payload: { wall: WireWall }) => void;
   'wall:updated': (payload: { wall: WireWall }) => void;
   'wall:deleted': (payload: { wallId: string }) => void;
