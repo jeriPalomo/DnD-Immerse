@@ -33,6 +33,7 @@ interface SheetState {
   items: Item[];
   campaigns: { id: string; name: string }[];
   access: OwnershipLevel;
+  grants: { userId: string; level: number }[];
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -63,6 +64,7 @@ export const useSheet = create<SheetState>((set, get) => ({
   items: [],
   campaigns: [],
   access: 0,
+  grants: [],
   loading: false,
   saving: false,
   error: null,
@@ -75,6 +77,7 @@ export const useSheet = create<SheetState>((set, get) => ({
         items: Item[];
         campaigns: { id: string; name: string }[];
         access: OwnershipLevel;
+        grants: { userId: string; level: number }[];
       }>(`/api/actors/${id}`);
       set({ ...res, loading: false });
     } catch (err) {
@@ -86,7 +89,7 @@ export const useSheet = create<SheetState>((set, get) => ({
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = null;
     pending = {};
-    set({ actor: null, items: [], campaigns: [], access: 0, error: null });
+    set({ actor: null, items: [], campaigns: [], access: 0, grants: [], error: null });
   },
 
   patch(fields) {

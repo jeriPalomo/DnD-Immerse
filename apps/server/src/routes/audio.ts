@@ -2,10 +2,10 @@ import { asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
-import { playlistTracks, playlists } from '../db/schema.js';
+import { ambientSounds, playlistTracks, playlists } from '../db/schema.js';
 import { HttpError, assertUser, requireAuth, requireDM } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
-import { storeAudio } from '../lib/uploads.js';
+import { deleteUpload, storeAudio } from '../lib/uploads.js';
 
 /** Playlists are DM-authored; players only ever hear the result. */
 export async function audioRoutes(app: FastifyInstance): Promise<void> {
@@ -140,6 +140,16 @@ export async function audioRoutes(app: FastifyInstance): Promise<void> {
     await requireDM(playlist.campaignId, user.id);
 
     await db.delete(playlistTracks).where(eq(playlistTracks.id, id));
+
+    // An ambient emitter may still be playing this file - placing a sound
+    // copies the URL - so only remove it when nothing points at it.
+    const stillUsed = await db
+      .select({ id: ambientSounds.id })
+      .from(ambientSounds)
+      .where(eq(ambientSounds.fileUrl, rows[0].fileUrl))
+      .limit(1);
+
+    if (stillUsed.length === 0) await deleteUpload(rows[0].fileUrl);
     return { ok: true };
   });
 

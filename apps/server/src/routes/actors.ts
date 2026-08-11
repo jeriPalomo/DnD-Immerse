@@ -7,7 +7,7 @@ import { actorCampaigns, actors, campaignMembers, campaigns, items, ownership } 
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { getBulkActorAccess, requireActorRead, requireActorWrite } from '../lib/access.js';
 import { newId } from '../lib/id.js';
-import { storeImage } from '../lib/uploads.js';
+import { deleteUpload, storeImage } from '../lib/uploads.js';
 import type { ActorInput } from '@dnd/shared';
 
 /** Maps a validated ActorInput onto the column set the table expects. */
@@ -127,7 +127,14 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
       .innerJoin(campaigns, eq(actorCampaigns.campaignId, campaigns.id))
       .where(eq(actorCampaigns.actorId, id));
 
-    return { actor, items: ownedItems, campaigns: assignments, access: level };
+    // Who this sheet is shared with, so the sharing control can show the
+    // truth rather than assume nothing has been granted.
+    const grants = await db
+      .select({ userId: ownership.userId, level: ownership.level })
+      .from(ownership)
+      .where(and(eq(ownership.documentType, 'actor'), eq(ownership.documentId, id)));
+
+    return { actor, items: ownedItems, campaigns: assignments, access: level, grants };
   });
 
   app.post('/api/actors', async (request) => {
@@ -180,6 +187,7 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
     }
 
     await db.delete(actors).where(eq(actors.id, id));
+    await deleteUpload(actor.portraitUrl);
     return { ok: true };
   });
 
@@ -192,7 +200,11 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
     if (!file) throw new HttpError(400, 'No file uploaded');
 
     const stored = await storeImage(await file.toBuffer(), 'avatars', { maxDimension: 800 });
+
+    const previous = await db.select({ url: actors.portraitUrl }).from(actors).where(eq(actors.id, id)).limit(1);
     await db.update(actors).set({ portraitUrl: stored.url }).where(eq(actors.id, id));
+    // Replacing a portrait should not leave the old one on disk forever.
+    await deleteUpload(previous[0]?.url ?? null);
 
     return { portraitUrl: stored.url };
   });

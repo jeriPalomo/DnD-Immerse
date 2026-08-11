@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Alert, Badge, Button, Card, Spinner } from '../components/ui.js';
+import { useAuth } from '../store/auth.js';
 import { AvatarUpload } from '../components/AvatarUpload.js';
 import { api } from '../lib/api.js';
 import type { Campaign, Member } from '../store/campaigns.js';
 
 export default function CampaignDetail() {
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +35,15 @@ export default function CampaignDetail() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function removeMember(userId: string) {
+    const leaving = userId === user?.id;
+    if (!confirm(leaving ? 'Leave this campaign?' : 'Remove this player from the campaign?')) return;
+
+    await api.delete(`/api/campaigns/${id}/members/${userId}`);
+    if (leaving) navigate('/campaigns');
+    else setMembers((current) => current.filter((m) => m.id !== userId));
+  }
 
   if (loading) return <Spinner />;
   if (error) {
@@ -115,6 +127,17 @@ export default function CampaignDetail() {
               <Badge tone={member.role === 'dm' ? 'dm' : 'player'}>
                 {member.role === 'dm' ? 'DM' : 'Player'}
               </Badge>
+
+              {/* The DM removes anyone; a player may only remove themselves. */}
+              {member.role !== 'dm' && (isDM || member.id === user?.id) && (
+                <button
+                  onClick={() => void removeMember(member.id)}
+                  className="text-xs text-ink-600 hover:text-red-400"
+                  title={member.id === user?.id ? 'Leave this campaign' : `Remove ${member.displayName}`}
+                >
+                  {member.id === user?.id ? 'Leave' : 'Remove'}
+                </button>
+              )}
             </li>
           ))}
         </ul>

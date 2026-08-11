@@ -338,7 +338,7 @@ describe('invariant: unshared journal entries never reach a player', () => {
   });
 
   const read = (cookie: string) =>
-    api<{ entries: { id: string; title: string; pages: { bodyMarkdown: string }[] }[] }>(
+    api<{ entries: { id: string; title: string; shared: boolean; pages: { bodyMarkdown: string }[] }[] }>(
       'GET', `/api/campaigns/${campaignId}/journal`, undefined, cookie,
     );
 
@@ -369,6 +369,18 @@ describe('invariant: unshared journal entries never reach a player', () => {
 
     const forPlayer = await read(alice.cookie);
     expect(forPlayer.entries.some((e) => e.id === entryId)).toBe(false);
+  });
+
+  it('reports share state to the DM, so the button cannot lie', async () => {
+    // The UI used to keep this in local state, which read "not shared" after
+    // any reload - and clicking then un-shared while claiming the opposite.
+    await api('POST', `/api/journal/${entryId}/share`, { shared: true }, dm.cookie);
+    const shown = await read(dm.cookie);
+    expect(shown.entries.find((e) => e.id === entryId)?.shared).toBe(true);
+
+    await api('POST', `/api/journal/${entryId}/share`, { shared: false }, dm.cookie);
+    const hidden = await read(dm.cookie);
+    expect(hidden.entries.find((e) => e.id === entryId)?.shared).toBe(false);
   });
 
   it('refuses to let a player write to the journal', async () => {
@@ -420,5 +432,57 @@ describe('map pins', () => {
     await expect(
       api('POST', `/api/scenes/${sceneId}/notes`, { label: 'X', x: 0, y: 0 }, alice.cookie),
     ).rejects.toThrow(/only the dm/i);
+  });
+});
+
+describe('uploads are cleaned up', () => {
+  it('removes a deleted image handout from disk', async () => {
+    const entry = await api<{ entry: { id: string } }>(
+      'POST', `/api/campaigns/${campaignId}/journal`, { title: 'Handout' }, dm.cookie,
+    );
+
+    // A 1x1 PNG is enough to exercise the sharp pipeline.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    const form = new FormData();
+    form.append('file', new Blob([png], { type: 'image/png' }), 'map.png');
+
+    const uploaded = await fetch(`${baseUrl}/api/journal/${entry.entry.id}/pages/image`, {
+      method: 'POST', headers: { cookie: dm.cookie }, body: form,
+    }).then((r) => r.json() as Promise<{ page: { id: string; fileUrl: string } }>);
+
+    const onDisk = path.join(DATA_DIR, 'uploads', ...uploaded.page.fileUrl.split('/').slice(2));
+    expect(fs.existsSync(onDisk)).toBe(true);
+
+    await api('DELETE', `/api/journal/pages/${uploaded.page.id}`, undefined, dm.cookie);
+    // Otherwise every replaced handout stays on disk for the life of the server.
+    expect(fs.existsSync(onDisk)).toBe(false);
+  });
+
+  it('keeps a track file that an ambient emitter still plays', async () => {
+    const track = await uploadTrack(playlistId, dm.cookie);
+    const onDisk = path.join(DATA_DIR, 'uploads', ...track.fileUrl.split('/').slice(2));
+
+    dmSocket.emit('ambient:create', {
+      sceneId, name: 'Keeps playing', fileUrl: track.fileUrl, x: 1, y: 1,
+      radius: 5, volume: 1, easing: true, blockedByWalls: false,
+    });
+    await new Promise((r) => setTimeout(r, 500));
+
+    await api('DELETE', `/api/tracks/${track.id}`, undefined, dm.cookie);
+
+    // Placing a sound copies the URL, so deleting the track must not break it.
+    expect(fs.existsSync(onDisk)).toBe(true);
+  });
+
+  it('removes a track file nothing references', async () => {
+    const track = await uploadTrack(playlistId, dm.cookie);
+    const onDisk = path.join(DATA_DIR, 'uploads', ...track.fileUrl.split('/').slice(2));
+    expect(fs.existsSync(onDisk)).toBe(true);
+
+    await api('DELETE', `/api/tracks/${track.id}`, undefined, dm.cookie);
+    expect(fs.existsSync(onDisk)).toBe(false);
   });
 });

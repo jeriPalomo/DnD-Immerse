@@ -12,7 +12,7 @@ import {
 } from '../auth/session.js';
 import { HttpError, assertUser, requireAuth } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
-import { storeImage } from '../lib/uploads.js';
+import { deleteUpload, storeImage } from '../lib/uploads.js';
 import type { User } from '../db/schema.js';
 
 function publicUser(user: User) {
@@ -102,6 +102,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const stored = await storeImage(await file.toBuffer(), 'avatars', { maxDimension: 512 });
     await db.update(users).set({ avatarUrl: stored.url }).where(eq(users.id, user.id));
+    await deleteUpload(user.avatarUrl);
 
     return { avatarUrl: stored.url };
   });

@@ -12,7 +12,7 @@ import {
 } from '../db/schema.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
-import { storeImage } from '../lib/uploads.js';
+import { deleteUpload, storeImage } from '../lib/uploads.js';
 
 /**
  * The campaign journal and the map pins that open its pages.
@@ -40,20 +40,27 @@ export async function journalRoutes(app: FastifyInstance): Promise<void> {
 
     const pages = await db.select().from(journalPages).orderBy(asc(journalPages.sortOrder));
 
+    // Which entries have been shown to anyone. The DM's UI needs this or the
+    // share button has to guess, and guesses wrong after a reload.
+    const allGrants = await db
+      .select({ documentId: ownership.documentId, userId: ownership.userId })
+      .from(ownership)
+      .where(eq(ownership.documentType, 'journal'));
+
     let visible = entries;
     if (!membership.isDM) {
-      const grants = await db
-        .select({ documentId: ownership.documentId })
-        .from(ownership)
-        .where(and(eq(ownership.documentType, 'journal'), eq(ownership.userId, user.id)));
-
-      const shared = new Set(grants.map((grant) => grant.documentId));
-      visible = entries.filter((entry) => shared.has(entry.id));
+      const mine = new Set(
+        allGrants.filter((grant) => grant.userId === user.id).map((grant) => grant.documentId),
+      );
+      visible = entries.filter((entry) => mine.has(entry.id));
     }
+
+    const sharedIds = new Set(allGrants.map((grant) => grant.documentId));
 
     return {
       entries: visible.map((entry) => ({
         ...entry,
+        shared: sharedIds.has(entry.id),
         pages: pages.filter((page) => page.entryId === entry.id),
       })),
     };
@@ -179,6 +186,8 @@ export async function journalRoutes(app: FastifyInstance): Promise<void> {
     await requireDM(entry[0].campaignId, user.id);
 
     await db.delete(journalPages).where(eq(journalPages.id, id));
+    // An image page owns its file outright, so it goes with the page.
+    await deleteUpload(rows[0].fileUrl);
     return { ok: true };
   });
 
@@ -190,7 +199,10 @@ export async function journalRoutes(app: FastifyInstance): Promise<void> {
     if (!rows[0]) throw new HttpError(404, 'Entry not found');
     await requireDM(rows[0].campaignId, user.id);
 
+    const owned = await db.select().from(journalPages).where(eq(journalPages.entryId, id));
     await db.delete(journalEntries).where(eq(journalEntries.id, id));
+    for (const page of owned) await deleteUpload(page.fileUrl);
+
     return { ok: true };
   });
 

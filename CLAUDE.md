@@ -91,6 +91,10 @@ browser firing `ended` would skip several tracks at once.
 **AoE outlines and target lists come from the same geometry.** `templateCovers`
 decides both what is drawn and who is caught, so they cannot disagree.
 
+**Uploaded files are deleted with the record that owns them**, except where
+another row still points at the same file — placing an ambient sound copies a
+track's URL, so deleting the track must not break the emitter.
+
 **No dead code.** Two audits found helpers that were written, tested, and never
 called — `movementBlocked` let players walk through walls, `deriveActor` made
 conditions decorative. Before adding a feature, check that the last one is

@@ -13,6 +13,8 @@ interface Page {
 interface Entry {
   id: string;
   title: string;
+  /** Reported by the server; local state guessed wrong after a reload. */
+  shared: boolean;
   pages: Page[];
 }
 
@@ -26,7 +28,6 @@ interface Entry {
 export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: boolean }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [shared, setShared] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -67,10 +68,13 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
     }, 600);
   }
 
-  async function toggleShare(entryId: string) {
-    const next = !shared[entryId];
-    setShared({ ...shared, [entryId]: next });
-    await api.post(`/api/journal/${entryId}/share`, { shared: next });
+  async function toggleShare(entry: Entry) {
+    // Optimistic, then reconciled from the server on reload.
+    setEntries((current) =>
+      current.map((e) => (e.id === entry.id ? { ...e, shared: !e.shared } : e)),
+    );
+    await api.post(`/api/journal/${entry.id}/share`, { shared: !entry.shared });
+    await load();
   }
 
   async function addImage(entryId: string, file: File) {
@@ -124,15 +128,15 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
                   {isDM && (
                     <>
                       <button
-                        onClick={() => void toggleShare(entry.id)}
+                        onClick={() => void toggleShare(entry)}
                         className={`shrink-0 rounded border px-1.5 text-[10px] transition-colors ${
-                          shared[entry.id]
+                          entry.shared
                             ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
                             : 'border-ink-700 text-ink-500 hover:text-ink-300'
                         }`}
-                        title="Show this entry to the party"
+                        title={entry.shared ? 'Take this back from the party' : 'Show this entry to the party'}
                       >
-                        {shared[entry.id] ? 'shown' : 'show'}
+                        {entry.shared ? 'shown' : 'show'}
                       </button>
                       <button
                         onClick={() => void remove(entry.id)}

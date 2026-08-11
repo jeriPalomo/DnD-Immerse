@@ -19,6 +19,7 @@ import {
 } from '../components/sheet/Abilities.js';
 import { AttackList, CombatStats, SpellcastingHeader } from '../components/sheet/Combat.js';
 import { FeaturePanel, InventoryPanel, SpellPanel } from '../components/sheet/ItemPanels.js';
+import { ShareSheet } from '../components/sheet/ShareSheet.js';
 import { useSheet } from '../store/sheet.js';
 import { useTable } from '../store/table.js';
 import { api } from '../lib/api.js';
@@ -191,6 +192,18 @@ export default function CharacterSheet() {
               onRemove={(itemId) => void sheet.removeItem(itemId)}
             />
           </Section>
+
+          {editable && (
+            <Section title="Who can see this">
+              <ShareSheet
+                actorId={actor.id}
+                ownerUserId={actor.ownerUserId}
+                campaignIds={sheet.campaigns.map((c) => c.id)}
+                grants={sheet.grants}
+                onChanged={() => void sheet.load(actor.id)}
+              />
+            </Section>
+          )}
 
           <Section title="Notes">
             <textarea
