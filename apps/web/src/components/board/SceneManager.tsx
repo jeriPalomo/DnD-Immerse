@@ -20,12 +20,12 @@ interface PartyActor {
  * drop tokens from the campaign's actors.
  */
 export function SceneManager({ campaignId }: { campaignId: string }) {
-  const { scene, activateScene, createToken } = useTable();
+  const { scene, activateScene, createToken, wallTool, setWallTool, walls } = useTable();
   const [scenes, setScenes] = useState<SceneRow[]>([]);
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
   const [actors, setActors] = useState<PartyActor[]>([]);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<'scenes' | 'tokens' | 'grid'>('scenes');
+  const [tab, setTab] = useState<'scenes' | 'tokens' | 'grid' | 'vision'>('scenes');
 
   const load = useCallback(async () => {
     const [sceneRes, actorRes] = await Promise.all([
@@ -74,7 +74,7 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
   return (
     <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
       <div className="mb-3 flex gap-1">
-        {(['scenes', 'tokens', 'grid'] as const).map((key) => (
+        {(['scenes', 'tokens', 'grid', 'vision'] as const).map((key) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -141,6 +141,66 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
 
       {tab === 'grid' && scene && (
         <GridCalibration scene={scene} onChange={(fields) => void patchScene(scene.id, fields)} />
+      )}
+
+      {tab === 'vision' && scene && (
+        <div className="space-y-3">
+          <label className="flex items-center gap-2 text-xs text-ink-300">
+            <input
+              type="checkbox"
+              checked={scene.visionEnabled}
+              onChange={(e) => void patchScene(scene.id, { visionEnabled: e.target.checked })}
+              className="accent-ember-500"
+            />
+            Dynamic vision
+          </label>
+          <p className="text-[11px] text-ink-500">
+            With vision on, each player sees only what their tokens can see. Walls
+            are computed on the server, so players never receive the geometry.
+          </p>
+
+          <div>
+            <div className="mb-1.5 flex items-center justify-between text-[11px] text-ink-400">
+              <span>Wall tool</span>
+              <span className="text-ink-600">{walls.length} walls</span>
+            </div>
+            <div className="flex gap-1.5">
+              {(
+                [
+                  ['off', 'Off'],
+                  ['wall', 'Draw wall'],
+                  ['door', 'Draw door'],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => setWallTool(value)}
+                  className={`flex-1 rounded border px-2 py-1 text-xs transition-colors ${
+                    wallTool === value
+                      ? 'border-arcane-400 bg-arcane-500/20 text-arcane-400'
+                      : 'border-ink-700 text-ink-400 hover:text-ink-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[10px] text-ink-600">
+              Click to place points; each click continues the run. Double-click to
+              finish a run, alt-click a wall to delete it.
+            </p>
+          </div>
+
+          <label className="flex items-center gap-2 text-xs text-ink-300">
+            <input
+              type="checkbox"
+              checked={scene.globalIllumination}
+              onChange={(e) => void patchScene(scene.id, { globalIllumination: e.target.checked })}
+              className="accent-ember-500"
+            />
+            Daylight (ignore token light radius)
+          </label>
+        </div>
       )}
 
       {tab === 'tokens' && (

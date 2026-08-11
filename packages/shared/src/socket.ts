@@ -122,6 +122,45 @@ export interface WireAudioState {
   volume: number;
 }
 
+/** Sent only to the DM. Wall geometry is a map of the dungeon. */
+export interface WireWall {
+  id: string;
+  sceneId: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  blocksMovement: number;
+  blocksSight: number;
+  blocksSound: number;
+  door: number;
+  doorState: number;
+}
+
+/**
+ * What a player is allowed to know about their own sight. The polygons are
+ * handed over so the client can draw fog; the walls that produced them are not.
+ */
+export interface WireVision {
+  /** Currently visible regions, in grid units. */
+  polygons: { x: number; y: number }[][];
+  /** Squares explored previously - drawn dimmed rather than black. */
+  explored: [number, number][];
+  gridWidth: number;
+  gridHeight: number;
+}
+
+/** A door a player may click, without revealing the wall network around it. */
+export interface WireDoor {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  door: number;
+  doorState: number;
+}
+
 export interface WirePresence {
   user: PublicUser;
   role: MemberRole;
@@ -148,6 +187,26 @@ export const tokenCommitSchema = z.object({
 export const tokenCreateSchema = tokenInputSchema.extend({ sceneId: z.string() });
 
 export const tokenUpdateSchema = tokenInputSchema.partial().extend({ tokenId: z.string() });
+
+export const wallCreateSchema = z.object({
+  sceneId: z.string(),
+  x1: z.number(),
+  y1: z.number(),
+  x2: z.number(),
+  y2: z.number(),
+  blocksMovement: z.number().int().min(0).max(1).default(1),
+  blocksSight: z.number().int().min(0).max(2).default(1),
+  blocksSound: z.number().int().min(0).max(1).default(0),
+  door: z.number().int().min(0).max(2).default(0),
+  doorState: z.number().int().min(0).max(2).default(0),
+});
+
+export const wallUpdateSchema = wallCreateSchema
+  .partial()
+  .extend({ wallId: z.string() });
+
+export type WallCreatePayload = z.infer<typeof wallCreateSchema>;
+export type WallUpdatePayload = z.infer<typeof wallUpdateSchema>;
 
 export const pingSchema = z.object({
   sceneId: z.string(),
@@ -187,7 +246,16 @@ export type InitiativeUpdatePayload = z.infer<typeof initiativeUpdateSchema>;
 /* ---------------------------------------------------------------- events */
 
 export interface ServerToClientEvents {
-  'scene:state': (payload: { scene: WireScene | null; tokens: WireToken[] }) => void;
+  'scene:state': (payload: {
+    scene: WireScene | null;
+    tokens: WireToken[];
+    /** Null when the scene has vision disabled - everyone sees everything. */
+    vision: WireVision | null;
+    /** Doors are shown to players so they can be opened; walls are not. */
+    doors: WireDoor[];
+    /** DM only. Absent from every player payload. */
+    walls?: WireWall[];
+  }) => void;
   'scene:list': (payload: { scenes: { id: string; name: string; mapImageUrl: string | null }[] }) => void;
   'scene:changed': (payload: { sceneId: string }) => void;
   'scene:updated': (payload: { scene: WireScene }) => void;
@@ -205,6 +273,11 @@ export interface ServerToClientEvents {
   'audio:state': (payload: WireAudioState) => void;
 
   'ping:map': (payload: PingPayload & { byUserId: string; color: string }) => void;
+
+  'wall:created': (payload: { wall: WireWall }) => void;
+  'wall:updated': (payload: { wall: WireWall }) => void;
+  'wall:deleted': (payload: { wallId: string }) => void;
+  'door:updated': (payload: { door: WireDoor }) => void;
 
   presence: (payload: { members: WirePresence[] }) => void;
 
@@ -233,6 +306,12 @@ export interface ClientToServerEvents {
   'audio:control': (payload: AudioControlPayload) => void;
 
   'ping:map': (payload: PingPayload) => void;
+
+  'wall:create': (payload: WallCreatePayload) => void;
+  'wall:update': (payload: WallUpdatePayload) => void;
+  'wall:delete': (payload: { wallId: string }) => void;
+  /** Any player may open a door they can see; that is the point of doors. */
+  'door:toggle': (payload: { wallId: string }) => void;
 }
 
 /** Room naming. The `:dm` room is what keeps DM-only data structurally separate. */

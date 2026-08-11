@@ -87,7 +87,11 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
       })
       .parse(request.body);
 
-    await db.update(scenes).set(patch).where(eq(scenes.id, id));
+    // An empty patch is a no-op, not a 500: `set({})` has no columns to write.
+    if (Object.keys(patch).length > 0) {
+      await db.update(scenes).set(patch).where(eq(scenes.id, id));
+    }
+
     const rows = await db.select().from(scenes).where(eq(scenes.id, id)).limit(1);
     return { scene: rows[0] };
   });

@@ -9,14 +9,12 @@ choices below. Keep it updated in the same commit as the work it describes.
 
 ## Status
 
-Phases 0–4 done. There is a **working battle map**: scenes with uploaded maps
-and grid calibration, sized tokens dragged in realtime, linked/unlinked HP, the
-token HUD, and the targeting action panel — on top of sheets, the compendium
-and the live chat/dice table.
+Phases 0–5 done. The board has **real line of sight**: the DM draws walls and
+doors, each player sees only what their tokens can see, and fog remembers
+explored ground across sessions.
 
-**Next: Phase 5** — walls, doors, lights, server-side vision and bitmap fog
-exploration. See docs/PLAN.md; the vision polygon is computed on the server and
-wall geometry is never sent to players.
+**Next: Phase 6** — initiative tracker, active effects, damage application with
+resistances, concentration saves. See docs/PLAN.md.
 
 ## Commands
 
@@ -68,6 +66,16 @@ the participants' personal socket rooms - never to the campaign room carrying a
 "private" flag, which a modified client could ignore. Secrecy is also persisted
 (a secret roll is stored as a whisper to the DM) so it survives a history
 reload.
+
+**Vision is computed on the server, never the client.** `realtime/vision.ts`
+produces each player's polygon and sends them the polygon plus the tokens inside
+it. Wall geometry is never in a player payload — doors are, because a door is a
+thing you can see and open. This is a deliberate divergence from Foundry, which
+computes vision in the browser and therefore ships every wall to every client.
+
+**Fog is a bitmap, not accumulated polygons.** One bit per grid square per
+player, base64 in `fog_exploration`. Unioning polygons grows without bound; a
+100×100 scene is 1.25 KB and merges with a bitwise OR.
 
 **Token drag never touches the database.** `token:move` streams position at
 ~30Hz and is rebroadcast without a write; `token:commit` persists once on drop

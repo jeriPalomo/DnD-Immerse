@@ -1,0 +1,178 @@
+import { Group, Line, Shape } from 'react-konva';
+import type Konva from 'konva';
+import { gridToPixel } from '@dnd/shared';
+import type { WireScene, WireVision } from '@dnd/shared';
+
+/**
+ * Three-state fog, which is most of why an explored map reads as explored:
+ *
+ *   black   never seen
+ *   dimmed  explored, but not currently in view — you remember the room's
+ *           shape, not who is standing in it now
+ *   clear   currently visible
+ *
+ * The polygons arrive from the server already computed. This layer only draws
+ * them; it has no wall data to reason about, which is the point.
+ */
+export function FogLayer({
+  scene,
+  vision,
+  grid,
+}: {
+  scene: WireScene;
+  vision: WireVision;
+  grid: { gridSize: number; offsetX: number; offsetY: number };
+}) {
+  const width = scene.mapWidth || 1400;
+  const height = scene.mapHeight || 900;
+
+  /**
+   * Drawn as one custom shape against the raw 2D context rather than as a
+   * stack of Konva nodes with `globalCompositeOperation`. Compositing between
+   * sibling nodes depends on layer draw order in ways that are easy to get
+   * subtly wrong; here the fill and the holes are unambiguously one operation.
+   */
+  const paint = (context: Konva.Context) => {
+    const ctx = context._context;
+
+    // Pass 1: solid black everywhere never explored. Explored squares are
+    // punched out, so remembered ground is not pitch black.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, width, height);
+    for (const [cx, cy] of vision.explored) {
+      const point = gridToPixel({ x: cx, y: cy }, grid);
+      // Half a pixel of bleed stops hairline seams between adjacent squares.
+      ctx.rect(point.x - 0.5, point.y - 0.5, grid.gridSize + 1, grid.gridSize + 1);
+    }
+    ctx.fillStyle = '#05040a';
+    ctx.fill('evenodd');
+    ctx.restore();
+
+    // Pass 2: a dim veil over everything outside current sight. Explored but
+    // unseen ground keeps its shape while hiding who is standing on it.
+    ctx.save();
+    ctx.fillStyle = 'rgba(5, 4, 10, 0.62)';
+    ctx.fillRect(0, 0, width, height);
+    ctx.globalCompositeOperation = 'destination-out';
+    for (const polygon of vision.polygons) {
+      if (polygon.length < 3) continue;
+      ctx.beginPath();
+      polygon.forEach((p, index) => {
+        const point = gridToPixel(p, grid);
+        if (index === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+      });
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  };
+
+  return (
+    <Shape
+      listening={false}
+      // Keyed on the payload so Konva repaints when sight changes.
+      key={`${vision.polygons.length}:${vision.explored.length}`}
+      sceneFunc={paint}
+    />
+  );
+}
+
+/**
+ * Doors, drawn for everyone. A door is a thing you can see and open; the walls
+ * around it are not sent to players at all.
+ */
+export function DoorLayer({
+  doors,
+  grid,
+  onToggle,
+}: {
+  doors: { id: string; x1: number; y1: number; x2: number; y2: number; door: number; doorState: number }[];
+  grid: { gridSize: number; offsetX: number; offsetY: number };
+  onToggle: (wallId: string) => void;
+}) {
+  return (
+    <Group>
+      {doors.map((door) => {
+        const a = gridToPixel({ x: door.x1, y: door.y1 }, grid);
+        const b = gridToPixel({ x: door.x2, y: door.y2 }, grid);
+
+        const open = door.doorState === 1;
+        const locked = door.doorState === 2;
+
+        return (
+          <Line
+            key={door.id}
+            points={[a.x, a.y, b.x, b.y]}
+            stroke={locked ? '#f87171' : open ? '#34d399' : '#e8853f'}
+            strokeWidth={Math.max(6, grid.gridSize * 0.14)}
+            dash={open ? [10, 10] : undefined}
+            lineCap="round"
+            // A fat invisible hit area, so a door is easy to click.
+            hitStrokeWidth={Math.max(18, grid.gridSize * 0.4)}
+            onClick={(e) => {
+              e.cancelBubble = true;
+              if (!locked) onToggle(door.id);
+            }}
+            onMouseEnter={(e) => {
+              const stage = e.target.getStage();
+              if (stage) stage.container().style.cursor = locked ? 'not-allowed' : 'pointer';
+            }}
+            onMouseLeave={(e) => {
+              const stage = e.target.getStage();
+              if (stage) stage.container().style.cursor = 'default';
+            }}
+          />
+        );
+      })}
+    </Group>
+  );
+}
+
+/** Wall geometry, DM only — this layer never renders for a player. */
+export function WallLayer({
+  walls,
+  grid,
+  onDelete,
+}: {
+  walls: { id: string; x1: number; y1: number; x2: number; y2: number; door: number }[];
+  grid: { gridSize: number; offsetX: number; offsetY: number };
+  onDelete: (wallId: string) => void;
+}) {
+  return (
+    <Group>
+      {walls
+        .filter((wall) => wall.door === 0)
+        .map((wall) => {
+          const a = gridToPixel({ x: wall.x1, y: wall.y1 }, grid);
+          const b = gridToPixel({ x: wall.x2, y: wall.y2 }, grid);
+
+          return (
+            <Line
+              key={wall.id}
+              points={[a.x, a.y, b.x, b.y]}
+              stroke="#8b7bf0"
+              strokeWidth={Math.max(3, grid.gridSize * 0.06)}
+              opacity={0.85}
+              lineCap="round"
+              hitStrokeWidth={Math.max(14, grid.gridSize * 0.3)}
+              onClick={(e) => {
+                e.cancelBubble = true;
+                // Alt-click removes a wall, matching alt-click to ping.
+                if (e.evt.altKey) onDelete(wall.id);
+              }}
+              onMouseEnter={(e) => {
+                const stage = e.target.getStage();
+                if (stage) stage.container().style.cursor = 'pointer';
+              }}
+              onMouseLeave={(e) => {
+                const stage = e.target.getStage();
+                if (stage) stage.container().style.cursor = 'default';
+              }}
+            />
+          );
+        })}
+    </Group>
+  );
+}

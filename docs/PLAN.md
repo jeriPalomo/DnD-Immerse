@@ -281,7 +281,7 @@ than no rules engine.
 | 2 ✅ | Actor/Item UI, 5e sheet, SRD 5.1 import, compendium picker | Sheets exist and are live |
 | 3 ✅ | Socket infra, presence, chat, server-authoritative dice, chat cards with action buttons | **Fully playable game night** |
 | 4 | Scenes, map upload, grid calibration, token CRUD, sized tokens, linked/unlinked, token HUD, targeting + action panel, realtime drag | **Working battle map** |
-| 5 | Walls, doors, lights, server-side vision, bitmap fog exploration | Real line-of-sight |
+| 5 ✅ | Walls, doors, server-side vision, bitmap fog exploration | Real line-of-sight |
 | 6 | Initiative tracker, active effects, damage application, concentration, saves | Full automation |
 | 7 | Playlists, positional ambient sounds, journal with pages, map pins, AoE templates | Immersion layer |
 

@@ -6,8 +6,11 @@ import type {
   ServerToClientEvents,
   WireChatMessage,
   WirePresence,
+  WireDoor,
   WireScene,
   WireToken,
+  WireVision,
+  WireWall,
 } from '@dnd/shared';
 
 type TableSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -22,6 +25,13 @@ interface TableState {
 
   scene: WireScene | null;
   tokens: WireToken[];
+  /** Null when the scene has vision off - everyone sees the whole map. */
+  vision: WireVision | null;
+  doors: WireDoor[];
+  /** Only ever populated for the DM; players never receive wall geometry. */
+  walls: WireWall[];
+  /** DM wall-drawing mode. */
+  wallTool: 'off' | 'wall' | 'door';
   selectedTokenId: string | null;
   /** The token a player has targeted, which drives the action panel. */
   targetTokenId: string | null;
@@ -47,6 +57,10 @@ interface TableState {
   updateToken: (tokenId: string, fields: Record<string, unknown>) => void;
   deleteToken: (tokenId: string) => void;
   pingMap: (x: number, y: number) => void;
+  setWallTool: (tool: 'off' | 'wall' | 'door') => void;
+  createWall: (x1: number, y1: number, x2: number, y2: number, isDoor: boolean) => void;
+  deleteWall: (wallId: string) => void;
+  toggleDoor: (wallId: string) => void;
   cardAction: (
     itemId: string,
     actorId: string,
@@ -70,6 +84,10 @@ export const useTable = create<TableState>((set, get) => ({
   selectedTokenId: null,
   targetTokenId: null,
   pings: [],
+  vision: null,
+  doors: [],
+  walls: [],
+  wallTool: 'off',
 
   setActiveActor(actorId) {
     set({ activeActorId: actorId });
@@ -97,7 +115,20 @@ export const useTable = create<TableState>((set, get) => ({
     });
     socket.on('presence', ({ members }) => set({ members }));
 
-    socket.on('scene:state', ({ scene, tokens }) => set({ scene, tokens }));
+    socket.on('scene:state', ({ scene, tokens, vision, doors, walls }) =>
+      // `walls` is absent for players, so it collapses to an empty array here.
+      set({ scene, tokens, vision: vision ?? null, doors: doors ?? [], walls: walls ?? [] }),
+    );
+    socket.on('door:updated', ({ door }) =>
+      set({ doors: get().doors.map((d) => (d.id === door.id ? door : d)) }),
+    );
+    socket.on('wall:created', ({ wall }) => set({ walls: [...get().walls, wall] }));
+    socket.on('wall:updated', ({ wall }) =>
+      set({ walls: get().walls.map((w) => (w.id === wall.id ? wall : w)) }),
+    );
+    socket.on('wall:deleted', ({ wallId }) =>
+      set({ walls: get().walls.filter((w) => w.id !== wallId) }),
+    );
     socket.on('token:created', ({ token }) => set({ tokens: [...get().tokens, token] }));
     socket.on('token:updated', ({ token }) => {
       const existing = get().tokens;
@@ -187,6 +218,28 @@ export const useTable = create<TableState>((set, get) => ({
   pingMap(x, y) {
     const sceneId = get().scene?.id;
     if (sceneId) get().socket?.emit('ping:map', { sceneId, x, y });
+  },
+
+  setWallTool(tool) {
+    set({ wallTool: tool, selectedTokenId: null });
+  },
+
+  createWall(x1, y1, x2, y2, isDoor) {
+    const sceneId = get().scene?.id;
+    if (!sceneId) return;
+    get().socket?.emit('wall:create', {
+      sceneId, x1, y1, x2, y2,
+      blocksMovement: 1, blocksSight: 1, blocksSound: 0,
+      door: isDoor ? 1 : 0, doorState: 0,
+    });
+  },
+
+  deleteWall(wallId) {
+    get().socket?.emit('wall:delete', { wallId });
+  },
+
+  toggleDoor(wallId) {
+    get().socket?.emit('door:toggle', { wallId });
   },
 
   cardAction(itemId, actorId, action, mode = 'normal') {

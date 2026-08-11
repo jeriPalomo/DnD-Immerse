@@ -9,6 +9,7 @@ import {
 } from '@dnd/shared';
 import type Konva from 'konva';
 import type { WireScene, WireToken } from '@dnd/shared';
+import { DoorLayer, FogLayer, WallLayer } from './FogLayer.js';
 import { useTable } from '../../store/table.js';
 import { useAuth } from '../../store/auth.js';
 
@@ -39,11 +40,16 @@ const DISPOSITION_COLOR: Record<string, string> = {
 };
 
 export function BattleMap({ isDM }: { isDM: boolean }) {
-  const { scene, tokens, selectedTokenId, targetTokenId, pings, select, target, moveToken, commitToken, pingMap } =
-    useTable();
+  const {
+    scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool,
+    select, target, moveToken, commitToken, pingMap, createWall, deleteWall, toggleDoor,
+  } = useTable();
+
+  // Where the DM clicked first while drawing a wall segment.
+  const [wallStart, setWallStart] = useState<{ x: number; y: number } | null>(null);
   const { user } = useAuth();
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
   // Zero until the container is measured; fitting against a placeholder size
   // leaves the map stuck off-centre.
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -51,17 +57,30 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
 
   const mapImage = useImage(scene?.mapImageUrl ?? null);
 
-  // Track the container so the stage fills it responsively.
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element) return;
+  /**
+   * Attached as a callback ref rather than in an effect.
+   *
+   * The container is not rendered while there is no active scene, so a
+   * mount-time effect would find a null ref and never observe anything - the
+   * stage would then sit at zero size forever once the scene did arrive.
+   */
+  const setContainer = useCallback((node: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    if (!node) return;
 
     const observer = new ResizeObserver(([entry]) => {
       setSize({ width: entry.contentRect.width, height: entry.contentRect.height });
     });
-    observer.observe(element);
-    return () => observer.disconnect();
+    observer.observe(node);
+    observerRef.current = observer;
+
+    // Measure once immediately; the observer only fires on later changes.
+    const rect = node.getBoundingClientRect();
+    setSize({ width: rect.width, height: rect.height });
   }, []);
+
+  useEffect(() => () => observerRef.current?.disconnect(), []);
 
   // Fit the map when it first loads or the scene changes.
   useEffect(() => {
@@ -113,7 +132,7 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
   const targeted = tokens.find((t) => t.id === targetTokenId) ?? null;
 
   return (
-    <div ref={containerRef} className="relative h-full overflow-hidden rounded-xl border border-ink-700 bg-ink-950">
+    <div ref={setContainer} className="relative h-full overflow-hidden rounded-xl border border-ink-700 bg-ink-950">
       <Stage
         width={size.width}
         height={size.height}
@@ -125,22 +144,39 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
         onWheel={onWheel}
         onDragEnd={(e) => setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }))}
         onClick={(e) => {
-          // Clicking empty map clears the selection; alt-click drops a ping.
-          if (e.target === e.target.getStage() || e.target.name() === 'map') {
-            const stage = e.target.getStage();
-            const pointer = stage?.getPointerPosition();
-            if (e.evt.altKey && pointer && stage) {
-              const point = pixelToGrid(
-                { x: (pointer.x - stage.x()) / stage.scaleX(), y: (pointer.y - stage.y()) / stage.scaleY() },
-                grid,
-              );
-              pingMap(point.x, point.y);
+          if (e.target !== e.target.getStage() && e.target.name() !== 'map') return;
+
+          const stage = e.target.getStage();
+          const pointer = stage?.getPointerPosition();
+          if (!stage || !pointer) return;
+
+          const point = pixelToGrid(
+            { x: (pointer.x - stage.x()) / stage.scaleX(), y: (pointer.y - stage.y()) / stage.scaleY() },
+            grid,
+          );
+
+          if (wallTool !== 'off') {
+            // Walls snap to grid corners so they line up with the map's own
+            // architecture rather than landing at arbitrary fractions.
+            const snapped = { x: Math.round(point.x), y: Math.round(point.y) };
+            if (!wallStart) {
+              setWallStart(snapped);
             } else {
-              select(null);
-              target(null);
+              createWall(wallStart.x, wallStart.y, snapped.x, snapped.y, wallTool === 'door');
+              // Chain from the end point, so drawing a room is a run of clicks.
+              setWallStart(snapped);
             }
+            return;
+          }
+
+          if (e.evt.altKey) {
+            pingMap(point.x, point.y);
+          } else {
+            select(null);
+            target(null);
           }
         }}
+        onDblClick={() => setWallStart(null)}
       >
         <Layer>
           {mapImage && (
@@ -156,6 +192,16 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
             <GridLines scene={scene} />
           </Layer>
         )}
+
+        {isDM && (
+          <Layer>
+            <WallLayer walls={walls} grid={grid} onDelete={deleteWall} />
+          </Layer>
+        )}
+
+        <Layer>
+          <DoorLayer doors={doors} grid={grid} onToggle={toggleDoor} />
+        </Layer>
 
         <Layer>
           {tokens
@@ -178,6 +224,14 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
               />
             ))}
         </Layer>
+
+        {/* Fog sits above the tokens so anything outside sight is covered, and
+            below the overlay so pings and rulers stay readable. */}
+        {vision && (
+          <Layer listening={false}>
+            <FogLayer scene={scene} vision={vision} grid={grid} />
+          </Layer>
+        )}
 
         <Layer listening={false}>
           {/* Reach readout while a target is chosen. */}
@@ -202,8 +256,16 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
       </Stage>
 
       <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-ink-950/80 px-2 py-1 text-[10px] text-ink-500">
-        scroll to zoom · drag to pan · alt-click to ping · shift-click a token to target
+        {wallTool !== 'off'
+          ? `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
+          : 'scroll to zoom · drag to pan · alt-click to ping · shift-click a token to target'}
       </div>
+
+      {wallStart && (
+        <div className="pointer-events-none absolute top-2 left-2 rounded bg-arcane-500/20 px-2 py-1 text-[10px] text-arcane-400">
+          from ({wallStart.x}, {wallStart.y})
+        </div>
+      )}
     </div>
   );
 }

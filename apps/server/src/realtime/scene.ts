@@ -15,8 +15,10 @@ import type {
   WireScene,
   WireToken,
 } from '@dnd/shared';
+import { wallCreateSchema, wallUpdateSchema } from '@dnd/shared';
 import { db } from '../db/index.js';
-import { actors, campaigns, scenes, tokens } from '../db/schema.js';
+import { actors, campaigns, scenes, tokens, walls as wallsTable } from '../db/schema.js';
+import { computePlayerView, toWireDoor, toWireWall, visibleTokens, wallsOf } from './vision.js';
 import { getMembership } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
 import type { IOServer, SocketData } from './index.js';
@@ -126,7 +128,12 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
 
   const sceneId = campaign[0]?.activeSceneId ?? null;
   if (!sceneId) {
-    io.to(campaignRoom(campaignId)).emit('scene:state', { scene: null, tokens: [] });
+    io.to(campaignRoom(campaignId)).emit('scene:state', {
+      scene: null,
+      tokens: [],
+      vision: null,
+      doors: [],
+    });
     return;
   }
 
@@ -140,27 +147,69 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
     .orderBy(asc(tokens.createdAt));
 
   const wireScene = toWireScene(scene);
+  const sceneWalls = await wallsOf(sceneId);
+  const doors = sceneWalls.filter((w) => w.door > 0).map(toWireDoor);
 
-  // Per-socket, because "hidden unless you own it" differs between players.
+  // Per-socket, because both "hidden unless you own it" and line of sight
+  // differ between players.
   for (const socket of await io.in(campaignRoom(campaignId)).fetchSockets()) {
     const userId = socket.data.user.id;
     const isDM = socket.data.rooms.get(campaignId) === 'dm';
+
+    if (isDM) {
+      socket.emit('scene:state', {
+        scene: wireScene,
+        tokens: filterTokensFor(all, true, userId),
+        vision: null,
+        doors,
+        walls: sceneWalls.map(toWireWall),
+      });
+      continue;
+    }
+
+    const view = await computePlayerView(scene, sceneWalls, all, userId);
+    // Two filters in sequence: hidden tokens first, then line of sight.
+    const permitted = filterTokensFor(all, false, userId);
+    const sighted = view
+      ? visibleTokens(
+          all.filter((t) => permitted.some((p) => p.id === t.id)),
+          view.polygons,
+          userId,
+        )
+      : all.filter((t) => permitted.some((p) => p.id === t.id));
+
     socket.emit('scene:state', {
       scene: wireScene,
-      tokens: filterTokensFor(all, isDM, userId),
+      tokens: filterTokensFor(sighted, false, userId),
+      vision: view?.vision ?? null,
+      doors,
+      // No `walls` key at all for a player - not an empty array, absent.
     });
   }
 }
 
 /** Broadcasts one token, or a deletion for viewers who may not see it. */
 async function broadcastToken(io: IOServer, campaignId: string, token: Token): Promise<void> {
+  const scene = await sceneOf(token.sceneId);
+  const sceneWalls = scene?.visionEnabled ? await wallsOf(token.sceneId) : [];
+  const all = scene?.visionEnabled
+    ? await db.select().from(tokens).where(eq(tokens.sceneId, token.sceneId))
+    : [];
+
   for (const socket of await io.in(campaignRoom(campaignId)).fetchSockets()) {
     const userId = socket.data.user.id;
     const isDM = socket.data.rooms.get(campaignId) === 'dm';
-    const visible = filterTokensFor([token], isDM, userId);
+
+    let visible = filterTokensFor([token], isDM, userId);
+
+    // Out of sight is as good as hidden: a moving enemy behind a wall must not
+    // stream its position to a player who cannot see it.
+    if (visible.length > 0 && !isDM && scene?.visionEnabled) {
+      const view = await computePlayerView(scene, sceneWalls, all, userId);
+      if (view && visibleTokens([token], view.polygons, userId).length === 0) visible = [];
+    }
 
     if (visible.length > 0) socket.emit('token:updated', { token: visible[0] });
-    // A token that just became hidden must disappear from the player's board.
     else socket.emit('token:deleted', { tokenId: token.id });
   }
 }
@@ -423,6 +472,83 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
     await db.delete(tokens).where(eq(tokens.id, tokenId));
     io.to(campaignRoom(ctx.campaignId)).emit('token:deleted', { tokenId });
+  });
+
+  /* ------------------------------------------------------------- walls */
+
+  socket.on('wall:create', async (payload) => {
+    const ctx = await context();
+    if (!ctx || !ctx.isDM) {
+      socket.emit('error', { message: 'Only the DM can build walls' });
+      return;
+    }
+
+    const input = wallCreateSchema.parse(payload);
+    const scene = await sceneOf(input.sceneId);
+    if (!scene || scene.campaignId !== ctx.campaignId) return;
+
+    const wall = { id: newId(), ...input };
+    await db.insert(wallsTable).values(wall);
+
+    // Walls go to the DM room only. Players never receive the geometry - if it
+    // is a door they get it via the door list, which carries no other walls.
+    io.to(campaignDmRoom(ctx.campaignId)).emit('wall:created', { wall: toWireWall(wall as never) });
+    await broadcastSceneState(io, ctx.campaignId);
+  });
+
+  socket.on('wall:update', async (payload) => {
+    const ctx = await context();
+    if (!ctx || !ctx.isDM) {
+      socket.emit('error', { message: 'Only the DM can edit walls' });
+      return;
+    }
+
+    const { wallId, ...fields } = wallUpdateSchema.parse(payload);
+    await db.update(wallsTable).set(fields).where(eq(wallsTable.id, wallId));
+
+    const rows = await db.select().from(wallsTable).where(eq(wallsTable.id, wallId)).limit(1);
+    if (rows[0]) io.to(campaignDmRoom(ctx.campaignId)).emit('wall:updated', { wall: toWireWall(rows[0]) });
+
+    await broadcastSceneState(io, ctx.campaignId);
+  });
+
+  socket.on('wall:delete', async ({ wallId }) => {
+    const ctx = await context();
+    if (!ctx || !ctx.isDM) {
+      socket.emit('error', { message: 'Only the DM can remove walls' });
+      return;
+    }
+
+    await db.delete(wallsTable).where(eq(wallsTable.id, wallId));
+    io.to(campaignDmRoom(ctx.campaignId)).emit('wall:deleted', { wallId });
+    await broadcastSceneState(io, ctx.campaignId);
+  });
+
+  /**
+   * Opening a door is deliberately available to players - it is the best
+   * moment the board produces. Locked doors stay shut for everyone but the DM.
+   */
+  socket.on('door:toggle', async ({ wallId }) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const rows = await db.select().from(wallsTable).where(eq(wallsTable.id, wallId)).limit(1);
+    const wall = rows[0];
+    if (!wall || wall.door === 0) return;
+
+    if (wall.doorState === 2 && !ctx.isDM) {
+      socket.emit('error', { message: 'That door is locked' });
+      return;
+    }
+
+    const doorState = wall.doorState === 1 ? 0 : 1;
+    await db.update(wallsTable).set({ doorState }).where(eq(wallsTable.id, wallId));
+
+    io.to(campaignRoom(ctx.campaignId)).emit('door:updated', {
+      door: toWireDoor({ ...wall, doorState }),
+    });
+    // Everyone's sight changes the moment a door swings.
+    await broadcastSceneState(io, ctx.campaignId);
   });
 
   socket.on('ping:map', async ({ sceneId, x, y }) => {
