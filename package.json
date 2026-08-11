@@ -13,7 +13,9 @@
     "build": "npm run build --workspace=@dnd/shared && npm run build --workspace=@dnd/web && npm run build --workspace=@dnd/server",
     "db:generate": "npm run db:generate --workspace=@dnd/server",
     "db:migrate": "npm run db:migrate --workspace=@dnd/server",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed": "npm run seed --workspace=@dnd/server",
+    "srd:import": "npm run srd:import --workspace=@dnd/server"
   },
   "engines": {
     "node": ">=20"

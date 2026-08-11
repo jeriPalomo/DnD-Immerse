@@ -60,7 +60,12 @@ export default function CampaignDetail() {
             <p className="mt-2 max-w-prose text-sm text-ink-400">{campaign.description}</p>
           )}
         </div>
-        <Badge tone={isDM ? 'dm' : 'player'}>{isDM ? 'Dungeon Master' : 'Player'}</Badge>
+        <div className="flex items-center gap-3">
+          <Badge tone={isDM ? 'dm' : 'player'}>{isDM ? 'Dungeon Master' : 'Player'}</Badge>
+          <Link to={`/campaigns/${campaign.id}/table`}>
+            <Button>Enter the table</Button>
+          </Link>
+        </div>
       </header>
 
       {isDM && campaign.inviteCode && (
@@ -94,8 +99,7 @@ export default function CampaignDetail() {
       <Card className="mt-6 border-dashed p-5">
         <h2 className="font-display text-lg text-ink-100">Coming next</h2>
         <p className="mt-2 text-sm text-ink-400">
-          Character sheets, the live table with chat and dice, and the battle map are built in the
-          phases after this one.
+          The battle map with tokens, walls and dynamic vision arrives in the phases after this one.
         </p>
       </Card>
     </div>

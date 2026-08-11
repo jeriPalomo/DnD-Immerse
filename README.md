@@ -22,7 +22,9 @@ Useful scripts:
 |---|---|
 | `npm run dev` | API + client together |
 | `npm run dev:server` / `dev:web` | One at a time |
-| `npm test` | Unit tests (rules + grid math) |
+| `npm test` | Unit + realtime integration tests |
+| `npm run srd:import` | Seed the SRD compendium |
+| `npm run seed` | Example campaign with a full party |
 | `npm run db:generate` | New migration after a schema change |
 | `npm run build` | Production build |
 

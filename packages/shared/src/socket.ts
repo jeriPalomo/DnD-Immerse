@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { rollRequestSchema, sendMessageSchema, tokenInputSchema } from './schemas.js';
+import {
+  cardActionSchema,
+  cardRequestSchema,
+  rollRequestSchema,
+  sendMessageSchema,
+  tokenInputSchema,
+} from './schemas.js';
 import type { ChatKind, MemberRole, RollResult, TokenLayer } from './schemas.js';
 
 /**
@@ -56,6 +62,19 @@ export interface WireScene {
   revealedPolygons: { x: number; y: number }[][];
 }
 
+export interface WireCard {
+  itemId: string;
+  actorId: string;
+  itemType: string;
+  itemName: string;
+  subtitle: string;
+  description: string;
+  /** Buttons the viewer may press, already filtered by what the item supports. */
+  actions: ('attack' | 'damage' | 'critical' | 'save' | 'versatile')[];
+  saveAbility: string | null;
+  saveDC: number | null;
+}
+
 export interface WireChatMessage {
   id: string;
   campaignId: string;
@@ -65,6 +84,7 @@ export interface WireChatMessage {
   kind: ChatKind;
   body: string;
   rollData: RollResult | null;
+  cardData: WireCard | null;
   whisperToUserId: string | null;
   createdAt: number;
 }
@@ -210,6 +230,8 @@ export interface ClientToServerEvents {
 
   'chat:send': (payload: z.infer<typeof sendMessageSchema>) => void;
   'chat:roll': (payload: z.infer<typeof rollRequestSchema>) => void;
+  'chat:card': (payload: z.infer<typeof cardRequestSchema>) => void;
+  'chat:cardAction': (payload: z.infer<typeof cardActionSchema>) => void;
 
   'initiative:update': (payload: InitiativeUpdatePayload) => void;
 

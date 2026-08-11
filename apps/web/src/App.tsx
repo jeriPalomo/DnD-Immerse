@@ -4,6 +4,7 @@ import { Button, Spinner } from './components/ui.js';
 import AuthPage from './pages/AuthPage.js';
 import CampaignDetail from './pages/CampaignDetail.js';
 import CampaignList from './pages/CampaignList.js';
+import CampaignTable from './pages/CampaignTable.js';
 import CharacterList from './pages/CharacterList.js';
 import CharacterSheet from './pages/CharacterSheet.js';
 import { useAuth } from './store/auth.js';
@@ -46,6 +47,16 @@ export default function App() {
           <RequireAuth>
             <Shell>
               <CampaignDetail />
+            </Shell>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/campaigns/:id/table"
+        element={
+          <RequireAuth>
+            <Shell>
+              <CampaignTable />
             </Shell>
           </RequireAuth>
         }

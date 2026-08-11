@@ -148,7 +148,7 @@ export type Condition = (typeof CONDITIONS)[number];
 
 /* ------------------------------------------------------------------ chat */
 
-export const chatKindSchema = z.enum(['text', 'roll', 'system']);
+export const chatKindSchema = z.enum(['text', 'roll', 'card', 'system']);
 export type ChatKind = z.infer<typeof chatKindSchema>;
 
 export const sendMessageSchema = z.object({
@@ -165,6 +165,23 @@ export const rollRequestSchema = z.object({
   /** Secret rolls are visible only to the roller and the DM. */
   secret: z.boolean().default(false),
 });
+
+/** Posts an item's card to chat, with buttons for its actions. */
+export const cardRequestSchema = z.object({
+  itemId: z.string(),
+  actorId: z.string(),
+});
+
+/** Presses a button on a posted card; the server rolls and replies. */
+export const cardActionSchema = z.object({
+  itemId: z.string(),
+  actorId: z.string(),
+  action: z.enum(['attack', 'damage', 'critical', 'save', 'versatile']),
+  mode: z.enum(['normal', 'advantage', 'disadvantage']).default('normal'),
+});
+
+export type CardRequest = z.infer<typeof cardRequestSchema>;
+export type CardAction = z.infer<typeof cardActionSchema>;
 
 export type RollRequest = z.infer<typeof rollRequestSchema>;
 

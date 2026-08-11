@@ -79,10 +79,20 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
     const dmCampaigns = new Set<string>();
     const levels = await getBulkActorAccess(rows.map((r) => r.actor.id), user.id, dmCampaigns);
 
-    // Players see their own sheets in full and everyone else's at whatever level
-    // the DM granted - defaulting to `limited`, which is name and portrait only.
+    // Players see their own sheets in full, other player characters at name
+    // level, and NPCs not at all.
+    //
+    // NPCs default to `none` rather than `limited` because a roster listing
+    // "Ancient Red Dragon" spoils the encounter before the party has met it -
+    // the name alone is the leak, even with every stat hidden. The DM shares an
+    // NPC deliberately, by granting ownership.
+    const visible = rows.filter(({ actor }) => {
+      const level = levels.get(actor.id) ?? OWNERSHIP.none;
+      return actor.type === 'character' || level >= OWNERSHIP.limited;
+    });
+
     return {
-      actors: rows.map(({ actor }) => {
+      actors: visible.map(({ actor }) => {
         const level = levels.get(actor.id) ?? OWNERSHIP.limited;
         if (level >= OWNERSHIP.observer) return { ...actor, access: level };
         return {

@@ -9,13 +9,13 @@ choices below. Keep it updated in the same commit as the work it describes.
 
 ## Status
 
-Phases 0–2 done: workspace, shared rules/grid math, full DB schema, Argon2
-session auth, campaigns with invite codes, the Actor/Item document model, the
-5e character sheet, and the SRD 5.1 compendium.
+Phases 0–3 done. The site is **playable for a real session**: accounts,
+campaigns, 5e character sheets, the SRD compendium, and a live table with
+presence, chat, whispers, server-rolled dice and item cards.
 
-**Next: Phase 3** — Socket.IO infrastructure, presence, chat, the
-server-authoritative dice engine, and chat cards with action buttons. That
-phase ends at a fully playable game night.
+**Next: Phase 4** — scenes, map upload, grid calibration, sized tokens with
+parity snapping, linked/unlinked tokens, the token HUD, and the targeting
+action panel. That phase ends at a working battle map.
 
 ## Commands
 
@@ -24,7 +24,12 @@ npm run dev          # API :3001 + client :5173
 npm test             # Vitest: rules5e + grid math
 npm run db:generate  # New migration after editing schema.ts
 npm run srd:import   # Seed the compendium (downloads once, then cached)
+npm run seed         # Example campaign: DM + 3 players, gear, NPCs
 ```
+
+`npm run seed` creates `dm@example.com` and three players, all with password
+`demo-password`. It only ever touches `@example.com` accounts, so it will not
+disturb real data.
 
 The SRD import is idempotent — re-running replaces the compendium in place.
 
@@ -53,7 +58,19 @@ overlay is a devtools inspection away from spoiling an ambush. This is the one
 place we deliberately diverge from Foundry, which computes vision client-side.
 
 **Dice are rolled on the server.** Half the value of a shared table is that
-nobody can fudge.
+nobody can fudge. The client sends an expression string; `lib/dice.ts` produces
+the numbers. Expressions are length- and size-capped so `99999d99999` cannot
+hang the process.
+
+**Private messages are routed, not flagged.** Whispers and secret rolls go to
+the participants' personal socket rooms - never to the campaign room carrying a
+"private" flag, which a modified client could ignore. Secrecy is also persisted
+(a secret roll is stored as a whisper to the DM) so it survives a history
+reload.
+
+**NPCs are absent from a player's roster, not redacted.** A row reading
+"Ancient Red Dragon — sheet not shared" spoils the encounter just as thoroughly
+as the stat block would. The name is the leak.
 
 **Socket authorization is re-checked in every handler.** Room membership
 authenticates; it does not authorize. DM-only data travels on the separate
