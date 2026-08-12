@@ -7,6 +7,7 @@ import { campaigns, scenes, tokens } from '../db/schema.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
 import { deleteUpload, storeImage } from '../lib/uploads.js';
+import { deleteOrphanedUploads, sceneFileUrls } from '../lib/orphans.js';
 import { detectGrid } from '@dnd/shared';
 import sharp from 'sharp';
 
@@ -107,7 +108,11 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
     const scene = await loadScene(id);
     await requireDM(scene.campaignId, user.id);
 
+    // Collected before the delete, since the rows go with it.
+    const files = await sceneFileUrls(id);
+
     await db.delete(scenes).where(eq(scenes.id, id));
+    await deleteOrphanedUploads(files);
 
     // Do not leave the campaign pointing at a scene that no longer exists.
     await db

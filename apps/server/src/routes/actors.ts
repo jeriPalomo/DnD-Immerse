@@ -15,6 +15,7 @@ import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from
 import { getBulkActorAccess, requireActorRead, requireActorWrite } from '../lib/access.js';
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
+import { syncLinkedTokens } from '../lib/linkedTokens.js';
 import { deleteUpload, storeImage } from '../lib/uploads.js';
 import type { ActorInput } from '@dnd/shared';
 
@@ -178,6 +179,11 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
       .update(actors)
       .set({ ...patch, updatedAt: Date.now() })
       .where(eq(actors.id, id));
+
+    // A linked token is the same creature as its sheet; keep the board in step.
+    if (patch.hpCurrent !== undefined || patch.hpMax !== undefined || patch.armorClass !== undefined) {
+      await syncLinkedTokens(app, id);
+    }
 
     const rows = await db.select().from(actors).where(eq(actors.id, id)).limit(1);
     return { actor: rows[0] };
@@ -361,6 +367,8 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
         updatedAt: Date.now(),
       })
       .where(eq(actors.id, id));
+
+    await syncLinkedTokens(app, id);
 
     for (const entry of result.restored) {
       const item = owned.find((candidate) => candidate.id === entry.id);

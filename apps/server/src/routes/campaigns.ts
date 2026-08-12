@@ -7,6 +7,7 @@ import { campaignMembers, campaigns, users } from '../db/schema.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { newId, newInviteCode } from '../lib/id.js';
 import { storeImage } from '../lib/uploads.js';
+import { campaignFileUrls, deleteOrphanedUploads } from '../lib/orphans.js';
 
 export async function campaignRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
@@ -99,7 +100,13 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     await requireDM(id, user.id);
 
+    // Rows cascade; files do not. Gathered first, removed after, and each one
+    // re-checked so a track an emitter still plays is left alone.
+    const files = await campaignFileUrls(id);
+
     await db.delete(campaigns).where(eq(campaigns.id, id));
+    await deleteOrphanedUploads(files);
+
     return { ok: true };
   });
 

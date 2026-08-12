@@ -609,7 +609,14 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
     const doomed = await tokenOf(tokenId);
     await db.delete(tokens).where(eq(tokens.id, tokenId));
-    if (doomed) invalidateDragCache(doomed.sceneId);
+
+    if (doomed) {
+      invalidateDragCache(doomed.sceneId);
+      // Only if nothing else points at it - token art is often the actor's
+      // portrait, and several tokens can share one image.
+      const { deleteOrphanedUploads } = await import('../lib/orphans.js');
+      await deleteOrphanedUploads([doomed.imageUrl]);
+    }
     io.to(campaignRoom(ctx.campaignId)).emit('token:deleted', { tokenId });
   });
 

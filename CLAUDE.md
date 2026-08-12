@@ -100,7 +100,16 @@ decides both what is drawn and who is caught, so they cannot disagree.
 
 **Uploaded files are deleted with the record that owns them**, except where
 another row still points at the same file — placing an ambient sound copies a
-track's URL, so deleting the track must not break the emitter.
+track's URL, and a token stamped from an actor reuses its portrait. Rows
+cascade; files do not, so deletion paths call `deleteOrphanedUploads`, which
+re-checks every table that can hold a URL before removing anything. Deleting a
+shared file turns a disk-space bug into a broken-image bug, which is worse.
+
+**A linked token is the same creature as its sheet, in both directions.**
+Damage writes to token and actor; rests and sheet edits write only to the
+actor, so those call `syncLinkedTokens` — otherwise a player who long-rested
+still shows 12/47 on the board. Unlinked tokens are deliberately untouched:
+five goblins from one stat block keep five independent HP pools.
 
 **No dead code.** Two audits found helpers that were written, tested, and never
 called — `movementBlocked` let players walk through walls, `deriveActor` made
