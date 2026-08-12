@@ -690,7 +690,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
     const wall = { id: newId(), ...input };
     await db.insert(wallsTable).values(wall);
-    invalidateDragCache(input.sceneId ?? '');
+    invalidateDragCache(input.sceneId);
 
     // Walls go to the DM room only. Players never receive the geometry - if it
     // is a door they get it via the door list, which carries no other walls.

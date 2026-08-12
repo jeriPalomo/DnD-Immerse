@@ -135,6 +135,11 @@ export interface UndoEntry {
   apply: () => void;
   /** Whether to surface a toast; a move is self-evident, a delete is not. */
   toast?: boolean;
+  /**
+   * The scene it happened in. Undoing into a different scene would recreate a
+   * token somewhere it never was, so entries do not survive a scene change.
+   */
+  sceneId: string | null;
 }
 
 type SetState = (partial: Partial<TableState>) => void;
@@ -209,7 +214,11 @@ export const useTable = create<TableState>((set, get) => ({
     });
     socket.on('presence', ({ members }) => set({ members }));
 
-    socket.on('scene:state', ({ scene, tokens, vision, doors, notes, drawings, walls }) =>
+    socket.on('scene:state', ({ scene, tokens, vision, doors, notes, drawings, walls }) => {
+      // Entries refer to tokens in the scene they happened in; keeping them
+      // across a switch would recreate one somewhere it never stood.
+      if (scene?.id !== get().scene?.id) set({ undoStack: [], toast: null });
+
       // `walls` is absent for players, so it collapses to an empty array here.
       set({
         scene,
@@ -219,8 +228,8 @@ export const useTable = create<TableState>((set, get) => ({
         notes: notes ?? [],
         drawings: drawings ?? [],
         walls: walls ?? [],
-      }),
-    );
+      });
+    });
     // Live sight during a drag: polygons and tokens only. Explored cells are
     // carried over from the last full scene:state, since fog exploration is
     // persisted on drop rather than on every frame.
@@ -288,7 +297,7 @@ export const useTable = create<TableState>((set, get) => ({
     });
     socket.on('error', ({ message }) => set({ error: message }));
 
-    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null, sounds: [], templates: [], audio: null, notes: [], drawings: [] });
+    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null, sounds: [], templates: [], audio: null, notes: [], drawings: [], undoStack: [], toast: null });
   },
 
   disconnect() {
@@ -341,6 +350,7 @@ export const useTable = create<TableState>((set, get) => ({
       pushUndo(set, get, {
         label: `Moved ${before.name || 'token'}`,
         toast: false,
+        sceneId: get().scene?.id ?? null,
         apply: () => get().socket?.emit('token:commit', { tokenId, x: before.x, y: before.y }),
       });
     }
@@ -362,6 +372,7 @@ export const useTable = create<TableState>((set, get) => ({
     // recoverable mistake, not a re-entry job.
     pushUndo(set, get, {
       label: `Deleted ${token.name || 'token'}`,
+      sceneId: get().scene?.id ?? null,
       apply: () => {
         const { socket, scene } = get();
         if (!socket || !scene) return;
