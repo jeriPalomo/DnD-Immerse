@@ -204,13 +204,6 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
     return { spells: rows };
   });
 
-  app.get('/api/compendium/spells/:id', async (request) => {
-    const { id } = request.params as { id: string };
-    const rows = await db.select().from(srdSpells).where(eq(srdSpells.id, id)).limit(1);
-    if (!rows[0]) throw new HttpError(404, 'Spell not found');
-    return { spell: rows[0] };
-  });
-
   app.get('/api/compendium/items', async (request) => {
     const query = z
       .object({

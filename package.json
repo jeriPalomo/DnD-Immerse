@@ -15,7 +15,8 @@
     "db:migrate": "npm run db:migrate --workspace=@dnd/server",
     "test": "vitest run",
     "seed": "npm run seed --workspace=@dnd/server",
-    "srd:import": "npm run srd:import --workspace=@dnd/server"
+    "srd:import": "npm run srd:import --workspace=@dnd/server",
+    "backup": "npm run backup --workspace=@dnd/server"
   },
   "engines": {
     "node": ">=20"

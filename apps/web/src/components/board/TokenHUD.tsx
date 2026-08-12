@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { api } from '../../lib/api.js';
 import { CONDITIONS } from '@dnd/shared';
 import type { WireToken } from '@dnd/shared';
 import { deriveToken } from '../../lib/derive.js';
@@ -23,6 +24,17 @@ export function TokenHUD({
   onUpdate: (fields: Record<string, unknown>) => void;
   onDelete: () => void;
 }) {
+  const [uploadingArt, setUploadingArt] = useState(false);
+
+  async function uploadArt(file: File) {
+    setUploadingArt(true);
+    try {
+      await api.upload(`/api/tokens/${token.id}/image`, file);
+    } finally {
+      setUploadingArt(false);
+    }
+  }
+
   const [delta, setDelta] = useState('');
   const [showConditions, setShowConditions] = useState(false);
   const [showSight, setShowSight] = useState(false);
@@ -151,6 +163,22 @@ export function TokenHUD({
 
       {canEdit && (
         <div className="mt-3 space-y-2">
+          {/* Art for this token alone. Without it every goblin stamped from
+              the same NPC looks identical. */}
+          <label className="block cursor-pointer text-center text-[10px] text-arcane-400 hover:underline">
+            {uploadingArt ? 'Uploading…' : token.imageUrl ? 'Replace token art' : 'Set token art'}
+            <input
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              aria-label="Token art"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void uploadArt(file);
+              }}
+            />
+          </label>
+
           <button
             onClick={() => setShowConditions(!showConditions)}
             className="w-full rounded border border-ink-700 px-2 py-1 text-xs text-ink-300 hover:border-ink-600"

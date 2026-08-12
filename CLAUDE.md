@@ -159,6 +159,11 @@ drives installed Chrome via `channel: 'chrome'` — no browser download needed.
 Screenshot the page and look at it; a sheet that renders is not the same as a
 sheet whose numbers are right.
 
+**`npm run backup` exists and should be run before sessions.** This machine
+holds the only copy of a campaign. The snapshot uses `VACUUM INTO` rather than
+a file copy, because copying a live SQLite file can capture a torn write — the
+result looks fine until the day you need it.
+
 **`data/` does not sync between machines.** The desktop is the server of record
 and holds the real campaign database; other machines keep throwaway local data.
 Never sync a live SQLite file between two running servers.

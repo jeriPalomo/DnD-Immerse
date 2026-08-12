@@ -12,7 +12,8 @@
     "db:studio": "drizzle-kit studio",
     "srd:import": "tsx src/srd/import.ts",
     "test": "vitest run",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "backup": "tsx src/backup.ts"
   },
   "dependencies": {
     "@dice-roller/rpg-dice-roller": "^5.5.1",

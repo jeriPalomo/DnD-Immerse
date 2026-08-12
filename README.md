@@ -27,6 +27,7 @@ Useful scripts:
 | `npm run seed` | Example campaign with a full party |
 | `npm run db:generate` | New migration after a schema change |
 | `npm run build` | Production build |
+| `npm run backup` | Snapshot the database and uploads into `data/backups/` |
 
 ## Letting your friends in
 
@@ -41,6 +42,21 @@ That publishes the app on your `*.ts.net` hostname with a real HTTPS
 certificate. Invite your friends to your tailnet and send them the URL.
 
 Set `SECURE_COOKIES=true` once you are serving over HTTPS.
+
+## Backups
+
+```bash
+npm run backup
+```
+
+This machine holds the only copy of a campaign — sheets, maps, the journal, and
+every player's fog exploration. The script snapshots the database with SQLite's
+`VACUUM INTO` (a plain file copy of a live database can catch a half-written
+page) alongside every upload, keeps the ten most recent, and prints what it
+wrote. Worth running before each session, or on a scheduled task.
+
+Restoring is a file copy: stop the server, put `app.db` and `uploads/` back
+under `data/`, and start it again.
 
 ## How your friends join
 

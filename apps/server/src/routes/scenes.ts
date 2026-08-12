@@ -6,7 +6,7 @@ import { db } from '../db/index.js';
 import { campaigns, scenes, tokens } from '../db/schema.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
-import { storeImage } from '../lib/uploads.js';
+import { deleteUpload, storeImage } from '../lib/uploads.js';
 
 /**
  * Scenes are DM-authored. Players never list them - they only ever see the one
@@ -137,23 +137,46 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
     return { scene: rows[0] };
   });
 
-  app.get('/api/scenes/:id/tokens', async (request) => {
+  app.post('/api/tokens/:tokenId/image', async (request) => {
     const user = assertUser(request);
-    const { id } = request.params as { id: string };
-    const scene = await loadScene(id);
-    await requireMembership(scene.campaignId, user.id);
+    const { tokenId } = request.params as { tokenId: string };
 
-    // The socket payload is the filtered one; this REST route is DM-only so it
-    // cannot become a way around that filtering.
-    await requireDM(scene.campaignId, user.id);
+    const rows = await db.select().from(tokens).where(eq(tokens.id, tokenId)).limit(1);
+    const token = rows[0];
+    if (!token) throw new HttpError(404, 'Token not found');
 
-    const rows = await db.select().from(tokens).where(eq(tokens.sceneId, id));
-    return { tokens: rows };
+    const scene = await db.select().from(scenes).where(eq(scenes.id, token.sceneId)).limit(1);
+    if (!scene[0]) throw new HttpError(404, 'Token not found');
+
+    const membership = await requireMembership(scene[0].campaignId, user.id);
+    if (!membership.isDM && token.ownerUserId !== user.id) {
+      throw new HttpError(403, 'That is not your token');
+    }
+
+    const file = await request.file();
+    if (!file) throw new HttpError(400, 'No file uploaded');
+
+    const stored = await storeImage(await file.toBuffer(), 'tokens', { maxDimension: 512 });
+    const previous = token.imageUrl;
+
+    await db.update(tokens).set({ imageUrl: stored.url }).where(eq(tokens.id, tokenId));
+
+    // Only remove the old art if it was this token's own upload; an inherited
+    // actor portrait is still in use by the sheet.
+    if (previous?.startsWith('/uploads/tokens/')) await deleteUpload(previous);
+
+    if (app.io) {
+      const { broadcastSceneState } = await import('../realtime/scene.js');
+      await broadcastSceneState(app.io, scene[0].campaignId);
+    }
+
+    return { imageUrl: stored.url };
   });
 }
 
-async function loadScene(id: string) {
-  const rows = await db.select().from(scenes).where(eq(scenes.id, id)).limit(1);
+/** Loads a scene and checks it exists, for the routes keyed by scene id. */
+async function loadScene(sceneId: string) {
+  const rows = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1);
   if (!rows[0]) throw new HttpError(404, 'Scene not found');
   return rows[0];
 }
