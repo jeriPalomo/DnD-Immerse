@@ -20,19 +20,53 @@ interface PartyActor {
  * DM-only scene controls: create scenes, upload maps, calibrate the grid, and
  * drop tokens from the campaign's actors.
  */
+interface GridGuess {
+  size: number;
+  offsetX: number;
+  offsetY: number;
+  confidence: number;
+}
+
 export function SceneManager({ campaignId }: { campaignId: string }) {
-  const { scene, activateScene, createToken, wallTool, setWallTool, walls } = useTable();
+  const { scene, activateScene, createToken, wallTool, setWallTool, walls, eraseDrawing } = useTable();
   const [scenes, setScenes] = useState<SceneRow[]>([]);
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
   const [actors, setActors] = useState<PartyActor[]>([]);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<'scenes' | 'tokens' | 'grid' | 'vision'>('scenes');
   const [localDarkness, setLocalDarkness] = useState(0);
+  const [guess, setGuess] = useState<GridGuess | null>(null);
   const [browsing, setBrowsing] = useState(false);
 
   useEffect(() => {
     if (scene) setLocalDarkness(scene.darkness);
   }, [scene?.id, scene?.darkness]);
+
+  /**
+   * Paste a map straight in.
+   *
+   * Finding a map online and pressing Ctrl+V is the actual workflow; a file
+   * picker means saving it first and then going looking for it.
+   */
+  useEffect(() => {
+    function onPaste(event: ClipboardEvent) {
+      if (!scene) return;
+
+      const image = [...(event.clipboardData?.items ?? [])].find((item) =>
+        item.type.startsWith('image/'),
+      );
+      if (!image) return;
+
+      const file = image.getAsFile();
+      if (file) {
+        event.preventDefault();
+        void uploadMap(scene.id, file);
+      }
+    }
+
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [scene?.id]);
 
   const load = useCallback(async () => {
     const [sceneRes, actorRes] = await Promise.all([
@@ -63,10 +97,17 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
   async function uploadMap(sceneId: string, file: File) {
     setBusy(true);
     try {
-      await api.upload(`/api/scenes/${sceneId}/map`, file);
+      const res = await api.upload<{ grid: GridGuess | null }>(
+        `/api/scenes/${sceneId}/map`,
+        file,
+      );
       await load();
       // Re-activate so every client picks up the new dimensions.
       if (activeSceneId === sceneId) activateScene(sceneId);
+
+      // Offered, never applied silently: a wrong guess you did not ask for is
+      // more confusing than three sliders.
+      if (res.grid && res.grid.confidence > 0.15) setGuess(res.grid);
     } finally {
       setBusy(false);
     }
@@ -146,6 +187,39 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
         </div>
       )}
 
+      {guess && scene && (
+        <div className="mb-2 rounded-lg border border-arcane-500/50 bg-arcane-500/10 p-2">
+          <div className="text-xs text-arcane-300">
+            Found a {guess.size}px grid
+            {guess.confidence < 0.4 && <span className="text-ink-500"> (not very sure)</span>}
+          </div>
+          <div className="mt-0.5 text-[10px] text-ink-500">
+            offset {guess.offsetX}, {guess.offsetY} — check the overlay before accepting
+          </div>
+          <div className="mt-1.5 flex gap-1">
+            <button
+              onClick={() => {
+                void patchScene(scene.id, {
+                  gridSize: guess.size,
+                  gridOffsetX: guess.offsetX,
+                  gridOffsetY: guess.offsetY,
+                });
+                setGuess(null);
+              }}
+              className="flex-1 rounded border border-arcane-500 bg-arcane-500/20 px-2 py-1 text-[11px] text-arcane-300"
+            >
+              Use it
+            </button>
+            <button
+              onClick={() => setGuess(null)}
+              className="rounded border border-ink-700 px-2 py-1 text-[11px] text-ink-400"
+            >
+              Ignore
+            </button>
+          </div>
+        </div>
+      )}
+
       {tab === 'grid' && scene && (
         <GridCalibration scene={scene} onChange={(fields) => void patchScene(scene.id, fields)} />
       )}
@@ -178,6 +252,8 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
                   ['wall', 'Wall'],
                   ['door', 'Door'],
                   ['note', 'Pin'],
+                  ['draw', 'Pen'],
+                  ['arrow', 'Arrow'],
                 ] as const
               ).map(([value, label]) => (
                 <button
@@ -197,6 +273,21 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
               Click to place points; each click continues the run. Double-click to
               finish a run, alt-click a wall to delete it.
             </p>
+          </div>
+
+          <div className="flex gap-1">
+            <button
+              onClick={() => eraseDrawing('mine')}
+              className="flex-1 rounded border border-ink-700 px-2 py-1 text-[10px] text-ink-400 hover:border-ink-600"
+            >
+              Erase my drawings
+            </button>
+            <button
+              onClick={() => eraseDrawing('all')}
+              className="flex-1 rounded border border-red-900/60 px-2 py-1 text-[10px] text-red-300 hover:bg-red-950/40"
+            >
+              Erase all
+            </button>
           </div>
 
           <label className="flex items-center gap-2 text-xs text-ink-300">

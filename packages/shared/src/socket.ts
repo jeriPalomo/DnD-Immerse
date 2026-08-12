@@ -189,6 +189,18 @@ export interface WireMapNote {
   hidden: boolean;
 }
 
+export interface WireDrawing {
+  id: string;
+  sceneId: string;
+  ownerUserId: string | null;
+  kind: 'freehand' | 'arrow' | 'text';
+  /** Flat x,y pairs in grid units, as Konva wants them. */
+  points: number[];
+  color: string;
+  text: string;
+  width: number;
+}
+
 export interface WireTemplate {
   id: string;
   sceneId: string;
@@ -321,6 +333,17 @@ export const audioControlSchema = z.object({
   volume: z.number().min(0).max(1).optional(),
 });
 
+export const drawingCreateSchema = z.object({
+  sceneId: z.string(),
+  kind: z.enum(['freehand', 'arrow', 'text']),
+  points: z.array(z.number()).min(2).max(2000),
+  color: z.string().max(20).default('#e8853f'),
+  text: z.string().max(120).default(''),
+  width: z.number().min(1).max(20).default(3),
+});
+
+export type DrawingCreatePayload = z.infer<typeof drawingCreateSchema>;
+
 export const groupRollSchema = z.object({
   /** Which kind of check every player character makes. */
   kind: z.enum(['skill', 'save', 'ability']),
@@ -396,6 +419,7 @@ export interface ServerToClientEvents {
     /** Doors are shown to players so they can be opened; walls are not. */
     doors: WireDoor[];
     notes: WireMapNote[];
+    drawings: WireDrawing[];
     /** DM only. Absent from every player payload. */
     walls?: WireWall[];
   }) => void;
@@ -471,6 +495,8 @@ export interface ClientToServerEvents {
   'audio:control': (payload: AudioControlPayload) => void;
   'template:create': (payload: TemplateCreatePayload) => void;
   'template:delete': (payload: { templateId: string }) => void;
+  'drawing:create': (payload: DrawingCreatePayload) => void;
+  'drawing:delete': (payload: { drawingId: string | 'mine' | 'all' }) => void;
   'ambient:create': (payload: AmbientCreatePayload) => void;
   'ambient:delete': (payload: { soundId: string }) => void;
 

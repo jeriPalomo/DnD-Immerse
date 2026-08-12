@@ -140,6 +140,16 @@ hooks on the second render than the first. Shortcut handlers read
 `useTable.getState()` when a key fires rather than closing over render values,
 which also means they cannot act on a stale selection.
 
+**Grid detection is signal processing, not AI.** `gridDetect.ts` autocorrelates
+the per-row and per-column edge profile to find the pitch a map already has
+printed on it. Three failure modes it has to handle, each of which had a test
+written before the fix: harmonics (the peak is often 2× the true period, so
+take the earliest lag within 90% of it), prominence measured as a z-score
+rather than a ratio (the mean correlation on a clean grid is negative), and
+flat profiles (a gradient has no signal, and float residue in it otherwise
+produces a confident answer about nothing). The guess is always confirmed by
+the DM, never applied silently.
+
 ## Conventions
 
 `packages/shared` is the contract between client and server — Zod schemas, the

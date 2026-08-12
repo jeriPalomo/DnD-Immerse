@@ -10,6 +10,7 @@ import type {
   WireAmbientSound,
   WireAudioState,
   WireDoor,
+  WireDrawing,
   WireEncounter,
   WireMapNote,
   WirePlaylist,
@@ -36,10 +37,11 @@ interface TableState {
   vision: WireVision | null;
   doors: WireDoor[];
   notes: WireMapNote[];
+  drawings: WireDrawing[];
   /** Only ever populated for the DM; players never receive wall geometry. */
   walls: WireWall[];
   /** DM wall-drawing mode. */
-  wallTool: 'off' | 'wall' | 'door' | 'note';
+  wallTool: 'off' | 'wall' | 'door' | 'note' | 'draw' | 'arrow';
   encounter: WireEncounter | null;
   audio: WireAudioState | null;
   playlists: WirePlaylist[];
@@ -80,7 +82,9 @@ interface TableState {
   updateToken: (tokenId: string, fields: Record<string, unknown>) => void;
   deleteToken: (tokenId: string) => void;
   pingMap: (x: number, y: number) => void;
-  setWallTool: (tool: 'off' | 'wall' | 'door' | 'note') => void;
+  setWallTool: (tool: 'off' | 'wall' | 'door' | 'note' | 'draw' | 'arrow') => void;
+  addDrawing: (kind: 'freehand' | 'arrow' | 'text', points: number[], color: string, text?: string) => void;
+  eraseDrawing: (id: string | 'mine' | 'all') => void;
   placeNote: (x: number, y: number) => Promise<void>;
   toggleNote: (noteId: string, hidden: boolean) => Promise<void>;
   removeNote: (noteId: string) => Promise<void>;
@@ -161,6 +165,7 @@ export const useTable = create<TableState>((set, get) => ({
   vision: null,
   doors: [],
   notes: [],
+  drawings: [],
   walls: [],
   wallTool: 'off',
   encounter: null,
@@ -198,7 +203,7 @@ export const useTable = create<TableState>((set, get) => ({
     });
     socket.on('presence', ({ members }) => set({ members }));
 
-    socket.on('scene:state', ({ scene, tokens, vision, doors, notes, walls }) =>
+    socket.on('scene:state', ({ scene, tokens, vision, doors, notes, drawings, walls }) =>
       // `walls` is absent for players, so it collapses to an empty array here.
       set({
         scene,
@@ -206,6 +211,7 @@ export const useTable = create<TableState>((set, get) => ({
         vision: vision ?? null,
         doors: doors ?? [],
         notes: notes ?? [],
+        drawings: drawings ?? [],
         walls: walls ?? [],
       }),
     );
@@ -269,7 +275,7 @@ export const useTable = create<TableState>((set, get) => ({
     });
     socket.on('error', ({ message }) => set({ error: message }));
 
-    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null, sounds: [], templates: [], audio: null, notes: [] });
+    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null, sounds: [], templates: [], audio: null, notes: [], drawings: [] });
   },
 
   disconnect() {
@@ -489,6 +495,15 @@ export const useTable = create<TableState>((set, get) => ({
 
   // Pins go over REST but the server pushes a scene refresh, so every client
   // sees one appear without reloading.
+  addDrawing(kind, points, color, text = '') {
+    const sceneId = get().scene?.id;
+    if (sceneId) get().socket?.emit('drawing:create', { sceneId, kind, points, color, text, width: 3 });
+  },
+
+  eraseDrawing(id) {
+    get().socket?.emit('drawing:delete', { drawingId: id });
+  },
+
   async placeNote(x, y) {
     const sceneId = get().scene?.id;
     if (!sceneId) return;

@@ -396,6 +396,31 @@ export const templates = sqliteTable(
   (t) => [index('templates_scene_idx').on(t.sceneId)],
 );
 
+/**
+ * Freehand annotation on the map: terrain the map does not show, arrows for
+ * "he ran that way", labels for improvised rooms.
+ */
+export const drawings = sqliteTable(
+  'drawings',
+  {
+    id: id(),
+    sceneId: text('scene_id')
+      .notNull()
+      .references(() => scenes.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['freehand', 'arrow', 'text'] })
+      .notNull()
+      .default('freehand'),
+    /** Points in GRID UNITS, like everything else on the board. */
+    points: text('points', { mode: 'json' }).$type<number[]>().notNull(),
+    color: text('color').notNull().default('#e8853f'),
+    text: text('text').notNull().default(''),
+    width: real('width').notNull().default(3),
+    createdAt: epoch('created_at'),
+  },
+  (t) => [index('drawings_scene_idx').on(t.sceneId)],
+);
+
 /* ------------------------------------------------------------------ chat */
 
 export const chatMessages = sqliteTable(
@@ -711,6 +736,7 @@ export type AmbientSound = typeof ambientSounds.$inferSelect;
 export type JournalEntry = typeof journalEntries.$inferSelect;
 export type JournalPage = typeof journalPages.$inferSelect;
 export type MapNote = typeof mapNotes.$inferSelect;
+export type Drawing = typeof drawings.$inferSelect;
 export type SrdSpell = typeof srdSpells.$inferSelect;
 export type SrdMonster = typeof srdMonsters.$inferSelect;
 export type SrdItem = typeof srdItems.$inferSelect;

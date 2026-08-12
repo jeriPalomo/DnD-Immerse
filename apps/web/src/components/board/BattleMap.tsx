@@ -10,6 +10,7 @@ import {
 import type Konva from 'konva';
 import type { WireScene, WireToken } from '@dnd/shared';
 import { DoorLayer, FogLayer, NoteLayer, WallLayer } from './FogLayer.js';
+import { DrawingLayer, colorForUser } from './DrawingLayer.js';
 import { TemplateLayer } from './TemplateLayer.js';
 import { LightLayer, WeatherLayer } from './AtmosphereLayer.js';
 import { useTable } from '../../store/table.js';
@@ -44,13 +45,21 @@ const DISPOSITION_COLOR: Record<string, string> = {
 export function BattleMap({ isDM }: { isDM: boolean }) {
   const {
     scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool, templates, notes,
+    drawings,
     select, target, moveToken, commitToken, pingMap, createWall, deleteWall, toggleDoor, clearTemplate,
-    placeNote, toggleNote, removeNote,
+    placeNote, toggleNote, removeNote, addDrawing, eraseDrawing,
   } = useTable();
+
 
   // Where the DM clicked first while drawing a wall segment.
   const [wallStart, setWallStart] = useState<{ x: number; y: number } | null>(null);
   const { user } = useAuth();
+
+  // The stroke in progress, kept local so it tracks the cursor with no round
+  // trip; it is sent once on release.
+  const [stroke, setStroke] = useState<number[] | null>(null);
+  const myColor = colorForUser(user?.id ?? '');
+  const drawingMode = wallTool === 'draw' || wallTool === 'arrow';
 
   const observerRef = useRef<ResizeObserver | null>(null);
   // Zero until the container is measured; fitting against a placeholder size
@@ -113,6 +122,18 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [fitToMap]);
 
+  /** Pointer position in grid units, or null if it is off-stage. */
+  function pointerGrid(event: Konva.KonvaEventObject<MouseEvent>) {
+    const stage = event.target.getStage();
+    const pointer = stage?.getPointerPosition();
+    if (!stage || !pointer) return null;
+
+    return pixelToGrid(
+      { x: (pointer.x - stage.x()) / stage.scaleX(), y: (pointer.y - stage.y()) / stage.scaleY() },
+      grid,
+    );
+  }
+
   const onWheel = useCallback((event: Konva.KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault();
     const stage = event.target.getStage();
@@ -165,8 +186,30 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
         scaleY={view.scale}
         x={view.x}
         y={view.y}
-        draggable
+        // Panning is suspended while drawing, or the map slides under the pen.
+        draggable={!drawingMode}
         onWheel={onWheel}
+        onMouseDown={(e) => {
+          if (!drawingMode) return;
+          const point = pointerGrid(e);
+          if (point) setStroke([point.x, point.y]);
+        }}
+        onMouseMove={(e) => {
+          if (!drawingMode || !stroke) return;
+          const point = pointerGrid(e);
+          if (!point) return;
+
+          // An arrow only ever needs its two ends.
+          if (wallTool === 'arrow') setStroke([stroke[0], stroke[1], point.x, point.y]);
+          else setStroke([...stroke, point.x, point.y]);
+        }}
+        onMouseUp={() => {
+          if (!drawingMode || !stroke) return;
+          if (stroke.length >= 4) {
+            addDrawing(wallTool === 'arrow' ? 'arrow' : 'freehand', stroke, myColor);
+          }
+          setStroke(null);
+        }}
         onDragEnd={(e) => setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }))}
         onClick={(e) => {
           if (e.target !== e.target.getStage() && e.target.name() !== 'map') return;
@@ -247,6 +290,17 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
             grid={grid}
             feetPerSquare={scene.feetPerSquare}
             darkness={scene.darkness}
+          />
+        </Layer>
+
+        <Layer>
+          <DrawingLayer
+            drawings={drawings}
+            grid={grid}
+            pending={stroke}
+            pendingColor={myColor}
+            onErase={eraseDrawing}
+            canErase={(drawing) => isDM || drawing.ownerUserId === user?.id}
           />
         </Layer>
 

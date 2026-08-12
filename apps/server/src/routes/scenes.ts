@@ -7,6 +7,8 @@ import { campaigns, scenes, tokens } from '../db/schema.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
 import { deleteUpload, storeImage } from '../lib/uploads.js';
+import { detectGrid } from '@dnd/shared';
+import sharp from 'sharp';
 
 /**
  * Scenes are DM-authored. Players never list them - they only ever see the one
@@ -130,7 +132,43 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
     if (!file) throw new HttpError(400, 'No file uploaded');
 
     // Battle maps are large; 4096 keeps detail without a 30MB payload.
-    const stored = await storeImage(await file.toBuffer(), 'maps', { maxDimension: 4096 });
+    const original = await file.toBuffer();
+    const stored = await storeImage(original, 'maps', { maxDimension: 4096 });
+
+    /*
+     * Guess the grid the map already has printed on it, so the DM confirms a
+     * number instead of nudging three sliders.
+     *
+     * Measured on a downscaled copy - the pattern is the same and the
+     * autocorrelation is far cheaper - then scaled back up to the stored
+     * image's coordinates.
+     */
+    let grid: { size: number; offsetX: number; offsetY: number; confidence: number } | null = null;
+    try {
+      const sample = await sharp(original)
+        .greyscale()
+        .resize(900, 900, { fit: 'inside', withoutEnlargement: true })
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+      const guess = detectGrid(
+        new Uint8Array(sample.data),
+        sample.info.width,
+        sample.info.height,
+      );
+
+      if (guess.size > 0) {
+        const scale = stored.width / sample.info.width;
+        grid = {
+          size: Math.round(guess.size * scale),
+          offsetX: Math.round(guess.offsetX * scale),
+          offsetY: Math.round(guess.offsetY * scale),
+          confidence: guess.confidence,
+        };
+      }
+    } catch {
+      // Detection is a convenience; a map that resists it still uploads.
+    }
 
     await db
       .update(scenes)
@@ -138,7 +176,8 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
       .where(eq(scenes.id, id));
 
     const rows = await db.select().from(scenes).where(eq(scenes.id, id)).limit(1);
-    return { scene: rows[0] };
+    // Reported, not applied: the DM sees the overlay and accepts it.
+    return { scene: rows[0], grid };
   });
 
   app.post('/api/tokens/:tokenId/image', async (request) => {

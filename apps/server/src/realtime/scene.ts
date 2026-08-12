@@ -3,6 +3,7 @@ import {
   campaignDmRoom,
   campaignRoom,
   clampToMap,
+  drawingCreateSchema,
   movementBlocked,
   snapTokenPosition,
   tokenCenter,
@@ -20,7 +21,15 @@ import type {
 } from '@dnd/shared';
 import { wallCreateSchema, wallUpdateSchema } from '@dnd/shared';
 import { db } from '../db/index.js';
-import { actors, campaigns, mapNotes, scenes, tokens, walls as wallsTable } from '../db/schema.js';
+import {
+  actors,
+  campaigns,
+  drawings as drawingsTable,
+  mapNotes,
+  scenes,
+  tokens,
+  walls as wallsTable,
+} from '../db/schema.js';
 import {
   computeLivePolygons,
   computePlayerView,
@@ -35,6 +44,18 @@ import type { IOServer, SocketData } from './index.js';
 import type { Scene, Token, Wall } from '../db/schema.js';
 
 type SceneSocket = Socket<ClientToServerEvents, ServerToClientEvents, object, SocketData>;
+
+/** The scene a campaign is currently showing, or null. */
+async function activeSceneOf(campaignId: string) {
+  const rows = await db
+    .select({ activeSceneId: campaigns.activeSceneId })
+    .from(campaigns)
+    .where(eq(campaigns.id, campaignId))
+    .limit(1);
+
+  const sceneId = rows[0]?.activeSceneId;
+  return sceneId ? ((await sceneOf(sceneId)) ?? null) : null;
+}
 
 /**
  * Walls and tokens for the scene currently being dragged over.
@@ -179,6 +200,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
       vision: null,
       doors: [],
       notes: [],
+      drawings: [],
     });
     return;
   }
@@ -196,6 +218,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
   const sceneWalls = await wallsOf(sceneId);
   const doors = sceneWalls.filter((w) => w.door > 0).map(toWireDoor);
   const notes = await db.select().from(mapNotes).where(eq(mapNotes.sceneId, sceneId));
+  const drawings = await db.select().from(drawingsTable).where(eq(drawingsTable.sceneId, sceneId));
 
   // Per-socket, because both "hidden unless you own it" and line of sight
   // differ between players.
@@ -210,6 +233,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
         vision: null,
         doors,
         notes,
+        drawings,
         walls: sceneWalls.map(toWireWall),
       });
       continue;
@@ -233,6 +257,8 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
       doors,
       // A pin the DM has not revealed is absent, like a hidden token.
       notes: notes.filter((note) => !note.hidden),
+      // Drawings are shared by design - annotating the map is how you point.
+      drawings,
       // No `walls` key at all for a player - not an empty array, absent.
     });
   }
@@ -588,6 +614,61 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
   });
 
   /* ------------------------------------------------------------- walls */
+
+  socket.on('drawing:create', async (payload) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const input = drawingCreateSchema.parse(payload);
+    const scene = await sceneOf(input.sceneId);
+    if (!scene || scene.campaignId !== ctx.campaignId) return;
+
+    await db.insert(drawingsTable).values({
+      id: newId(),
+      sceneId: input.sceneId,
+      ownerUserId: user.id,
+      kind: input.kind,
+      points: input.points,
+      color: input.color,
+      text: input.text,
+      width: input.width,
+    });
+
+    await broadcastSceneState(io, ctx.campaignId);
+  });
+
+  socket.on('drawing:delete', async ({ drawingId }) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const scene = await activeSceneOf(ctx.campaignId);
+    if (!scene) return;
+
+    if (drawingId === 'all') {
+      // Clearing everyone's annotations is the DM's call.
+      if (!ctx.isDM) {
+        socket.emit('error', { message: 'Only the DM can clear everything' });
+        return;
+      }
+      await db.delete(drawingsTable).where(eq(drawingsTable.sceneId, scene.id));
+    } else if (drawingId === 'mine') {
+      await db
+        .delete(drawingsTable)
+        .where(and(eq(drawingsTable.sceneId, scene.id), eq(drawingsTable.ownerUserId, user.id)));
+    } else {
+      const rows = await db.select().from(drawingsTable).where(eq(drawingsTable.id, drawingId)).limit(1);
+      const drawing = rows[0];
+      if (!drawing) return;
+
+      if (!ctx.isDM && drawing.ownerUserId !== user.id) {
+        socket.emit('error', { message: 'That is not your drawing' });
+        return;
+      }
+      await db.delete(drawingsTable).where(eq(drawingsTable.id, drawingId));
+    }
+
+    await broadcastSceneState(io, ctx.campaignId);
+  });
 
   socket.on('wall:create', async (payload) => {
     const ctx = await context();

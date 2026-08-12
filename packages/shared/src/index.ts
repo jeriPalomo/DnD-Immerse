@@ -10,3 +10,4 @@ export * from './effects.js';
 export * from './aoe.js';
 export * from './audio.js';
 export * from './rest.js';
+export * from './gridDetect.js';
