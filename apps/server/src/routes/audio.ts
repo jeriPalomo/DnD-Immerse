@@ -46,6 +46,7 @@ export async function audioRoutes(app: FastifyInstance): Promise<void> {
       .object({
         name: z.string().min(1).max(60).optional(),
         mode: z.enum(['sequential', 'shuffle', 'simultaneous']).optional(),
+        role: z.enum(['none', 'combat']).optional(),
         fadeMs: z.number().int().min(0).max(10000).optional(),
       })
       .parse(request.body);

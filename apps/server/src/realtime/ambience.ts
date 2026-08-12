@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import {
   ambientCreateSchema,
   audioControlSchema,
@@ -63,6 +63,7 @@ export async function playlistsOf(campaignId: string): Promise<WirePlaylist[]> {
     id: list.id,
     name: list.name,
     mode: list.mode,
+    role: list.role,
     fadeMs: list.fadeMs,
     tracks: tracks
       .filter((track) => track.playlistId === list.id)
@@ -281,6 +282,31 @@ export function registerAmbienceHandlers(io: IOServer, socket: AmbienceSocket): 
     await broadcastAudio(io, ctx.campaignId);
   });
 
+  /** Shows a journal image large on every screen for a moment. */
+  socket.on('handout:show', async ({ pageId }) => {
+    const ctx = await context();
+    if (!ctx || !ctx.isDM) {
+      socket.emit('error', { message: 'Only the DM can show a handout' });
+      return;
+    }
+
+    const { journalEntries, journalPages } = await import('../db/schema.js');
+    const rows = await db
+      .select({ page: journalPages, entry: journalEntries })
+      .from(journalPages)
+      .innerJoin(journalEntries, eq(journalPages.entryId, journalEntries.id))
+      .where(eq(journalPages.id, pageId))
+      .limit(1);
+
+    const found = rows[0];
+    if (!found?.page.fileUrl || found.entry.campaignId !== ctx.campaignId) return;
+
+    io.to(campaignRoom(ctx.campaignId)).emit('handout:reveal', {
+      imageUrl: found.page.fileUrl,
+      title: found.page.title,
+    });
+  });
+
   socket.on('ambient:create', async (payload) => {
     const ctx = await context();
     if (!ctx || !ctx.isDM) {
@@ -359,4 +385,88 @@ export function registerAmbienceHandlers(io: IOServer, socket: AmbienceSocket): 
     await db.delete(templates).where(eq(templates.id, templateId));
     await broadcastTemplates(io, ctx.campaignId);
   });
+}
+
+/**
+ * Switches to the combat playlist when a fight starts, and back when it ends.
+ *
+ * The DM is busiest exactly when the music should change, so this happens on
+ * its own. What was playing is stored rather than held in memory, so a server
+ * restart mid-combat does not lose the way back.
+ */
+export async function setCombatMusic(
+  io: IOServer,
+  campaignId: string,
+  inCombat: boolean,
+): Promise<void> {
+  const rows = await db
+    .select()
+    .from(audioState)
+    .where(eq(audioState.campaignId, campaignId))
+    .limit(1);
+  const current = rows[0];
+
+  if (inCombat) {
+    const combat = await db
+      .select()
+      .from(playlists)
+      .where(and(eq(playlists.campaignId, campaignId), eq(playlists.role, 'combat')))
+      .limit(1);
+    if (!combat[0]) return;
+
+    const tracks = await db
+      .select()
+      .from(playlistTracks)
+      .where(eq(playlistTracks.playlistId, combat[0].id))
+      .orderBy(asc(playlistTracks.sortOrder));
+    if (tracks.length === 0) return;
+
+    // Already playing combat music; leave it be rather than restarting it.
+    if (current?.playlistId === combat[0].id && current.playing) return;
+
+    await db
+      .insert(audioState)
+      .values({
+        campaignId,
+        playlistId: combat[0].id,
+        trackId: tracks[0].id,
+        playing: true,
+        startedAt: Date.now(),
+        volume: current?.volume ?? 0.6,
+        resumePlaylistId: current?.playing ? current.playlistId : null,
+        resumeTrackId: current?.playing ? current.trackId : null,
+      })
+      .onConflictDoUpdate({
+        target: audioState.campaignId,
+        set: {
+          playlistId: combat[0].id,
+          trackId: tracks[0].id,
+          playing: true,
+          startedAt: Date.now(),
+          resumePlaylistId: current?.playing ? current.playlistId : null,
+          resumeTrackId: current?.playing ? current.trackId : null,
+        },
+      });
+
+    await broadcastAudio(io, campaignId);
+    return;
+  }
+
+  if (!current) return;
+
+  // Nothing to go back to: stop rather than leaving battle music over a tavern.
+  const resuming = Boolean(current.resumeTrackId);
+  await db
+    .update(audioState)
+    .set({
+      playlistId: current.resumePlaylistId,
+      trackId: current.resumeTrackId,
+      playing: resuming,
+      startedAt: resuming ? Date.now() : null,
+      resumePlaylistId: null,
+      resumeTrackId: null,
+    })
+    .where(eq(audioState.campaignId, campaignId));
+
+  await broadcastAudio(io, campaignId);
 }

@@ -6,6 +6,7 @@ const SHORTCUTS: [string, string][] = [
   ['T', 'Target the selected token'],
   ['Space', 'Next turn (DM, in combat)'],
   ['F', 'Fit the map to the window'],
+  ['\\', 'Focus the board, hiding the side panels'],
   ['Ctrl+Z', 'Undo the last delete or move'],
   ['?', 'This list'],
 ];

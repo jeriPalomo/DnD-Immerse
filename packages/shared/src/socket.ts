@@ -140,6 +140,7 @@ export interface WirePlaylist {
   id: string;
   name: string;
   mode: 'sequential' | 'shuffle' | 'simultaneous';
+  role: 'none' | 'combat';
   fadeMs: number;
   tracks: WireTrack[];
 }
@@ -445,6 +446,8 @@ export interface ServerToClientEvents {
   'audio:playlists': (payload: { playlists: WirePlaylist[] }) => void;
   'audio:sounds': (payload: { sounds: WireAmbientSound[] }) => void;
   'template:state': (payload: { templates: WireTemplate[] }) => void;
+  /** Shown large on every screen for a moment, then it settles into the journal. */
+  'handout:reveal': (payload: { imageUrl: string; title: string }) => void;
 
   'ping:map': (payload: PingPayload & { byUserId: string; color: string }) => void;
 
@@ -491,6 +494,8 @@ export interface ClientToServerEvents {
   'turn:next': (payload: Record<string, never>) => void;
   'turn:previous': (payload: Record<string, never>) => void;
   'damage:apply': (payload: DamageApplyPayload) => void;
+  'death:save': (payload: { tokenId: string }) => void;
+  'handout:show': (payload: { pageId: string }) => void;
 
   'audio:control': (payload: AudioControlPayload) => void;
   'template:create': (payload: TemplateCreatePayload) => void;

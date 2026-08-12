@@ -105,6 +105,11 @@ interface TableState {
   placeAmbient: (payload: Record<string, unknown>) => void;
   removeAmbient: (soundId: string) => void;
   groupRoll: (kind: 'skill' | 'save' | 'ability', key: string, dc: number | null, secret: boolean) => void;
+  rollDeathSave: (tokenId: string) => void;
+  showHandout: (pageId: string) => void;
+  /** A handout being shown large right now. */
+  reveal: { imageUrl: string; title: string } | null;
+  dismissReveal: () => void;
   undo: () => void;
   dismissToast: () => void;
   applyDamage: (
@@ -172,6 +177,7 @@ export const useTable = create<TableState>((set, get) => ({
   lastDamage: null,
   undoStack: [],
   toast: null,
+  reveal: null,
   audio: null,
   playlists: [],
   sounds: [],
@@ -233,6 +239,13 @@ export const useTable = create<TableState>((set, get) => ({
     socket.on('audio:playlists', ({ playlists }) => set({ playlists }));
     socket.on('audio:sounds', ({ sounds }) => set({ sounds }));
     socket.on('template:state', ({ templates }) => set({ templates }));
+    socket.on('handout:reveal', (reveal) => {
+      set({ reveal });
+      // Long enough to take in, short enough not to block the table.
+      setTimeout(() => {
+        if (get().reveal?.imageUrl === reveal.imageUrl) set({ reveal: null });
+      }, 8000);
+    });
     // Surfaced as a short-lived banner so the DM sees resistances being applied
     // without having to read the chat log mid-combat.
     socket.on('damage:applied', ({ results }) => {
@@ -383,6 +396,18 @@ export const useTable = create<TableState>((set, get) => ({
 
   groupRoll(kind, key, dc, secret) {
     get().socket?.emit('chat:groupRoll', { kind, key, dc, secret });
+  },
+
+  rollDeathSave(tokenId) {
+    get().socket?.emit('death:save', { tokenId });
+  },
+
+  showHandout(pageId) {
+    get().socket?.emit('handout:show', { pageId });
+  },
+
+  dismissReveal() {
+    set({ reveal: null });
   },
 
   undo() {

@@ -15,6 +15,7 @@ interface Playlist {
   id: string;
   name: string;
   mode: 'sequential' | 'shuffle' | 'simultaneous';
+  role: 'none' | 'combat';
   tracks: Track[];
 }
 
@@ -117,6 +118,23 @@ export function Soundboard({ campaignId }: { campaignId: string }) {
                 <option value="shuffle">shuffle</option>
                 <option value="simultaneous">layered</option>
               </select>
+              <button
+                onClick={async () => {
+                  await api.patch(`/api/playlists/${playlist.id}`, {
+                    role: playlist.role === 'combat' ? 'none' : 'combat',
+                  });
+                  await load();
+                }}
+                title="Starting an encounter switches to this automatically, and ending it switches back"
+                className={`shrink-0 rounded border px-1 text-[10px] transition-colors ${
+                  playlist.role === 'combat'
+                    ? 'border-ember-500 bg-ember-500/20 text-ember-300'
+                    : 'border-ink-700 text-ink-600 hover:text-ink-400'
+                }`}
+              >
+                combat
+              </button>
+
               <label className="shrink-0 cursor-pointer text-[10px] text-arcane-400 hover:underline">
                 + track
                 <input

@@ -7,6 +7,7 @@ import {
   concentrationDC,
   concentrationSave,
   damageApplySchema,
+  resolveDeathSave,
   expiredEffects,
   initiativeExpression,
   initiativeAddSchema,
@@ -27,6 +28,7 @@ import { activeEffects, actors, encounters, initiativeEntries, tokens } from '..
 import { getMembership } from '../auth/guards.js';
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
+import { setCombatMusic } from './ambience.js';
 import { invalidateDragCache } from './scene.js';
 import type { IOServer, SocketData } from './index.js';
 import type { Token } from '../db/schema.js';
@@ -176,6 +178,7 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
     });
 
     await broadcastEncounter(io, ctx.campaignId);
+    await setCombatMusic(io, ctx.campaignId, true);
   });
 
   socket.on('encounter:end', async () => {
@@ -188,6 +191,7 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       .where(eq(encounters.campaignId, ctx.campaignId));
 
     await broadcastEncounter(io, ctx.campaignId);
+    await setCombatMusic(io, ctx.campaignId, false);
   });
 
   socket.on('initiative:add', async (payload) => {
@@ -311,6 +315,73 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       await broadcastEncounter(io, ctx.campaignId);
     });
   }
+
+  /**
+   * A death saving throw, rolled here like every other die.
+   *
+   * The player whose character it is may roll their own; the DM may roll for
+   * anyone, which is what happens when someone steps away from the table.
+   */
+  socket.on('death:save', async ({ tokenId }) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const found = await db.select().from(tokens).where(eq(tokens.id, tokenId)).limit(1);
+    const token = found[0];
+    if (!token?.actorId) return;
+
+    if (!ctx.isDM && token.ownerUserId !== user.id) {
+      socket.emit('error', { message: 'That is not your character' });
+      return;
+    }
+
+    const actorRows = await db.select().from(actors).where(eq(actors.id, token.actorId)).limit(1);
+    const actor = actorRows[0];
+    if (!actor) return;
+
+    const roll = rollExpression('1d20', `${actor.name} death save`);
+    const outcome = resolveDeathSave(roll.total, {
+      successes: actor.deathSaveSuccesses,
+      failures: actor.deathSaveFailures,
+    });
+
+    await db
+      .update(actors)
+      .set({
+        deathSaveSuccesses: outcome.successes,
+        deathSaveFailures: outcome.failures,
+        ...(outcome.revivedAtHp !== null ? { hpCurrent: outcome.revivedAtHp } : {}),
+        updatedAt: Date.now(),
+      })
+      .where(eq(actors.id, actor.id));
+
+    if (outcome.revivedAtHp !== null) {
+      await db
+        .update(tokens)
+        .set({
+          hp: outcome.revivedAtHp,
+          conditions: token.conditions.filter((c) => c !== 'unconscious'),
+        })
+        .where(eq(tokens.id, tokenId));
+    } else if (outcome.dead) {
+      await db
+        .update(tokens)
+        .set({ conditions: [...new Set([...token.conditions, 'unconscious'])] })
+        .where(eq(tokens.id, tokenId));
+    }
+
+    invalidateDragCache(token.sceneId);
+    await postSystemMessage(
+      io,
+      ctx.campaignId,
+      user.id,
+      `${actor.name} death save: ${roll.output} — ${outcome.summary}`,
+    );
+
+    const { broadcastSceneState } = await import('./scene.js');
+    await broadcastSceneState(io, ctx.campaignId);
+    await broadcastEncounter(io, ctx.campaignId);
+  });
 
   /**
    * Applies damage or healing to tokens, with resistances taken from the

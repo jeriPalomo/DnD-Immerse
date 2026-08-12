@@ -29,6 +29,13 @@
       "when": 1786542066237,
       "tag": "0003_drawings",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786545322874,
+      "tag": "0004_combat_music",
+      "breakpoints": true
     }
   ]
 }

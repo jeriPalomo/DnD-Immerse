@@ -3,8 +3,10 @@ import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } fr
 import {
   TOKEN_MOVE_THROTTLE_MS,
   gridToPixel,
+  isDown,
   pixelToGrid,
   snapTokenPosition,
+  tokenBadges,
   tokenDistanceInFeet,
 } from '@dnd/shared';
 import type Konva from 'konva';
@@ -42,13 +44,25 @@ const DISPOSITION_COLOR: Record<string, string> = {
   hostile: '#f87171',
 };
 
-export function BattleMap({ isDM }: { isDM: boolean }) {
+export function BattleMap({
+  isDM,
+  focused = false,
+  onToggleFocus,
+}: {
+  isDM: boolean;
+  focused?: boolean;
+  onToggleFocus?: () => void;
+}) {
   const {
     scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool, templates, notes,
-    drawings,
+    drawings, encounter,
     select, target, moveToken, commitToken, pingMap, createWall, deleteWall, toggleDoor, clearTemplate,
     placeNote, toggleNote, removeNote, addDrawing, eraseDrawing,
   } = useTable();
+
+  // Whose turn it is, so the board can say so without anyone reading the
+  // tracker.
+  const activeTokenId = encounter?.entries[encounter.activeIndex]?.tokenId ?? null;
 
 
   // Where the DM clicked first while drawing a wall segment.
@@ -110,6 +124,54 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
   useEffect(() => {
     fitToMap();
   }, [scene?.id, fitToMap]);
+
+  /*
+   * Refit when focus mode toggles, since the board has just changed width by a
+   * large factor. Deliberately not on every container resize: that would pull
+   * the view away from a DM who has zoomed into a corner on purpose.
+   */
+  /*
+   * Bring the active combatant into view when the turn changes - but only if
+   * it is actually off-screen. Always recentring would fight a DM who has
+   * deliberately framed one corner of the map.
+   */
+  useEffect(() => {
+    if (!activeTokenId || !size.width || !size.height) return;
+
+    const token = tokens.find((candidate) => candidate.id === activeTokenId);
+    if (!token) return;
+
+    const point = gridToPixel({ x: token.x + token.w / 2, y: token.y + token.h / 2 }, grid);
+    const screenX = point.x * view.scale + view.x;
+    const screenY = point.y * view.scale + view.y;
+
+    const margin = 40;
+    const visible =
+      screenX > margin &&
+      screenY > margin &&
+      screenX < size.width - margin &&
+      screenY < size.height - margin;
+    if (visible) return;
+
+    setView((current) => ({
+      ...current,
+      x: size.width / 2 - point.x * current.scale,
+      y: size.height / 2 - point.y * current.scale,
+    }));
+    // Only when the turn moves, not on every pan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTokenId]);
+
+  const firstFocusRender = useRef(true);
+  useEffect(() => {
+    if (firstFocusRender.current) {
+      firstFocusRender.current = false;
+      return;
+    }
+    // After the layout has settled at its new width.
+    const timer = setTimeout(fitToMap, 60);
+    return () => clearTimeout(timer);
+  }, [focused]);
 
   // Easy to get lost after zooming into a corner.
   useEffect(() => {
@@ -319,6 +381,7 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
             .filter((t) => t.layer !== 'gm' || isDM)
             .map((token) => (
               <TokenShape
+                active={token.id === activeTokenId}
                 onHover={setHovered}
                 key={token.id}
                 token={token}
@@ -398,13 +461,28 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
         </div>
       )}
 
-      <button
-        onClick={fitToMap}
-        title="Fit the map to the window (F)"
-        className="absolute top-2 right-2 rounded border border-ink-700 bg-ink-950/85 px-2 py-1 text-[10px] text-ink-400 transition-colors hover:border-ember-500 hover:text-ember-300"
-      >
-        Fit
-      </button>
+      <div className="absolute top-2 right-2 flex gap-1">
+        {onToggleFocus && (
+          <button
+            onClick={onToggleFocus}
+            title="Hide the side panels and give the board the whole window (backslash)"
+            className={`rounded border px-2 py-1 text-[10px] transition-colors ${
+              focused
+                ? 'border-ember-500 bg-ember-500/20 text-ember-300'
+                : 'border-ink-700 bg-ink-950/85 text-ink-400 hover:border-ember-500 hover:text-ember-300'
+            }`}
+          >
+            {focused ? 'Exit focus' : 'Focus'}
+          </button>
+        )}
+        <button
+          onClick={fitToMap}
+          title="Fit the map to the window (F)"
+          className="rounded border border-ink-700 bg-ink-950/85 px-2 py-1 text-[10px] text-ink-400 transition-colors hover:border-ember-500 hover:text-ember-300"
+        >
+          Fit
+        </button>
+      </div>
 
       <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-ink-950/80 px-2 py-1 text-[10px] text-ink-500">
         {wallTool !== 'off'
@@ -485,6 +563,7 @@ function TokenShape({
   onMove,
   onCommit,
   onHover,
+  active,
 }: {
   token: WireToken;
   grid: { gridSize: number; offsetX: number; offsetY: number };
@@ -495,6 +574,7 @@ function TokenShape({
   onMove: (id: string, x: number, y: number) => void;
   onCommit: (id: string, x: number, y: number) => void;
   onHover: (token: WireToken | null) => void;
+  active: boolean;
 }) {
   const image = useImage(token.imageUrl);
   const lastEmit = useRef(0);
@@ -505,6 +585,10 @@ function TokenShape({
   const ring = DISPOSITION_COLOR[token.disposition] ?? '#a9a3bd';
 
   const hpPercent = token.maxHp && token.maxHp > 0 ? Math.max(0, (token.hp ?? 0) / token.maxHp) : null;
+
+  // Conditions read off the board rather than out of a panel.
+  const badges = tokenBadges(token.conditions);
+  const down = isDown(token.hp, token.maxHp);
 
   return (
     <Group
@@ -551,14 +635,55 @@ function TokenShape({
         />
       )}
 
+      {active && (
+        <Circle
+          x={width / 2}
+          y={height / 2}
+          radius={Math.min(width, height) / 2 + Math.max(3, grid.gridSize * 0.08)}
+          stroke="#f2a86b"
+          strokeWidth={Math.max(2, grid.gridSize * 0.045)}
+          dash={[grid.gridSize * 0.12, grid.gridSize * 0.09]}
+          shadowColor="#e8853f"
+          shadowBlur={grid.gridSize * 0.18}
+          listening={false}
+        />
+      )}
+
       <Circle
         x={width / 2}
         y={height / 2}
         radius={Math.min(width, height) / 2 - 1}
-        stroke={targeted ? '#e8853f' : selected ? '#8b7bf0' : ring}
+        stroke={down ? '#7d1d1d' : targeted ? '#e8853f' : selected ? '#8b7bf0' : ring}
         strokeWidth={targeted || selected ? 3.5 : 2}
         dash={targeted ? [6, 4] : undefined}
       />
+
+      {/* Down: dimmed and struck through, so it is obvious at a glance which
+          bodies on the board are still a threat. */}
+      {down && (
+        <>
+          <Circle
+            x={width / 2}
+            y={height / 2}
+            radius={Math.min(width, height) / 2 - 1}
+            fill="#0b0a0f"
+            opacity={0.55}
+            listening={false}
+          />
+          <Line
+            points={[width * 0.2, height * 0.2, width * 0.8, height * 0.8]}
+            stroke="#e05252"
+            strokeWidth={Math.max(2, grid.gridSize * 0.05)}
+            listening={false}
+          />
+          <Line
+            points={[width * 0.8, height * 0.2, width * 0.2, height * 0.8]}
+            stroke="#e05252"
+            strokeWidth={Math.max(2, grid.gridSize * 0.05)}
+            listening={false}
+          />
+        </>
+      )}
 
       {!image && (
         <Text
@@ -582,6 +707,57 @@ function TokenShape({
             cornerRadius={2}
           />
         </>
+      )}
+
+      {/* Ringed across the top edge, where they do not cover the art. */}
+      {badges.glyphs.map((badge, index) => {
+        const size = Math.max(9, grid.gridSize * 0.2);
+        const step = size * 1.15;
+        const count = badges.glyphs.length + (badges.overflow > 0 ? 1 : 0);
+        const startX = width / 2 - ((count - 1) * step) / 2;
+
+        return (
+          <Group key={badge.condition} x={startX + index * step} y={-size * 0.55}>
+            <Circle radius={size * 0.62} fill="#12101ad9" stroke="#6d5ce7" strokeWidth={1} />
+            <Text
+              x={-size * 0.62}
+              y={-size * 0.42}
+              width={size * 1.24}
+              text={badge.glyph}
+              fontSize={size * 0.78}
+              fill="#cec9dd"
+              align="center"
+              listening={false}
+            />
+          </Group>
+        );
+      })}
+
+      {badges.overflow > 0 && (
+        <Group
+          x={
+            width / 2 +
+            ((badges.glyphs.length + 1 - 1) * Math.max(9, grid.gridSize * 0.2) * 1.15) / 2
+          }
+          y={-Math.max(9, grid.gridSize * 0.2) * 0.55}
+        >
+          <Circle
+            radius={Math.max(9, grid.gridSize * 0.2) * 0.62}
+            fill="#12101ad9"
+            stroke="#6d5ce7"
+            strokeWidth={1}
+          />
+          <Text
+            x={-Math.max(9, grid.gridSize * 0.2) * 0.62}
+            y={-Math.max(9, grid.gridSize * 0.2) * 0.4}
+            width={Math.max(9, grid.gridSize * 0.2) * 1.24}
+            text={`+${badges.overflow}`}
+            fontSize={Math.max(9, grid.gridSize * 0.2) * 0.62}
+            fill="#a9a3bd"
+            align="center"
+            listening={false}
+          />
+        </Group>
       )}
 
       {token.hidden && (

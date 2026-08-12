@@ -16,6 +16,7 @@ import { useTable } from '../store/table.js';
 import { useAuth } from '../store/auth.js';
 import { ErrorBoundary } from '../components/ErrorBoundary.js';
 import { ShortcutHelp } from '../components/board/ShortcutHelp.js';
+import { HandoutReveal } from '../components/board/HandoutReveal.js';
 import { Toast } from '../components/board/Toast.js';
 import { SidebarTabs } from '../components/board/SidebarTabs.js';
 import { useHotkeys } from '../lib/useHotkeys.js';
@@ -36,6 +37,7 @@ export default function CampaignTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [focusBoard, setFocusBoard] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -122,6 +124,7 @@ export default function CampaignTable() {
       if (campaign?.role === 'dm' && state.encounter) state.nextTurn();
     },
     '?': () => setShowHelp(true),
+    '\\': () => setFocusBoard((on) => !on),
     // Explicitly requested, so Ctrl+F and Ctrl+R still reach the browser.
     'ctrl+z': (e) => {
       e.preventDefault();
@@ -159,18 +162,48 @@ export default function CampaignTable() {
         {scene && <span className="text-xs text-ink-500">{scene.name}</span>}
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px_360px]">
-        {/* The board */}
-        <div className="h-[calc(100vh-8rem)] min-h-[420px]">
+      <div
+        className={
+          focusBoard
+            ? 'grid gap-3'
+            : 'grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px_360px]'
+        }
+      >
+        {/*
+          The board takes the map's aspect ratio, so a long thin bridge gets a
+          long thin box instead of 350px of black above and below it. CSS does
+          the clamping: max-height keeps a tall map inside the window, and
+          min-height stops an extreme ratio collapsing into a sliver - at which
+          point the existing fitToMap centring takes over, as it does today.
+        */}
+        <div
+          // w-full + max-w-full are load-bearing: with an aspect ratio and a
+          // min-height, CSS satisfies the height first and then demands the
+          // width the ratio implies - which for a 5:1 map overflowed the
+          // column and covered the sidebar and chat entirely.
+          className="min-h-64 w-full max-w-full overflow-hidden"
+          style={
+            scene?.mapWidth && scene.mapHeight
+              ? {
+                  aspectRatio: `${scene.mapWidth} / ${scene.mapHeight}`,
+                  maxHeight: 'calc(100vh - 8rem)',
+                }
+              : { height: 'calc(100vh - 8rem)', minHeight: '420px' }
+          }
+        >
           <ErrorBoundary label="The battle map">
-            <BattleMap isDM={Boolean(isDM)} />
+            <BattleMap
+              isDM={Boolean(isDM)}
+              focused={focusBoard}
+              onToggleFocus={() => setFocusBoard((on) => !on)}
+            />
           </ErrorBoundary>
         </div>
 
         {/* Contextual column. Transient panels sit above the tabs: a token
             HUD you have to hunt for after clicking a token is worse than one
             that is simply always in the same place. */}
-        <div className="flex flex-col gap-3 xl:h-[calc(100vh-8rem)]">
+        <div className={`flex flex-col gap-3 xl:h-[calc(100vh-8rem)] ${focusBoard ? 'hidden' : ''}`}>
           <AudioPlayer isDM={Boolean(isDM)} />
 
           {targeted && scene && (
@@ -256,7 +289,7 @@ export default function CampaignTable() {
         </div>
 
         {/* Chat */}
-        <div className="h-[calc(100vh-8rem)] min-h-[420px]">
+        <div className={`h-[calc(100vh-8rem)] min-h-[420px] ${focusBoard ? 'hidden' : ''}`}>
           <ErrorBoundary label="Chat">
             <ChatPanel />
           </ErrorBoundary>
@@ -266,6 +299,8 @@ export default function CampaignTable() {
       {showHelp && <ShortcutHelp onClose={() => setShowHelp(false)} />}
 
       <Toast />
+
+      <HandoutReveal />
     </div>
   );
 }

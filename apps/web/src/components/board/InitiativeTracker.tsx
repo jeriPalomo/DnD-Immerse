@@ -13,7 +13,7 @@ import { GroupRoll } from './GroupRoll.js';
  */
 export function InitiativeTracker({ isDM }: { isDM: boolean }) {
   const {
-    encounter, tokens, selectedTokenId, lastDamage, templates, scene, clearTemplate,
+    encounter, tokens, selectedTokenId, lastDamage, templates, scene, clearTemplate, rollDeathSave,
     startEncounter, endEncounter, addToInitiative, removeFromInitiative,
     nextTurn, previousTurn, select,
   } = useTable();
@@ -155,6 +155,23 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
                       className={`h-full ${hpPercent <= 50 ? 'bg-ember-500' : 'bg-emerald-600'}`}
                       style={{ width: `${hpPercent}%` }}
                     />
+                  </div>
+                )}
+
+                {/* At zero hit points the tracker offers the save directly,
+                    rather than the DM remembering to ask for it. */}
+                {entry.hp !== null && entry.hp <= 0 && entry.tokenId && (
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <span className="text-[9px] tracking-wide text-red-400 uppercase">Dying</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        rollDeathSave(entry.tokenId!);
+                      }}
+                      className="rounded border border-red-800 bg-red-950/50 px-1.5 py-0.5 text-[9px] text-red-200 hover:bg-red-900/50"
+                    >
+                      Death save
+                    </button>
                   </div>
                 )}
 

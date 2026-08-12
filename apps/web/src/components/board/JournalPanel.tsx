@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../ui.js';
 import { api } from '../../lib/api.js';
+import { useTable } from '../../store/table.js';
 
 interface Page {
   id: string;
@@ -29,6 +30,7 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
   const [entries, setEntries] = useState<Entry[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { showHandout } = useTable();
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
@@ -159,16 +161,25 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
                             alt={p.title}
                             className="w-full rounded border border-ink-700"
                           />
-                          <figcaption className="mt-0.5 flex items-center justify-between text-[10px] text-ink-500">
-                            <span className="truncate">{p.title}</span>
+                          <figcaption className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-ink-500">
+                            <span className="min-w-0 flex-1 truncate">{p.title}</span>
                             {isDM && (
-                              <button
-                                onClick={() => void removePage(p.id)}
-                                className="text-ink-700 hover:text-red-400"
-                                aria-label={`Remove ${p.title}`}
-                              >
-                                ✕
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => showHandout(p.id)}
+                                  title="Show this large on everyone's screen"
+                                  className="shrink-0 rounded border border-ember-500/50 px-1.5 text-[10px] text-ember-300 hover:bg-ember-500/15"
+                                >
+                                  reveal
+                                </button>
+                                <button
+                                  onClick={() => void removePage(p.id)}
+                                  className="shrink-0 text-ink-700 hover:text-red-400"
+                                  aria-label={`Remove ${p.title}`}
+                                >
+                                  ✕
+                                </button>
+                              </>
                             )}
                           </figcaption>
                         </figure>

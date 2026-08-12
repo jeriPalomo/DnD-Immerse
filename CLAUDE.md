@@ -150,6 +150,17 @@ flat profiles (a gradient has no signal, and float residue in it otherwise
 produces a confident answer about nothing). The guess is always confirmed by
 the DM, never applied silently.
 
+**The board takes the map's aspect ratio.** A long thin bridge gets a long thin
+box rather than 350px of black above and below. `w-full max-w-full` on that
+container is load-bearing: with an aspect ratio and a min-height, CSS satisfies
+the height first and then demands the width the ratio implies, which for a 5:1
+map overflowed the column and covered the sidebar entirely.
+
+**Refits wait for the ResizeObserver, never a timer.** Focus mode nearly
+doubles the board width; refitting on a timeout raced the observer and refitted
+against the old size, leaving the map drawn at its former scale. Arm a flag on
+the toggle, fire it when the new size arrives.
+
 ## Conventions
 
 `packages/shared` is the contract between client and server — Zod schemas, the

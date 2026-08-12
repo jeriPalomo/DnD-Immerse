@@ -521,6 +521,10 @@ export const playlists = sqliteTable(
     mode: text('mode', { enum: ['sequential', 'shuffle', 'simultaneous'] })
       .notNull()
       .default('sequential'),
+    /** Marking one as combat music lets an encounter switch to it by itself. */
+    role: text('role', { enum: ['none', 'combat'] })
+      .notNull()
+      .default('none'),
     fadeMs: integer('fade_ms').notNull().default(1500),
     createdAt: epoch('created_at'),
   },
@@ -580,6 +584,9 @@ export const audioState = sqliteTable('audio_state', {
   /** Server epoch ms; clients derive their own seek offset from this. */
   startedAt: integer('started_at'),
   volume: real('volume').notNull().default(0.6),
+  /** What to go back to when combat ends. */
+  resumePlaylistId: text('resume_playlist_id'),
+  resumeTrackId: text('resume_track_id'),
 });
 
 /* --------------------------------------------------------------- journal */
