@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { ErrorBoundary } from '../ErrorBoundary.js';
 
 export interface SidebarTab {
   id: string;
@@ -50,7 +51,12 @@ export function SidebarTabs({ tabs }: { tabs: SidebarTab[] }) {
         })}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">{current.node}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+        {/* Keyed on the tab so switching away from a crashed panel resets it. */}
+        <ErrorBoundary key={current.id} label={current.label}>
+          {current.node}
+        </ErrorBoundary>
+      </div>
     </div>
   );
 }

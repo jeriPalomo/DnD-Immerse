@@ -1,11 +1,19 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
-import { OWNERSHIP, actorInputSchema, emptyActor, ownershipLevelSchema } from '@dnd/shared';
+import {
+  OWNERSHIP,
+  actorInputSchema,
+  applyRest,
+  emptyActor,
+  ownershipLevelSchema,
+  parseHitDicePool,
+} from '@dnd/shared';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
 import { actorCampaigns, actors, campaignMembers, campaigns, items, ownership } from '../db/schema.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { getBulkActorAccess, requireActorRead, requireActorWrite } from '../lib/access.js';
+import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
 import { deleteUpload, storeImage } from '../lib/uploads.js';
 import type { ActorInput } from '@dnd/shared';
@@ -286,6 +294,86 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
     }
 
     return { ok: true };
+  });
+
+  /**
+   * Rests. Resolved here rather than on the client because hit dice are dice,
+   * and every other die in the app is rolled on the server.
+   */
+  app.post('/api/actors/:id/rest', async (request) => {
+    const user = assertUser(request);
+    const { id } = request.params as { id: string };
+    const { actor } = await requireActorWrite(id, user.id);
+
+    const input = z
+      .object({
+        type: z.enum(['short', 'long']),
+        hitDiceSpent: z.number().int().min(0).max(20).default(0),
+      })
+      .parse(request.body);
+
+    const owned = await db.select().from(items).where(eq(items.ownerActorId, id));
+    const features = owned.map((item) => {
+      const uses = (item.system as { uses?: { value: number; max: number; per: string } }).uses;
+      return {
+        id: item.id,
+        name: item.name,
+        uses: uses ? { value: uses.value, max: uses.max, per: uses.per as never } : null,
+      };
+    });
+
+    // Roll the spent hit dice here, so the table sees real numbers.
+    const pool = parseHitDicePool(actor.hitDiceTotal);
+    const available = Math.max(0, pool.count - actor.hitDiceUsed);
+    const spending = input.type === 'short' ? Math.min(input.hitDiceSpent, available) : 0;
+
+    let healing = 0;
+    const conMod = Math.floor((actor.con - 10) / 2);
+    if (spending > 0 && pool.die > 0) {
+      const roll = rollExpression(`${spending}d${pool.die}`, `${actor.name} hit dice`);
+      // Constitution applies per die, and a die never heals less than one.
+      healing = Math.max(spending, roll.total + conMod * spending);
+    }
+
+    const result = applyRest({
+      actor: {
+        level: actor.level,
+        hpCurrent: actor.hpCurrent,
+        hpMax: actor.hpMax,
+        hpTemp: actor.hpTemp,
+        hitDiceTotal: actor.hitDiceTotal,
+        hitDiceUsed: actor.hitDiceUsed,
+        spellSlots: actor.spellSlots,
+      },
+      features,
+      type: input.type,
+      hitDiceSpent: spending,
+      hitDiceHealing: healing,
+    });
+
+    await db
+      .update(actors)
+      .set({
+        hpCurrent: result.hpCurrent,
+        hpTemp: result.hpTemp,
+        hitDiceUsed: result.hitDiceUsed,
+        spellSlots: result.spellSlots,
+        updatedAt: Date.now(),
+      })
+      .where(eq(actors.id, id));
+
+    for (const entry of result.restored) {
+      const item = owned.find((candidate) => candidate.id === entry.id);
+      if (!item) continue;
+
+      const system = item.system as { uses?: { value: number } };
+      await db
+        .update(items)
+        .set({ system: { ...item.system, uses: { ...system.uses, value: entry.to } } as never })
+        .where(eq(items.id, entry.id));
+    }
+
+    return { result };
   });
 
   /* ----------------------------------------------------------- NPC creation */

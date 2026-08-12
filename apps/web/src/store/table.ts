@@ -45,6 +45,14 @@ interface TableState {
   playlists: WirePlaylist[];
   sounds: WireAmbientSound[];
   templates: WireTemplate[];
+  /**
+   * Recent reversible actions, newest last. Bounded, because an undo stack
+   * that grows all session is a memory leak nobody notices.
+   */
+  undoStack: UndoEntry[];
+  /** A short-lived message with an undo affordance. */
+  toast: { message: string; undo: boolean } | null;
+
   /** Most recent damage results, shown briefly then cleared. */
   lastDamage: { tokenId: string; name: string; before: number; after: number; reason: string }[] | null;
   selectedTokenId: string | null;
@@ -92,6 +100,9 @@ interface TableState {
   clearTemplate: (templateId: string) => void;
   placeAmbient: (payload: Record<string, unknown>) => void;
   removeAmbient: (soundId: string) => void;
+  groupRoll: (kind: 'skill' | 'save' | 'ability', key: string, dc: number | null, secret: boolean) => void;
+  undo: () => void;
+  dismissToast: () => void;
   applyDamage: (
     tokenIds: string[],
     amount: number,
@@ -108,6 +119,31 @@ interface TableState {
 }
 
 const MAX_MESSAGES = 300;
+const MAX_UNDO = 10;
+
+export interface UndoEntry {
+  label: string;
+  apply: () => void;
+  /** Whether to surface a toast; a move is self-evident, a delete is not. */
+  toast?: boolean;
+}
+
+type SetState = (partial: Partial<TableState>) => void;
+type GetState = () => TableState;
+
+/** Records a reversible action and, unless told otherwise, offers an undo. */
+function pushUndo(set: SetState, get: GetState, entry: UndoEntry): void {
+  const stack = [...get().undoStack, entry];
+  set({ undoStack: stack.length > MAX_UNDO ? stack.slice(-MAX_UNDO) : stack });
+
+  if (entry.toast === false) return;
+
+  set({ toast: { message: entry.label, undo: true } });
+  setTimeout(() => {
+    // Only clear it if nothing newer replaced it in the meantime.
+    if (get().toast?.message === entry.label) set({ toast: null });
+  }, 6000);
+}
 
 export const useTable = create<TableState>((set, get) => ({
   socket: null,
@@ -129,6 +165,8 @@ export const useTable = create<TableState>((set, get) => ({
   wallTool: 'off',
   encounter: null,
   lastDamage: null,
+  undoStack: [],
+  toast: null,
   audio: null,
   playlists: [],
   sounds: [],
@@ -279,6 +317,15 @@ export const useTable = create<TableState>((set, get) => ({
   },
 
   commitToken(tokenId, x, y) {
+    const before = get().tokens.find((t) => t.id === tokenId);
+    if (before && (before.x !== x || before.y !== y)) {
+      pushUndo(set, get, {
+        label: `Moved ${before.name || 'token'}`,
+        toast: false,
+        apply: () => get().socket?.emit('token:commit', { tokenId, x: before.x, y: before.y }),
+      });
+    }
+
     get().socket?.emit('token:commit', { tokenId, x, y });
   },
 
@@ -287,7 +334,66 @@ export const useTable = create<TableState>((set, get) => ({
   },
 
   deleteToken(tokenId) {
+    const token = get().tokens.find((t) => t.id === tokenId);
     get().socket?.emit('token:delete', { tokenId });
+
+    if (!token) return;
+
+    // Deleting a Gargantuan dragon by a stray Del keypress should be a
+    // recoverable mistake, not a re-entry job.
+    pushUndo(set, get, {
+      label: `Deleted ${token.name || 'token'}`,
+      apply: () => {
+        const { socket, scene } = get();
+        if (!socket || !scene) return;
+        socket.emit('token:create', {
+          sceneId: scene.id,
+          name: token.name,
+          imageUrl: token.imageUrl,
+          actorId: token.actorId,
+          actorLinked: token.actorLinked,
+          ownerUserId: token.ownerUserId,
+          x: token.x,
+          y: token.y,
+          w: token.w,
+          h: token.h,
+          rotation: token.rotation,
+          layer: token.layer,
+          disposition: token.disposition,
+          visionRange: token.visionRange,
+          darkvisionRange: token.darkvisionRange,
+          lightBright: token.lightBright,
+          lightDim: token.lightDim,
+          hp: token.hp,
+          maxHp: token.maxHp,
+          ac: token.ac,
+          conditions: token.conditions,
+          hidden: token.hidden,
+          locked: token.locked,
+        } as never);
+      },
+    });
+  },
+
+  groupRoll(kind, key, dc, secret) {
+    get().socket?.emit('chat:groupRoll', { kind, key, dc, secret });
+  },
+
+  undo() {
+    const stack = get().undoStack;
+    const entry = stack[stack.length - 1];
+    if (!entry) {
+      set({ toast: { message: 'Nothing to undo', undo: false } });
+      setTimeout(() => set({ toast: null }), 2500);
+      return;
+    }
+
+    set({ undoStack: stack.slice(0, -1), toast: null });
+    entry.apply();
+  },
+
+  dismissToast() {
+    set({ toast: null });
   },
 
   pingMap(x, y) {

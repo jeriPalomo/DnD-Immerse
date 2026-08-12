@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { tokensInTemplate } from '@dnd/shared';
 import { Button } from '../ui.js';
 import { useTable } from '../../store/table.js';
+import { GroupRoll } from './GroupRoll.js';
 
 /**
  * The turn order.
@@ -23,11 +24,14 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
   if (!encounter) {
     if (!isDM) return null;
     return (
-      <div className="p-2">
-        <h2 className="mb-2 font-display text-sm text-ink-100">Combat</h2>
-        <Button size="sm" variant="secondary" onClick={() => startEncounter()}>
-          Start encounter
-        </Button>
+      <div className="space-y-3 p-2">
+        <div>
+          <h2 className="mb-2 font-display text-sm text-ink-100">Combat</h2>
+          <Button size="sm" variant="secondary" onClick={() => startEncounter()}>
+            Start encounter
+          </Button>
+        </div>
+        <GroupRoll />
       </div>
     );
   }
@@ -296,6 +300,8 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
               Resistances come from the sheet. A concentrating target rolls to hold it.
             </p>
           </div>
+
+          <GroupRoll />
 
           <Button size="sm" variant="ghost" onClick={() => endEncounter()} className="w-full">
             End encounter

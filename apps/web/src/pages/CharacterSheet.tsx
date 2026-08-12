@@ -20,6 +20,7 @@ import {
 import { AttackList, CombatStats, SpellcastingHeader } from '../components/sheet/Combat.js';
 import { FeaturePanel, InventoryPanel, SpellPanel } from '../components/sheet/ItemPanels.js';
 import { CampaignAssign } from '../components/sheet/CampaignAssign.js';
+import { RestControl } from '../components/sheet/RestControl.js';
 import { ShareSheet } from '../components/sheet/ShareSheet.js';
 import { useSheet } from '../store/sheet.js';
 import { useTable } from '../store/table.js';
@@ -30,7 +31,7 @@ function sectionId(title: string): string {
   return `sheet-${title.toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '')}`;
 }
 
-const NAV = ['Attacks', 'Spells', 'Inventory', 'Features & Traits', 'Notes'];
+const NAV = ['Attacks', 'Spells', 'Inventory', 'Rest', 'Features & Traits', 'Notes'];
 
 export default function CharacterSheet() {
   const { id } = useParams<{ id: string }>();
@@ -203,6 +204,15 @@ export default function CharacterSheet() {
                 void sheet.patchItem(itemId, { system: { equipped } })
               }
               onRemove={(itemId) => void sheet.removeItem(itemId)}
+            />
+          </Section>
+
+          <Section title="Rest">
+            <RestControl
+              actorId={actor.id}
+              hitDiceTotal={actor.hitDiceTotal}
+              hitDiceUsed={actor.hitDiceUsed}
+              onRested={() => void sheet.load(actor.id)}
             />
           </Section>
 

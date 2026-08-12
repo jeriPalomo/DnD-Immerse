@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Button, Spinner } from './components/ui.js';
+import { ErrorBoundary } from './components/ErrorBoundary.js';
 import AuthPage from './pages/AuthPage.js';
 import CampaignDetail from './pages/CampaignDetail.js';
 import CampaignList from './pages/CampaignList.js';
@@ -133,7 +134,11 @@ function Shell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <main>{children}</main>
+      <main>
+        <ErrorBoundary label="This page" variant="page">
+          {children}
+        </ErrorBoundary>
+      </main>
     </div>
   );
 }

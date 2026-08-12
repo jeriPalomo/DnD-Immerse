@@ -321,6 +321,19 @@ export const audioControlSchema = z.object({
   volume: z.number().min(0).max(1).optional(),
 });
 
+export const groupRollSchema = z.object({
+  /** Which kind of check every player character makes. */
+  kind: z.enum(['skill', 'save', 'ability']),
+  /** A skill key, an ability key, or an ability key for a raw check. */
+  key: z.string().max(30),
+  /** Optional target number; each line is marked pass or fail against it. */
+  dc: z.number().int().min(1).max(40).nullable().default(null),
+  /** Secret rolls go to the DM alone - a stealth check nobody should see. */
+  secret: z.boolean().default(false),
+});
+
+export type GroupRollPayload = z.infer<typeof groupRollSchema>;
+
 export const templateCreateSchema = z.object({
   sceneId: z.string(),
   shape: z.enum(['circle', 'cone', 'ray', 'rect']),
@@ -442,6 +455,7 @@ export interface ClientToServerEvents {
 
   'chat:send': (payload: z.infer<typeof sendMessageSchema>) => void;
   'chat:roll': (payload: z.infer<typeof rollRequestSchema>) => void;
+  'chat:groupRoll': (payload: GroupRollPayload) => void;
   'chat:card': (payload: z.infer<typeof cardRequestSchema>) => void;
   'chat:cardAction': (payload: z.infer<typeof cardActionSchema>) => void;
 

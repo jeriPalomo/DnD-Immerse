@@ -22,8 +22,16 @@ import type {
   WireCard,
   WireChatMessage,
 } from '@dnd/shared';
+import {
+  abilityModifier,
+  groupRollSchema,
+  savingThrowBonus,
+  skillBonus,
+  SKILLS,
+  type GroupRollPayload,
+} from '@dnd/shared';
 import { db } from '../db/index.js';
-import { actors, campaigns, chatMessages, items, users } from '../db/schema.js';
+import { actorCampaigns, actors, campaigns, chatMessages, items, users } from '../db/schema.js';
 import { getMembership } from '../auth/guards.js';
 import { getActorAccess } from '../lib/access.js';
 import { rollExpression } from '../lib/dice.js';
@@ -210,6 +218,84 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         whisperToUserId: input.whisperToUserId,
       },
       { authorName: user.displayName, actorName: actor?.name ?? null },
+    );
+  });
+
+  /**
+   * One check, rolled for every player character at once.
+   *
+   * Replaces the DM asking four people in turn and waiting. Modifiers come
+   * from the same rules functions the sheet displays, so a group Perception
+   * check agrees with what each player can see on their own sheet.
+   */
+  socket.on('chat:groupRoll', async (payload) => {
+    const campaignId = activeCampaign();
+    if (!campaignId) return;
+
+    const membership = await getMembership(campaignId, user.id);
+    if (!membership?.isDM) {
+      socket.emit('error', { message: 'Only the DM can call for a group roll' });
+      return;
+    }
+
+    const input = groupRollSchema.parse(payload);
+
+    // Player characters only. NPC sheets are the DM's business, and rolling
+    // for them here would quietly reveal the bestiary.
+    const party = await db
+      .select({ actor: actors })
+      .from(actorCampaigns)
+      .innerJoin(actors, eq(actorCampaigns.actorId, actors.id))
+      .where(and(eq(actorCampaigns.campaignId, campaignId), eq(actors.type, 'character')));
+
+    if (party.length === 0) {
+      socket.emit('error', { message: 'No characters are assigned to this campaign' });
+      return;
+    }
+
+    const label = describeGroupRoll(input);
+    const lines: string[] = [];
+
+    for (const { actor } of party) {
+      const scores = {
+        str: actor.str, dex: actor.dex, con: actor.con,
+        int: actor.int, wis: actor.wis, cha: actor.cha,
+      };
+
+      let modifier = 0;
+      if (input.kind === 'skill') {
+        const level = (actor.skillProficiencies?.[input.key as never] ?? 0) as 0 | 1 | 2;
+        modifier = skillBonus(scores, actor.level, input.key as never, level);
+      } else if (input.kind === 'save') {
+        const proficient = Boolean(actor.saveProficiencies?.[input.key as never]);
+        modifier = savingThrowBonus(scores, actor.level, input.key as never, proficient);
+      } else {
+        modifier = abilityModifier(scores[input.key as keyof typeof scores] ?? 10);
+      }
+
+      const expression = modifier >= 0 ? `1d20+${modifier}` : `1d20${modifier}`;
+      const roll = rollExpression(expression, actor.name);
+
+      const verdict =
+        input.dc === null ? '' : roll.total >= input.dc ? '  ✓' : '  ✗';
+      lines.push(`${actor.name}: ${roll.output}${verdict}`);
+    }
+
+    const header = input.dc === null ? label : `${label} (DC ${input.dc})`;
+    const body = [header, ...lines].join(String.fromCharCode(10));
+
+    await persistAndDeliver(
+      io,
+      campaignId,
+      {
+        userId: user.id,
+        actorId: null,
+        kind: 'system',
+        body,
+        // A secret group roll reaches only the DM, like a secret single roll.
+        whisperToUserId: input.secret ? user.id : null,
+      },
+      { authorName: user.displayName, actorName: null },
     );
   });
 
@@ -408,4 +494,14 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
 
     socket.emit('chat:history', { messages });
   });
+}
+
+/** A readable title for the group roll card. */
+function describeGroupRoll(input: GroupRollPayload): string {
+  if (input.kind === 'skill') {
+    const skill = SKILLS[input.key as keyof typeof SKILLS];
+    return `Group ${skill?.name ?? input.key} check`;
+  }
+  if (input.kind === 'save') return `Group ${input.key.toUpperCase()} saving throw`;
+  return `Group ${input.key.toUpperCase()} check`;
 }

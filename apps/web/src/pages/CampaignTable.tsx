@@ -14,7 +14,9 @@ import { TokenHUD } from '../components/board/TokenHUD.js';
 import { api } from '../lib/api.js';
 import { useTable } from '../store/table.js';
 import { useAuth } from '../store/auth.js';
+import { ErrorBoundary } from '../components/ErrorBoundary.js';
 import { ShortcutHelp } from '../components/board/ShortcutHelp.js';
+import { Toast } from '../components/board/Toast.js';
 import { SidebarTabs } from '../components/board/SidebarTabs.js';
 import { useHotkeys } from '../lib/useHotkeys.js';
 import type { Actor, Item } from '../store/sheet.js';
@@ -120,6 +122,11 @@ export default function CampaignTable() {
       if (campaign?.role === 'dm' && state.encounter) state.nextTurn();
     },
     '?': () => setShowHelp(true),
+    // Explicitly requested, so Ctrl+F and Ctrl+R still reach the browser.
+    'ctrl+z': (e) => {
+      e.preventDefault();
+      useTable.getState().undo();
+    },
   });
 
   if (loading) return <Spinner />;
@@ -155,7 +162,9 @@ export default function CampaignTable() {
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px_360px]">
         {/* The board */}
         <div className="h-[calc(100vh-8rem)] min-h-[420px]">
-          <BattleMap isDM={Boolean(isDM)} />
+          <ErrorBoundary label="The battle map">
+            <BattleMap isDM={Boolean(isDM)} />
+          </ErrorBoundary>
         </div>
 
         {/* Contextual column. Transient panels sit above the tabs: a token
@@ -248,11 +257,15 @@ export default function CampaignTable() {
 
         {/* Chat */}
         <div className="h-[calc(100vh-8rem)] min-h-[420px]">
-          <ChatPanel />
+          <ErrorBoundary label="Chat">
+            <ChatPanel />
+          </ErrorBoundary>
         </div>
       </div>
 
       {showHelp && <ShortcutHelp onClose={() => setShowHelp(false)} />}
+
+      <Toast />
     </div>
   );
 }

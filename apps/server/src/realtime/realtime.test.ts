@@ -362,3 +362,57 @@ describe('NPCs stay off the player roster', () => {
     expect(playerView.actors.some((a) => a.type === 'npc')).toBe(false);
   });
 });
+
+describe('group rolls', () => {
+  beforeAll(async () => {
+    // This suite otherwise only creates NPCs, and a group roll needs a party.
+    const pc = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors', { name: 'Alice PC', type: 'character', wis: 14 }, alice.cookie,
+    );
+    await api('POST', `/api/actors/${pc.actor.id}/campaigns/${campaignId}`, {}, alice.cookie);
+
+    // An NPC in the same campaign, which must not appear in any result.
+    const npc = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors', { name: 'Tavern Keeper', type: 'npc' }, dm.cookie,
+    );
+    await api('POST', `/api/actors/${npc.actor.id}/campaigns/${campaignId}`, {}, dm.cookie);
+  });
+
+  it('rolls once for each player character and nothing for NPCs', async () => {
+
+    const waiting = next<{ message: { body: string } }>(aliceSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', { kind: 'skill', key: 'perception', dc: null, secret: false });
+
+    const body = (await waiting)?.message.body ?? '';
+    expect(body).toMatch(/Group Perception check/i);
+    expect(body).toContain('Alice PC');
+    // The bestiary stays the DM's business.
+    expect(body).not.toContain('Tavern Keeper');
+  });
+
+  it('marks each line against a DC when one is given', async () => {
+    const waiting = next<{ message: { body: string } }>(aliceSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', { kind: 'save', key: 'dex', dc: 15, secret: false });
+
+    const body = (await waiting)?.message.body ?? '';
+    expect(body).toMatch(/DC 15/);
+    expect(body).toMatch(/[✓✗]/);
+  });
+
+  it('keeps a secret group roll away from players', async () => {
+    const toPlayer = next<{ message: { body: string } }>(aliceSocket, 'chat:message', 1200);
+    const toDm = next<{ message: { body: string } }>(dmSocket, 'chat:message');
+
+    dmSocket.emit('chat:groupRoll', { kind: 'skill', key: 'stealth', dc: null, secret: true });
+
+    expect((await toDm)?.message.body).toMatch(/Group Stealth/i);
+    // A secret roll is routed to the DM alone, never flagged and broadcast.
+    expect(await toPlayer).toBeNull();
+  });
+
+  it('refuses to let a player call for one', async () => {
+    const failure = next<{ message: string }>(aliceSocket, 'error');
+    aliceSocket.emit('chat:groupRoll', { kind: 'skill', key: 'perception', dc: null, secret: false });
+    expect((await failure)?.message).toMatch(/only the dm/i);
+  });
+});
