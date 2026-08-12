@@ -92,6 +92,8 @@ export const sceneInputSchema = z.object({
   gridVisible: z.boolean().default(true),
   fogEnabled: z.boolean().default(false),
   feetPerSquare: z.number().min(1).max(100).default(5),
+  weather: z.enum(['none', 'rain', 'storm', 'snow', 'fog', 'ash']).default('none'),
+  weatherIntensity: z.number().min(0).max(1).default(0.5),
 });
 
 export const tokenLayerSchema = z.enum(['background', 'token', 'gm']);
@@ -108,6 +110,7 @@ export const tokenInputSchema = z.object({
   darkvisionRange: z.number().min(0).default(0),
   lightBright: z.number().min(0).default(0),
   lightDim: z.number().min(0).default(0),
+  lightColor: z.string().max(20).default('#ffb46b'),
   x: z.number().default(0),
   y: z.number().default(0),
   w: z.number().min(0.25).max(40).default(1),

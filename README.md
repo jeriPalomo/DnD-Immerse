@@ -43,6 +43,15 @@ certificate. Invite your friends to your tailnet and send them the URL.
 
 Set `SECURE_COOKIES=true` once you are serving over HTTPS.
 
+## Rules editions
+
+Campaigns pick 2014 (SRD 5.1) or 2024 (SRD 5.2) on the campaign page. The 2024
+option adds the published equipment list and **weapon mastery** — Sap, Vex,
+Topple and the rest, shown on the sheet beside each weapon.
+
+Spells and monsters come from the 2014 list either way: the 2024 SRD dataset
+does not publish them yet. `npm run srd:import` pulls both editions and says so.
+
 ## Backups
 
 ```bash

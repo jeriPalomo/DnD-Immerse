@@ -53,6 +53,14 @@ export const campaigns = sqliteTable('campaigns', {
     .references(() => users.id, { onDelete: 'cascade' }),
   activeSceneId: text('active_scene_id'),
   inviteCode: text('invite_code').notNull().unique(),
+  /**
+   * Which edition the compendium offers. 2024 covers equipment and weapon
+   * mastery; its spells and monsters are not published in the SRD dataset yet,
+   * so those still come from 2014 whichever is selected.
+   */
+  ruleset: text('ruleset', { enum: ['2014', '2024'] })
+    .notNull()
+    .default('2014'),
   bannerUrl: text('banner_url'),
   createdAt: epoch('created_at'),
 });
@@ -247,6 +255,11 @@ export const scenes = sqliteTable(
       .notNull()
       .default(true),
     darkness: real('darkness').notNull().default(0),
+    /** Cosmetic overlay; has no mechanical effect. */
+    weather: text('weather', { enum: ['none', 'rain', 'storm', 'snow', 'fog', 'ash'] })
+      .notNull()
+      .default('none'),
+    weatherIntensity: real('weather_intensity').notNull().default(0.5),
 
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: epoch('created_at'),
@@ -293,6 +306,8 @@ export const tokens = sqliteTable(
     darkvisionRange: real('darkvision_range').notNull().default(0),
     lightBright: real('light_bright').notNull().default(0),
     lightDim: real('light_dim').notNull().default(0),
+    /** Torchlight is warm, a spell might not be. Cosmetic, like weather. */
+    lightColor: text('light_color').notNull().default('#ffb46b'),
 
     hp: integer('hp'),
     maxHp: integer('max_hp'),
@@ -603,6 +618,9 @@ export const srdSpells = sqliteTable(
   'srd_spells',
   {
     id: id(),
+    ruleset: text('ruleset', { enum: ['2014', '2024'] })
+      .notNull()
+      .default('2014'),
     name: text('name').notNull(),
     level: integer('level').notNull(),
     school: text('school').notNull().default(''),
@@ -625,6 +643,9 @@ export const srdMonsters = sqliteTable(
   'srd_monsters',
   {
     id: id(),
+    ruleset: text('ruleset', { enum: ['2014', '2024'] })
+      .notNull()
+      .default('2014'),
     name: text('name').notNull(),
     size: text('size').notNull().default(''),
     type: text('type').notNull().default(''),
@@ -652,6 +673,9 @@ export const srdItems = sqliteTable(
   'srd_items',
   {
     id: id(),
+    ruleset: text('ruleset', { enum: ['2014', '2024'] })
+      .notNull()
+      .default('2014'),
     name: text('name').notNull(),
     category: text('category').notNull().default(''),
     itemType: text('item_type').notNull().default('equipment'),

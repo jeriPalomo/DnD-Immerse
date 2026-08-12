@@ -44,6 +44,7 @@ export interface WireToken {
   darkvisionRange: number;
   lightBright: number;
   lightDim: number;
+  lightColor: string;
   hp: number | null;
   maxHp: number | null;
   ac: number | null;
@@ -70,6 +71,9 @@ export interface WireScene {
   visionEnabled: boolean;
   globalIllumination: boolean;
   darkness: number;
+  /** Cosmetic overlay; never affects who can see what. */
+  weather: 'none' | 'rain' | 'storm' | 'snow' | 'fog' | 'ash';
+  weatherIntensity: number;
 }
 
 export interface WireCard {

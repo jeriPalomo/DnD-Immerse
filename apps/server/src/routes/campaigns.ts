@@ -1,5 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { campaignInputSchema } from '@dnd/shared';
+import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
 import { campaignMembers, campaigns, users } from '../db/schema.js';
@@ -83,7 +84,10 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     await requireDM(id, user.id);
 
-    const input = campaignInputSchema.partial().parse(request.body);
+    const input = campaignInputSchema
+      .extend({ ruleset: z.enum(['2014', '2024']) })
+      .partial()
+      .parse(request.body);
     await db.update(campaigns).set(input).where(eq(campaigns.id, id));
 
     const rows = await db.select().from(campaigns).where(eq(campaigns.id, id)).limit(1);

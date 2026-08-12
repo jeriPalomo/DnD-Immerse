@@ -15,7 +15,8 @@ import { db } from '../db/index.js';
 import { srdItems, srdMonsters, srdSpells } from '../db/schema.js';
 import { paths } from '../env.js';
 
-const BASE = 'https://raw.githubusercontent.com/5e-bits/5e-database/main/src/2014/en';
+const BASE_2014 = 'https://raw.githubusercontent.com/5e-bits/5e-database/main/src/2014/en';
+const BASE_2024 = 'https://raw.githubusercontent.com/5e-bits/5e-database/main/src/2024/en';
 
 const SOURCES = {
   spells: '5e-SRD-Spells.json',
@@ -24,18 +25,31 @@ const SOURCES = {
   magicItems: '5e-SRD-Magic-Items.json',
 } as const;
 
-/** Downloads once and caches under data/srd/ so re-imports work offline. */
-async function load(file: string): Promise<unknown[]> {
-  const cached = path.join(paths.srd, file);
+/**
+ * Downloads once and caches under data/srd/ so re-imports work offline.
+ *
+ * `optional` covers the 2024 files that are not published yet - spells and
+ * monsters chief among them - so a missing one is an empty list rather than a
+ * failed import.
+ */
+async function load(file: string, ruleset: '2014' | '2024' = '2014', optional = false): Promise<unknown[]> {
+  const cached = path.join(paths.srd, `${ruleset}-${file}`);
   try {
     return JSON.parse(await fs.readFile(cached, 'utf8'));
   } catch {
     // Not cached yet.
   }
 
-  process.stdout.write(`  downloading ${file}... `);
-  const response = await fetch(`${BASE}/${file}`);
-  if (!response.ok) throw new Error(`${file}: HTTP ${response.status}`);
+  process.stdout.write(`  downloading ${ruleset}/${file}... `);
+  const response = await fetch(`${ruleset === '2024' ? BASE_2024 : BASE_2014}/${file}`);
+
+  if (!response.ok) {
+    if (optional) {
+      console.log(`not published (HTTP ${response.status})`);
+      return [];
+    }
+    throw new Error(`${file}: HTTP ${response.status}`);
+  }
 
   const text = await response.text();
   await fs.writeFile(cached, text);
@@ -141,7 +155,22 @@ function toSpellSystem(spell: Json): ItemSystem {
 /* ------------------------------------------------------------ equipment */
 
 function toEquipmentSystem(item: Json): { itemType: string; system: ItemSystem } {
-  const category: string = item.equipment_category?.index ?? '';
+  /*
+   * 2014 carries a single `equipment_category` with singular names ("weapon");
+   * 2024 carries an `equipment_categories` array with plural, more specific
+   * ones ("martial-melee-weapons", "weapons"). Scan the whole list rather than
+   * trusting the first entry, which is the most specific and least useful.
+   */
+  const categories: string[] = [
+    item.equipment_category?.index,
+    ...(Array.isArray(item.equipment_categories)
+      ? item.equipment_categories.map((c: Json) => c?.index)
+      : []),
+  ].filter(Boolean);
+
+  const isWeapon = categories.some((c) => c === 'weapon' || c === 'weapons');
+  const isArmor = categories.some((c) => c === 'armor' || c === 'armour' || c === 'shields');
+  const category = isWeapon ? 'weapon' : isArmor ? 'armor' : '';
   const weight = item.weight ?? 0;
   const cost = item.cost ? `${item.cost.quantity} ${item.cost.unit}` : '';
 
@@ -156,7 +185,9 @@ function toEquipmentSystem(item: Json): { itemType: string; system: ItemSystem }
   };
 
   if (category === 'weapon') {
-    const isRanged = item.weapon_range === 'Ranged';
+    // 2024 drops weapon_range, so fall back to the category list.
+    const isRanged =
+      item.weapon_range === 'Ranged' || categories.some((c) => c === 'ranged-weapons');
     const properties: string[] = (item.properties ?? []).map((p: Json) => p.name);
 
     return {
@@ -180,6 +211,7 @@ function toEquipmentSystem(item: Json): { itemType: string; system: ItemSystem }
           long: item.range?.long ?? null,
         },
         properties,
+        mastery: item.mastery?.name ?? '',
         activation: { type: 'action', cost: 1 },
       } as ItemSystem,
     };
@@ -203,16 +235,30 @@ function toEquipmentSystem(item: Json): { itemType: string; system: ItemSystem }
   return { itemType: 'equipment', system: { ...shared, armorType: 'none', baseAC: 0, dexCap: null, strengthRequirement: 0, stealthDisadvantage: false } as ItemSystem };
 }
 
+/** Keeps the last row for any repeated id; sources overlap between files. */
+function dedupe<T extends { id: string }>(rows: T[]): T[] {
+  return [...new Map(rows.map((row) => [row.id, row])).values()];
+}
+
 /* --------------------------------------------------------------- import */
 
 export async function importSrd(): Promise<void> {
   console.log('Importing SRD 5.1 (CC-BY-4.0, 5e-bits/5e-database)');
 
   const [spells, monsters, equipment, magicItems] = await Promise.all([
-    load(SOURCES.spells),
-    load(SOURCES.monsters),
-    load(SOURCES.equipment),
-    load(SOURCES.magicItems),
+    load(SOURCES.spells, '2014'),
+    load(SOURCES.monsters, '2014'),
+    load(SOURCES.equipment, '2014'),
+    load(SOURCES.magicItems, '2014'),
+  ]);
+
+  // The 2024 dataset is partial. Equipment carries weapon mastery, which is the
+  // change a table actually feels; spells and monsters are not published yet,
+  // so a 2024 campaign still draws those from 2014.
+  const [equipment2024, magicItems2024, monsters2024] = await Promise.all([
+    load(SOURCES.equipment, '2024', true),
+    load(SOURCES.magicItems, '2024', true),
+    load(SOURCES.monsters, '2024', true),
   ]);
 
   // Replace wholesale so a re-run picks up upstream corrections.
@@ -220,8 +266,9 @@ export async function importSrd(): Promise<void> {
   await db.delete(srdMonsters);
   await db.delete(srdItems);
 
-  const spellRows = (spells as Json[]).map((s) => ({
+  const spellRows = dedupe((spells as Json[]).map((s) => ({
     id: s.index,
+    ruleset: '2014' as const,
     name: s.name,
     level: s.level ?? 0,
     school: s.school?.name ?? '',
@@ -235,10 +282,11 @@ export async function importSrd(): Promise<void> {
     higherLevel: joinDesc(s.higher_level),
     classes: (s.classes ?? []).map((c: Json) => c.name) as string[],
     system: toSpellSystem(s),
-  }));
+  })));
 
-  const monsterRows = (monsters as Json[]).map((m) => ({
-    id: m.index,
+  const toMonsterRow = (m: Json, ruleset: '2014' | '2024') => ({
+    id: ruleset === '2024' ? `2024-${m.index}` : m.index,
+    ruleset,
     name: m.name,
     size: m.size ?? '',
     type: m.type ?? '',
@@ -260,21 +308,38 @@ export async function importSrd(): Promise<void> {
     xp: m.xp ?? 0,
     tokenSize: tokenSizeFor(m.size),
     data: m as Record<string, unknown>,
-  }));
+  });
 
-  const itemRows = [...(equipment as Json[]), ...(magicItems as Json[])].map((e) => {
+  const monsterRows = dedupe([
+    ...(monsters as Json[]).map((m) => toMonsterRow(m, '2014')),
+    ...(monsters2024 as Json[]).map((m) => toMonsterRow(m, '2024')),
+  ]);
+
+  const toItemRow = (e: Json, ruleset: '2014' | '2024') => {
     const { itemType, system } = toEquipmentSystem(e);
     return {
-      id: e.index,
+      // 2024 reuses many indexes, so namespace them to avoid collisions.
+      id: ruleset === '2024' ? `2024-${e.index}` : e.index,
+      ruleset,
       name: e.name,
-      category: e.equipment_category?.name ?? 'Wondrous Item',
+      category:
+        e.equipment_category?.name ??
+        (Array.isArray(e.equipment_categories) ? e.equipment_categories[0]?.name : null) ??
+        'Wondrous Item',
       itemType,
       cost: e.cost ? `${e.cost.quantity} ${e.cost.unit}` : '',
       weight: e.weight ?? 0,
       description: joinDesc(e.desc),
       system,
     };
-  });
+  };
+
+  // The equipment and magic-item files overlap, so the same index can appear
+  // twice; last one wins rather than failing the whole import.
+  const itemRows = dedupe([
+    ...[...(equipment as Json[]), ...(magicItems as Json[])].map((e) => toItemRow(e, '2014')),
+    ...[...(equipment2024 as Json[]), ...(magicItems2024 as Json[])].map((e) => toItemRow(e, '2024')),
+  ]);
 
   // Chunked: SQLite has a hard limit on variables per statement.
   for (const [table, rows] of [
@@ -287,9 +352,18 @@ export async function importSrd(): Promise<void> {
     }
   }
 
+  const mastered = itemRows.filter(
+    (row) => (row.system as { mastery?: string }).mastery,
+  ).length;
+
   console.log(
     `  ${spellRows.length} spells, ${monsterRows.length} monsters, ${itemRows.length} items`,
   );
+  console.log(
+    `  2024: ${itemRows.filter((r) => r.ruleset === '2024').length} items ` +
+      `(${mastered} with weapon mastery), ${monsterRows.filter((r) => r.ruleset === '2024').length} monsters`,
+  );
+  console.log('  2024 spells are not published in the SRD dataset; 2024 campaigns use the 2014 list');
 }
 
 if (process.argv[1]?.endsWith('import.ts') || process.argv[1]?.endsWith('import.js')) {

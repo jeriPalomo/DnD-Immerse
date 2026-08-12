@@ -146,6 +146,11 @@ export const weaponSystemSchema = z.object({
   thrown: z.boolean().default(false),
   range: rangeSchema.default({ type: 'touch', value: 5, long: null }),
   properties: z.array(z.string().max(30)).default([]),
+  /**
+   * 2024 weapon mastery: Sap, Vex, Topple and so on. Empty under 2014 rules,
+   * where the mechanic does not exist.
+   */
+  mastery: z.string().max(30).default(''),
   activation: activationSchema.default({}),
   description: z.string().max(8000).default(''),
 });
@@ -289,6 +294,7 @@ export const prototypeTokenSchema = z.object({
   darkvisionRange: z.number().min(0).default(0),
   lightBright: z.number().min(0).default(0),
   lightDim: z.number().min(0).default(0),
+  lightColor: z.string().max(20).default('#ffb46b'),
   hidden: z.boolean().default(false),
 });
 

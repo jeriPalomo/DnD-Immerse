@@ -173,6 +173,7 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
         q: z.string().max(80).optional(),
         level: z.coerce.number().int().min(0).max(9).optional(),
         class: z.string().max(30).optional(),
+        ruleset: z.enum(['2014', '2024']).optional(),
         limit: z.coerce.number().int().min(1).max(200).default(60),
       })
       .parse(request.query);
@@ -182,6 +183,9 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
     if (query.level !== undefined) filters.push(eq(srdSpells.level, query.level));
     // classes is a JSON array; match it as text rather than joining a table.
     if (query.class) filters.push(sql`lower(${srdSpells.classes}) like ${`%${query.class.toLowerCase()}%`}`);
+    // 2024 spells are not published, so a 2024 campaign still gets the 2014
+    // list rather than an empty one.
+    filters.push(eq(srdSpells.ruleset, '2014'));
 
     const rows = await db
       .select({
@@ -209,11 +213,12 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       .object({
         q: z.string().max(80).optional(),
         type: z.string().max(30).optional(),
+        ruleset: z.enum(['2014', '2024']).default('2014'),
         limit: z.coerce.number().int().min(1).max(200).default(60),
       })
       .parse(request.query);
 
-    const filters = [];
+    const filters = [eq(srdItems.ruleset, query.ruleset)];
     if (query.q) filters.push(like(srdItems.name, `%${query.q}%`));
     if (query.type) filters.push(eq(srdItems.itemType, query.type));
 
@@ -225,6 +230,7 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
         itemType: srdItems.itemType,
         cost: srdItems.cost,
         weight: srdItems.weight,
+        system: srdItems.system,
       })
       .from(srdItems)
       .where(filters.length ? and(...filters) : undefined)
@@ -238,13 +244,16 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
     const query = z
       .object({
         q: z.string().max(80).optional(),
+        ruleset: z.enum(['2014', '2024']).optional(),
         limit: z.coerce.number().int().min(1).max(200).default(60),
       })
       .parse(request.query);
 
+    // Only three 2024 monsters exist, so both editions are always offered.
     const rows = await db
       .select({
         id: srdMonsters.id,
+        ruleset: srdMonsters.ruleset,
         name: srdMonsters.name,
         size: srdMonsters.size,
         type: srdMonsters.type,

@@ -91,6 +91,34 @@ export default function CampaignDetail() {
 
       {isDM && (
         <Card className="mb-6 p-5">
+          <h2 className="mb-1 font-display text-lg text-ink-100">Rules edition</h2>
+          <p className="mb-3 text-sm text-ink-400">
+            Which equipment list the compendium offers. 2024 adds weapon mastery.
+          </p>
+          <select
+            value={campaign.ruleset ?? '2014'}
+            aria-label="Rules edition"
+            onChange={async (e) => {
+              const updated = await api.patch<{ campaign: Campaign }>(
+                `/api/campaigns/${campaign.id}`,
+                { ruleset: e.target.value },
+              );
+              setCampaign(updated.campaign);
+            }}
+            className="rounded-lg border border-ink-600 bg-ink-850 px-3 py-2 text-sm text-ink-100 focus:border-arcane-400 focus:outline-none"
+          >
+            <option value="2014">2014 rules (SRD 5.1)</option>
+            <option value="2024">2024 rules (SRD 5.2)</option>
+          </select>
+          <p className="mt-2 text-xs text-ink-600">
+            Spells and monsters come from the 2014 list either way — the 2024 SRD dataset does
+            not publish them yet.
+          </p>
+        </Card>
+      )}
+
+      {isDM && (
+        <Card className="mb-6 p-5">
           <h2 className="mb-1 font-display text-lg text-ink-100">Campaign banner</h2>
           <p className="mb-3 text-sm text-ink-400">Sets the mood on the campaign page.</p>
           <AvatarUpload

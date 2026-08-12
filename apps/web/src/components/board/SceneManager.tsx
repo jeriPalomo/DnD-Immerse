@@ -209,6 +209,42 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
             Daylight (ignore token light radius)
           </label>
 
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className="mb-1 block text-[11px] text-ink-400">Weather</span>
+              <select
+                value={scene.weather}
+                aria-label="Scene weather"
+                onChange={(e) => void patchScene(scene.id, { weather: e.target.value })}
+                className="w-full rounded border border-ink-600 bg-ink-850 px-2 py-1 text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
+              >
+                {['none', 'rain', 'storm', 'snow', 'fog', 'ash'].map((w) => (
+                  <option key={w} value={w}>
+                    {w === 'none' ? 'Clear' : w[0].toUpperCase() + w.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 flex justify-between text-[11px] text-ink-400">
+                <span>Intensity</span>
+                <span className="font-mono text-ink-200">{Math.round(scene.weatherIntensity * 100)}%</span>
+              </span>
+              <input
+                type="range"
+                min={0.1}
+                max={1}
+                step={0.05}
+                value={scene.weatherIntensity}
+                aria-label="Weather intensity"
+                disabled={scene.weather === 'none'}
+                onChange={(e) => void patchScene(scene.id, { weatherIntensity: Number(e.target.value) })}
+                className="mt-1.5 w-full accent-arcane-500 disabled:opacity-30"
+              />
+            </label>
+          </div>
+
           {scene.globalIllumination && (
             <label className="block">
               <div className="mb-1 flex justify-between text-[11px] text-ink-400">

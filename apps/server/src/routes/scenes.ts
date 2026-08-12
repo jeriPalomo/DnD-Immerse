@@ -58,6 +58,8 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
       visionEnabled: false,
       globalIllumination: true,
       darkness: 0,
+      weather: 'none' as const,
+      weatherIntensity: 0.5,
       sortOrder: 0,
       createdAt: Date.now(),
     };
@@ -83,6 +85,8 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
         visionEnabled: z.boolean().optional(),
         globalIllumination: z.boolean().optional(),
         darkness: z.number().min(0).max(1).optional(),
+        weather: z.enum(['none', 'rain', 'storm', 'snow', 'fog', 'ash']).optional(),
+        weatherIntensity: z.number().min(0).max(1).optional(),
       })
       .parse(request.body);
 

@@ -12,6 +12,7 @@ export interface Campaign {
   bannerUrl: string | null;
   createdAt: number;
   role: 'dm' | 'player';
+  ruleset?: '2014' | '2024';
 }
 
 export interface Member {

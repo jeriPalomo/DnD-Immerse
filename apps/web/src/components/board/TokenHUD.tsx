@@ -243,9 +243,21 @@ export function TokenHUD({
                       />
                     </label>
                   ))}
+                  <label className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-ink-400">Light colour</span>
+                    <input
+                      type="color"
+                      value={token.lightColor}
+                      aria-label="Light colour"
+                      onChange={(e) => onUpdate({ lightColor: e.target.value })}
+                      className="h-6 w-12 cursor-pointer rounded border border-ink-600 bg-ink-850"
+                    />
+                  </label>
+
                   <p className="text-[10px] text-ink-600">
                     Darkvision and carried light only matter when the scene's daylight
-                    is switched off.
+                    is switched off. Colour is cosmetic — it never changes what anyone
+                    can see.
                   </p>
                 </div>
               )}

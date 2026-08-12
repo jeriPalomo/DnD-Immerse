@@ -31,10 +31,12 @@ interface ItemRow {
  */
 export function CompendiumPicker({
   kind,
+  ruleset = '2014',
   onAdd,
   onClose,
 }: {
   kind: 'spell' | 'item';
+  ruleset?: '2014' | '2024';
   onAdd: (srdId: string) => Promise<void>;
   onClose: () => void;
 }) {
@@ -54,6 +56,7 @@ export function CompendiumPicker({
         const params = new URLSearchParams();
         if (query) params.set('q', query);
         if (kind === 'spell' && level !== '') params.set('level', String(level));
+        params.set('ruleset', ruleset);
 
         const path = `/api/compendium/${kind === 'spell' ? 'spells' : 'items'}?${params}`;
         const res = await api.get<{ spells?: SpellRow[]; items?: ItemRow[] }>(path);
@@ -70,7 +73,7 @@ export function CompendiumPicker({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, level, kind]);
+  }, [query, level, kind, ruleset]);
 
   const levels = useMemo(() => Array.from({ length: 10 }, (_, i) => i), []);
 
@@ -90,7 +93,9 @@ export function CompendiumPicker({
           <h2 className="font-display text-lg text-ink-100">
             {kind === 'spell' ? 'Spells' : 'Equipment'}
           </h2>
-          <span className="text-xs text-ink-500">SRD 5.1</span>
+          <span className="text-xs text-ink-500">
+            {ruleset === '2024' ? 'SRD 5.2 · 2024' : 'SRD 5.1 · 2014'}
+          </span>
           <button
             onClick={onClose}
             className="ml-auto rounded px-2 py-1 text-ink-400 hover:bg-ink-800 hover:text-ink-100"
@@ -165,5 +170,8 @@ function describe(row: SpellRow | ItemRow): string {
     if (row.ritual) parts.push('Ritual');
     return parts.filter(Boolean).join(' · ');
   }
-  return [row.category, row.cost, row.weight ? `${row.weight} lb` : ''].filter(Boolean).join(' · ');
+  const mastery = (row as { system?: { mastery?: string } }).system?.mastery;
+  return [row.category, row.cost, row.weight ? `${row.weight} lb` : '', mastery && `Mastery: ${mastery}`]
+    .filter(Boolean)
+    .join(' · ');
 }

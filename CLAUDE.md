@@ -144,7 +144,18 @@ Hot scalars (abilities, HP, AC, level) stay indexed columns because the party
 panel and token HUD read them constantly; type-specific detail goes in a
 Zod-validated `system` JSON column.
 
+**Atmosphere never changes what anyone can see.** Coloured light and weather
+are drawn after vision has already decided visibility. A torch tinting the
+floor orange must not move a token in or out of view, or two players would
+disagree about what is on the board.
+
 ## Gotchas
+
+**The 2024 SRD dataset is partial.** Equipment (with weapon mastery) and
+features are published; spells and all but three monsters are not. A 2024
+campaign therefore draws spells and monsters from the 2014 list. Check
+`src/2024/en/` upstream before assuming a file exists — the importer marks the
+missing ones optional so a 404 is an empty list, not a failed import.
 
 **The driver is `@libsql/client`, not `better-sqlite3`.** The latter has no
 prebuilt binary for Node 24 and needs a node-gyp toolchain. Do not "fix" this

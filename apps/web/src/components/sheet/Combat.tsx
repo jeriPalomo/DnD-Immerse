@@ -198,6 +198,15 @@ export function AttackList({ actor, weapons }: { actor: Actor; weapons: Item[] }
               <td className="py-1.5">
                 {weapon.name}
                 <span className="ml-1.5 text-[10px] text-ink-500 uppercase">{ability}</span>
+                {/* 2024 weapon mastery; blank under 2014, where it does not exist. */}
+                {s.mastery && (
+                  <span
+                    className="ml-1.5 rounded bg-arcane-500/20 px-1 text-[10px] text-arcane-400"
+                    title={`Weapon mastery: ${s.mastery}`}
+                  >
+                    {s.mastery}
+                  </span>
+                )}
               </td>
               <td className="py-1.5 font-mono text-ember-300">{formatModifier(toHit)}</td>
               <td className="py-1.5 font-mono">

@@ -82,6 +82,8 @@ function toWireScene(scene: Scene): WireScene {
     visionEnabled: scene.visionEnabled,
     globalIllumination: scene.globalIllumination,
     darkness: scene.darkness,
+    weather: scene.weather,
+    weatherIntensity: scene.weatherIntensity,
   };
 }
 
@@ -105,6 +107,7 @@ function toWireToken(token: Token): WireToken {
     darkvisionRange: token.darkvisionRange,
     lightBright: token.lightBright,
     lightDim: token.lightDim,
+    lightColor: token.lightColor,
     hp: token.hp,
     maxHp: token.maxHp,
     ac: token.ac,

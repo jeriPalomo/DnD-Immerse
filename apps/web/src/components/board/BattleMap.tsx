@@ -11,6 +11,7 @@ import type Konva from 'konva';
 import type { WireScene, WireToken } from '@dnd/shared';
 import { DoorLayer, FogLayer, NoteLayer, WallLayer } from './FogLayer.js';
 import { TemplateLayer } from './TemplateLayer.js';
+import { LightLayer, WeatherLayer } from './AtmosphereLayer.js';
 import { useTable } from '../../store/table.js';
 import { useAuth } from '../../store/auth.js';
 
@@ -217,6 +218,16 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
           />
         </Layer>
 
+        {/* Light sits under the tokens and over the map, like light does. */}
+        <Layer listening={false}>
+          <LightLayer
+            tokens={tokens}
+            grid={grid}
+            feetPerSquare={scene.feetPerSquare}
+            darkness={scene.darkness}
+          />
+        </Layer>
+
         {/* Below the tokens, so an outline never hides who is standing in it. */}
         <Layer>
           <TemplateLayer
@@ -276,6 +287,22 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
               />
             );
           })}
+        </Layer>
+        {/* Weather is drawn last, in view space, so panning does not drag the
+            rain sideways with the terrain. */}
+        <Layer
+          listening={false}
+          x={-view.x / view.scale}
+          y={-view.y / view.scale}
+          scaleX={1 / view.scale}
+          scaleY={1 / view.scale}
+        >
+          <WeatherLayer
+            weather={scene.weather}
+            intensity={scene.weatherIntensity}
+            width={size.width}
+            height={size.height}
+          />
         </Layer>
       </Stage>
 
