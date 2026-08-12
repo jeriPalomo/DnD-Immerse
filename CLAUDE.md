@@ -17,7 +17,8 @@ rules automation, and ambient audio with a journal and AoE templates.
 ## Commands
 
 ```bash
-npm run dev          # API :3001 + client :5173
+npm start            # Production: one process, everything on :3001
+npm run dev          # Development: API :3001 + client :5173, hot reload
 npm test             # Vitest: rules5e + grid math
 npm run db:generate  # New migration after editing schema.ts
 npm run srd:import   # Seed the compendium (downloads once, then cached)
@@ -156,6 +157,13 @@ features are published; spells and all but three monsters are not. A 2024
 campaign therefore draws spells and monsters from the 2014 list. Check
 `src/2024/en/` upstream before assuming a file exists — the importer marks the
 missing ones optional so a 404 is an empty list, not a failed import.
+
+**`packages/shared` ships built JavaScript, and everything resolves to
+`dist/`.** Its `main` used to point at `src/index.ts`, which meant the compiled
+server imported TypeScript and `npm start` could never have worked. `npm run
+dev` runs a watch build so edits still appear immediately — conditional exports
+pointing at source resolve inconsistently across vite, tsx and vitest, which is
+worse than one path plus a watcher.
 
 **The driver is `@libsql/client`, not `better-sqlite3`.** The latter has no
 prebuilt binary for Node 24 and needs a node-gyp toolchain. Do not "fix" this

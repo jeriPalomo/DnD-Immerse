@@ -26,6 +26,8 @@ export const env = {
 } as const;
 
 export const paths = {
+  /** The built client, served by this process in production. */
+  webDist: path.resolve(ROOT, 'apps/web/dist'),
   db: path.join(env.dataDir, 'app.db'),
   uploads: path.join(env.dataDir, 'uploads'),
   srd: path.join(env.dataDir, 'srd'),

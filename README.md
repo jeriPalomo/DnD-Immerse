@@ -6,12 +6,23 @@ hosted service you rent.
 
 ## Running it
 
+**To play:**
+
 ```bash
 npm install
+npm start
+```
+
+One process on `http://localhost:3001` serving both the API and the client.
+That is what to run for a real session, and what to point Tailscale at.
+
+**To work on it:**
+
+```bash
 npm run dev
 ```
 
-That starts the API on `:3001` and the client on `:5173`. Open http://localhost:5173.
+API on `:3001`, client on `:5173` with hot reload. Open http://localhost:5173.
 
 The database, uploads and SRD data all live under `data/`, which is gitignored.
 Migrations run automatically on boot; the SQLite file is created on first start.
@@ -20,7 +31,8 @@ Useful scripts:
 
 | Command | Does |
 |---|---|
-| `npm run dev` | API + client together |
+| `npm start` | Build and serve everything on `:3001` |
+| `npm run dev` | Development, with hot reload on `:5173` |
 | `npm run dev:server` / `dev:web` | One at a time |
 | `npm test` | Unit + realtime integration tests |
 | `npm run srd:import` | Seed the SRD compendium |
@@ -35,7 +47,7 @@ Serve over Tailscale rather than forwarding a port — your home IP is never
 exposed and there is nothing to harden at the router.
 
 ```bash
-tailscale serve --bg 5173
+tailscale serve --bg 3001
 ```
 
 That publishes the app on your `*.ts.net` hostname with a real HTTPS
@@ -77,13 +89,13 @@ One-time, per person:
 
 Then, any session:
 
-3. You run `npm run dev` and `tailscale serve --bg 5173`
+3. You run `npm run dev` and `tailscale serve --bg 3001`
 4. They open your `https://…ts.net` URL and register — any email and password,
    since the accounts live only on your machine
 5. You send them the 8-character invite code from the campaign page; they press
    **Join with code**
 
-Your machine has to be awake and running `npm run dev` for anyone to connect.
+Your machine has to be awake and running `npm start` for anyone to connect.
 
 ## Working across two machines
 

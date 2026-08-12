@@ -7,7 +7,7 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=@dnd/server & npm run dev --workspace=@dnd/web",
+    "dev": "npm run build --workspace=@dnd/shared && concurrently -n shared,api,web -c gray,cyan,magenta \"npm:dev:shared\" \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "npm run dev --workspace=@dnd/server",
     "dev:web": "npm run dev --workspace=@dnd/web",
     "build": "npm run build --workspace=@dnd/shared && npm run build --workspace=@dnd/web && npm run build --workspace=@dnd/server",
@@ -16,12 +16,16 @@
     "test": "vitest run",
     "seed": "npm run seed --workspace=@dnd/server",
     "srd:import": "npm run srd:import --workspace=@dnd/server",
-    "backup": "npm run backup --workspace=@dnd/server"
+    "backup": "npm run backup --workspace=@dnd/server",
+    "dev:shared": "npm run dev --workspace=@dnd/shared",
+    "start": "npm run build && npm run start --workspace=@dnd/server",
+    "pretest": "npm run build --workspace=@dnd/shared"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
+    "concurrently": "^10.0.4",
     "typescript": "^5.7.3",
     "vitest": "^3.0.5"
   },
