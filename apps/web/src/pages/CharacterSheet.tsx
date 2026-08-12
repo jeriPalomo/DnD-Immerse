@@ -25,6 +25,13 @@ import { useSheet } from '../store/sheet.js';
 import { useTable } from '../store/table.js';
 import { api } from '../lib/api.js';
 
+/** Stable anchor from a section title, so the nav and the sections agree. */
+function sectionId(title: string): string {
+  return `sheet-${title.toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '')}`;
+}
+
+const NAV = ['Attacks', 'Spells', 'Inventory', 'Features & Traits', 'Notes'];
+
 export default function CharacterSheet() {
   const { id } = useParams<{ id: string }>();
   const sheet = useSheet();
@@ -80,6 +87,20 @@ export default function CharacterSheet() {
       </div>
 
       <Identity actor={actor} editable={editable} onChange={sheet.patch} />
+
+      {/* Jumping beats scrolling a sheet this tall; hunting for the spell list
+          was the actual complaint. */}
+      <nav className="sticky top-0 z-10 -mx-4 mb-2 flex gap-1 overflow-x-auto border-b border-ink-800 bg-ink-950/90 px-4 py-2 backdrop-blur">
+        {NAV.map((title) => (
+          <a
+            key={title}
+            href={`#${sectionId(title)}`}
+            className="shrink-0 rounded px-2 py-1 text-xs text-ink-400 transition-colors hover:bg-ink-850 hover:text-ink-100"
+          >
+            {title}
+          </a>
+        ))}
+      </nav>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
         {/* Left rail: the derived numbers */}
@@ -250,7 +271,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="p-4">
+    <Card id={sectionId(title)} className="scroll-mt-20 p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="font-display text-lg text-ink-100">{title}</h2>
         {action}

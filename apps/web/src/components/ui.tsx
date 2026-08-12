@@ -90,9 +90,18 @@ export function Textarea({ className, ...rest }: TextareaHTMLAttributes<HTMLText
 
 /* ----------------------------------------------------------------- misc */
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
+export function Card({
+  className,
+  children,
+  id,
+}: {
+  className?: string;
+  children: ReactNode;
+  id?: string;
+}) {
   return (
     <div
+      id={id}
       className={cx(
         'rounded-xl border border-ink-700 bg-ink-900/80 shadow-xl shadow-black/40 backdrop-blur',
         className,

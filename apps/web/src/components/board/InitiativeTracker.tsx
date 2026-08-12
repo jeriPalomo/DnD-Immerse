@@ -23,7 +23,7 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
   if (!encounter) {
     if (!isDM) return null;
     return (
-      <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
+      <div className="p-2">
         <h2 className="mb-2 font-display text-sm text-ink-100">Combat</h2>
         <Button size="sm" variant="secondary" onClick={() => startEncounter()}>
           Start encounter
@@ -44,7 +44,7 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
       : [];
 
   return (
-    <div className="rounded-xl border border-ember-500/40 bg-ink-900 p-4">
+    <div className="rounded-lg border-l-2 border-ember-500/60 bg-ink-900 p-2 pl-3">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="font-display text-sm text-ink-100">
           Round {encounter.round}

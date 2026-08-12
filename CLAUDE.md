@@ -134,6 +134,12 @@ authenticates; it does not authorize. DM-only data travels on the separate
 `campaign:{id}:dm` room so secrecy is structural rather than a forgettable
 `if (isDM)` branch.
 
+**Hooks go above the early returns.** `CampaignTable` returns early while
+loading, and binding `useHotkeys` after that produced React error #310 — more
+hooks on the second render than the first. Shortcut handlers read
+`useTable.getState()` when a key fires rather than closing over render values,
+which also means they cannot act on a stale selection.
+
 ## Conventions
 
 `packages/shared` is the contract between client and server — Zod schemas, the

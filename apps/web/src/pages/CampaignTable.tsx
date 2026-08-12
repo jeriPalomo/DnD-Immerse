@@ -14,6 +14,9 @@ import { TokenHUD } from '../components/board/TokenHUD.js';
 import { api } from '../lib/api.js';
 import { useTable } from '../store/table.js';
 import { useAuth } from '../store/auth.js';
+import { ShortcutHelp } from '../components/board/ShortcutHelp.js';
+import { SidebarTabs } from '../components/board/SidebarTabs.js';
+import { useHotkeys } from '../lib/useHotkeys.js';
 import type { Actor, Item } from '../store/sheet.js';
 
 type PartyMember = Partial<Actor> & { id: string; name: string; access: number };
@@ -30,6 +33,7 @@ export default function CampaignTable() {
   const [myItems, setMyItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -65,6 +69,59 @@ export default function CampaignTable() {
     })();
   }, [id, user?.id]);
 
+  /**
+   * Shortcuts are bound before any early return, or React sees a different
+   * number of hooks between the loading and loaded renders.
+   *
+   * Handlers read the store when the key is pressed rather than closing over
+   * values from render, which also means they can never act on a stale
+   * selection.
+   */
+  /** Moves the selected token a square, snapped and persisted in one step. */
+  function nudge(event: KeyboardEvent, dx: number, dy: number) {
+    event.preventDefault();
+    const state = useTable.getState();
+    const token = state.tokens.find((t) => t.id === state.selectedTokenId);
+    if (!token || token.locked) return;
+    if (campaign?.role !== 'dm' && token.ownerUserId !== user?.id) return;
+
+    state.commitToken(token.id, token.x + dx, token.y + dy);
+  }
+
+  useHotkeys({
+    Escape: () => {
+      setShowHelp((open) => {
+        if (open) return false;
+        useTable.getState().target(null);
+        useTable.getState().select(null);
+        return false;
+      });
+    },
+    Delete: () => {
+      const { selectedTokenId, deleteToken } = useTable.getState();
+      if (selectedTokenId && campaign?.role === 'dm') deleteToken(selectedTokenId);
+    },
+    ArrowLeft: (e) => nudge(e, -1, 0),
+    ArrowRight: (e) => nudge(e, 1, 0),
+    ArrowUp: (e) => nudge(e, 0, -1),
+    ArrowDown: (e) => nudge(e, 0, 1),
+    Enter: (e) => {
+      e.preventDefault();
+      document.querySelector<HTMLInputElement>('input[aria-label="Message"]')?.focus();
+    },
+    t: () => {
+      const { selectedTokenId, target } = useTable.getState();
+      if (selectedTokenId) target(selectedTokenId);
+    },
+    ' ': (e) => {
+      // Space would otherwise scroll the page behind the board.
+      e.preventDefault();
+      const state = useTable.getState();
+      if (campaign?.role === 'dm' && state.encounter) state.nextTurn();
+    },
+    '?': () => setShowHelp(true),
+  });
+
   if (loading) return <Spinner />;
   if (error) {
     return (
@@ -84,6 +141,7 @@ export default function CampaignTable() {
 
   const canEditSelected = Boolean(selected && (isDM || selected.ownerUserId === user?.id));
 
+
   return (
     <div className="mx-auto max-w-[110rem] px-4 py-4">
       <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -100,17 +158,11 @@ export default function CampaignTable() {
           <BattleMap isDM={Boolean(isDM)} />
         </div>
 
-        {/* Contextual column */}
-        <div className="space-y-3 overflow-y-auto xl:h-[calc(100vh-8rem)]">
+        {/* Contextual column. Transient panels sit above the tabs: a token
+            HUD you have to hunt for after clicking a token is worse than one
+            that is simply always in the same place. */}
+        <div className="flex flex-col gap-3 xl:h-[calc(100vh-8rem)]">
           <AudioPlayer isDM={Boolean(isDM)} />
-
-          <InitiativeTracker isDM={Boolean(isDM)} />
-
-          {isDM && id && <SceneManager campaignId={id} />}
-
-          {isDM && id && <Soundboard campaignId={id} />}
-
-          {id && <JournalPanel campaignId={id} isDM={Boolean(isDM)} />}
 
           {targeted && scene && (
             <TargetPanel
@@ -158,7 +210,29 @@ export default function CampaignTable() {
             />
           )}
 
-          <Card className="p-3">
+          <SidebarTabs
+            tabs={[
+              { id: 'combat', label: 'Combat', node: <InitiativeTracker isDM={Boolean(isDM)} /> },
+              ...(isDM && id
+                ? [
+                    { id: 'scene', label: 'Scene', node: <SceneManager campaignId={id} /> },
+                    { id: 'sound', label: 'Sound', node: <Soundboard campaignId={id} /> },
+                  ]
+                : []),
+              ...(id
+                ? [
+                    {
+                      id: 'journal',
+                      label: 'Journal',
+                      node: <JournalPanel campaignId={id} isDM={Boolean(isDM)} />,
+                    },
+                  ]
+                : []),
+            ]}
+          />
+
+          {/* Pinned below the tabs: the party is for glancing at, not working in. */}
+          <Card className="shrink-0 p-3">
             <h2 className="mb-2 font-display text-sm text-ink-100">The party</h2>
             {party.length === 0 ? (
               <p className="text-xs text-ink-500">No characters assigned yet.</p>
@@ -177,6 +251,8 @@ export default function CampaignTable() {
           <ChatPanel />
         </div>
       </div>
+
+      {showHelp && <ShortcutHelp onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

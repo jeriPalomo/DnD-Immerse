@@ -96,7 +96,7 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
   if (!isDM && entries.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
+    <div className="p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 className="font-display text-sm text-ink-100">Journal</h2>
         {isDM && (

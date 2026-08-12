@@ -57,6 +57,7 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
   // leaves the map stuck off-centre.
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+  const [hovered, setHovered] = useState<WireToken | null>(null);
 
   const mapImage = useImage(scene?.mapImageUrl ?? null);
 
@@ -85,8 +86,8 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
 
   useEffect(() => () => observerRef.current?.disconnect(), []);
 
-  // Fit the map when it first loads or the scene changes.
-  useEffect(() => {
+  /** Centres the whole map in the viewport. Shared by the button and the F key. */
+  const fitToMap = useCallback(() => {
     if (!scene?.mapWidth || !scene.mapHeight || !size.width || !size.height) return;
     const scale = Math.min(size.width / scene.mapWidth, size.height / scene.mapHeight, 1);
     setView({
@@ -94,7 +95,23 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
       x: (size.width - scene.mapWidth * scale) / 2,
       y: (size.height - scene.mapHeight * scale) / 2,
     });
-  }, [scene?.id, scene?.mapWidth, scene?.mapHeight, size.width, size.height]);
+  }, [scene?.mapWidth, scene?.mapHeight, size.width, size.height]);
+
+  // Fit when the map first loads or the scene changes.
+  useEffect(() => {
+    fitToMap();
+  }, [scene?.id, fitToMap]);
+
+  // Easy to get lost after zooming into a corner.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const el = event.target as HTMLElement | null;
+      if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return;
+      if (event.key === 'f' || event.key === 'F') fitToMap();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fitToMap]);
 
   const onWheel = useCallback((event: Konva.KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault();
@@ -135,7 +152,12 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
   const targeted = tokens.find((t) => t.id === targetTokenId) ?? null;
 
   return (
-    <div ref={setContainer} className="relative h-full overflow-hidden rounded-xl border border-ink-700 bg-ink-950">
+    <div
+      ref={setContainer}
+      className={`relative h-full overflow-hidden rounded-xl border border-ink-700 bg-ink-950 ${
+        wallTool === 'off' ? '' : 'cursor-crosshair'
+      }`}
+    >
       <Stage
         width={size.width}
         height={size.height}
@@ -243,6 +265,7 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
             .filter((t) => t.layer !== 'gm' || isDM)
             .map((token) => (
               <TokenShape
+                onHover={setHovered}
                 key={token.id}
                 token={token}
                 grid={grid}
@@ -306,12 +329,35 @@ export function BattleMap({ isDM }: { isDM: boolean }) {
         </Layer>
       </Stage>
 
+      {hovered && (
+        <div
+          className="pointer-events-none absolute top-2 left-2 rounded border border-ink-700 bg-ink-950/90 px-2 py-1"
+          // HTML rather than a Konva label, so it stays sharp however far the
+          // board is zoomed out.
+        >
+          <div className="text-xs text-ink-100">{hovered.name || 'Token'}</div>
+          <div className="text-[10px] text-ink-500">
+            {hovered.maxHp !== null ? `${hovered.hp}/${hovered.maxHp} HP` : 'no hit points'}
+            {hovered.ac !== null ? ` · AC ${hovered.ac}` : ''}
+            {hovered.conditions.length > 0 ? ` · ${hovered.conditions.join(', ')}` : ''}
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={fitToMap}
+        title="Fit the map to the window (F)"
+        className="absolute top-2 right-2 rounded border border-ink-700 bg-ink-950/85 px-2 py-1 text-[10px] text-ink-400 transition-colors hover:border-ember-500 hover:text-ember-300"
+      >
+        Fit
+      </button>
+
       <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-ink-950/80 px-2 py-1 text-[10px] text-ink-500">
         {wallTool !== 'off'
           ? wallTool === 'note'
             ? 'click to drop a pin — click a pin to reveal it, alt-click to delete'
             : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
-          : 'scroll to zoom · drag to pan · alt-click to ping · shift-click a token to target'}
+          : 'scroll to zoom · drag to pan · alt-click to ping · shift-click a token to target · ? for keys'}
       </div>
 
       {wallStart && (
@@ -384,6 +430,7 @@ function TokenShape({
   onSelect,
   onMove,
   onCommit,
+  onHover,
 }: {
   token: WireToken;
   grid: { gridSize: number; offsetX: number; offsetY: number };
@@ -393,6 +440,7 @@ function TokenShape({
   onSelect: (withShift: boolean) => void;
   onMove: (id: string, x: number, y: number) => void;
   onCommit: (id: string, x: number, y: number) => void;
+  onHover: (token: WireToken | null) => void;
 }) {
   const image = useImage(token.imageUrl);
   const lastEmit = useRef(0);
@@ -408,6 +456,8 @@ function TokenShape({
     <Group
       x={position.x}
       y={position.y}
+      onMouseEnter={() => onHover(token)}
+      onMouseLeave={() => onHover(null)}
       draggable={draggable}
       opacity={token.hidden ? 0.45 : 1}
       onClick={(e) => {

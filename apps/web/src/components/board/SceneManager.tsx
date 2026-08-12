@@ -79,7 +79,7 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
   }
 
   return (
-    <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
+    <div className="p-2">
       <div className="mb-3 flex gap-1">
         {(['scenes', 'tokens', 'grid', 'vision'] as const).map((key) => (
           <button
