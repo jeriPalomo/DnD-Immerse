@@ -5,12 +5,10 @@ import {
   gridToPixel,
   pixelToGrid,
   pointInPolygon,
-  rectToPolygon,
   snapTokenPosition,
   tokenCenter,
   tokenDistance,
   tokenDistanceInFeet,
-  tokenFootprintVisible,
 } from './grid.js';
 
 const GRID = { gridSize: 70, offsetX: 12, offsetY: 8 };
@@ -104,25 +102,20 @@ describe('snapTokenPosition', () => {
   });
 });
 
-describe('fog geometry', () => {
-  const room = rectToPolygon(0, 0, 10, 10);
+describe('pointInPolygon', () => {
+  const room = [
+    { x: 0, y: 0 },
+    { x: 10, y: 0 },
+    { x: 10, y: 10 },
+    { x: 0, y: 10 },
+  ];
 
-  it('detects points inside and outside a polygon', () => {
+  it('detects points inside and outside', () => {
     expect(pointInPolygon({ x: 5, y: 5 }, room)).toBe(true);
     expect(pointInPolygon({ x: 15, y: 5 }, room)).toBe(false);
   });
 
-  it('keeps a large creature visible when only part of it is revealed', () => {
-    // A 4x4 dragon mostly in the dark, one corner poking into the lit room.
-    const dragon = { x: 8, y: 8, w: 4, h: 4 };
-    expect(tokenFootprintVisible(dragon, [room])).toBe(true);
-  });
-
-  it('hides a token entirely outside the revealed area', () => {
-    expect(tokenFootprintVisible({ x: 20, y: 20, w: 1, h: 1 }, [room])).toBe(false);
-  });
-
-  it('reveals nothing when no area has been explored', () => {
-    expect(tokenFootprintVisible({ x: 1, y: 1, w: 1, h: 1 }, [])).toBe(false);
+  it('rejects a degenerate polygon', () => {
+    expect(pointInPolygon({ x: 0, y: 0 }, [{ x: 0, y: 0 }])).toBe(false);
   });
 });

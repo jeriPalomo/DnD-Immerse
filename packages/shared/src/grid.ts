@@ -45,10 +45,6 @@ export function snap(value: number, increment = 1): number {
   return Math.round(value / increment) * increment;
 }
 
-export function snapPoint(p: Point, increment = 1): Point {
-  return { x: snap(p.x, increment), y: snap(p.y, increment) };
-}
-
 export type DiagonalRule = 'standard' | 'variant';
 
 /**
@@ -69,11 +65,6 @@ export function gridDistance(a: Point, b: Point, rule: DiagonalRule = 'standard'
   const diagonals = Math.min(dx, dy);
   const straights = Math.max(dx, dy) - diagonals;
   return straights + diagonals + Math.floor(diagonals / 2);
-}
-
-/** Distance in feet, at the standard 5 feet per square. */
-export function distanceInFeet(a: Point, b: Point, rule: DiagonalRule = 'standard', feetPerSquare = 5): number {
-  return gridDistance(a, b, rule) * feetPerSquare;
 }
 
 export type Polygon = Point[];
@@ -100,37 +91,6 @@ export function pointInPolygon(point: Point, polygon: Polygon): boolean {
 
 export function pointInAnyPolygon(point: Point, polygons: Polygon[]): boolean {
   return polygons.some((poly) => pointInPolygon(point, poly));
-}
-
-/**
- * A token occupies a WxH block of squares. It counts as visible if any part
- * of its footprint is revealed, so a large creature poking out of the fog is
- * not invisible.
- */
-export function tokenFootprintVisible(
-  token: { x: number; y: number; w: number; h: number },
-  revealed: Polygon[],
-): boolean {
-  if (revealed.length === 0) return false;
-
-  const corners: Point[] = [
-    { x: token.x, y: token.y },
-    { x: token.x + token.w, y: token.y },
-    { x: token.x, y: token.y + token.h },
-    { x: token.x + token.w, y: token.y + token.h },
-    { x: token.x + token.w / 2, y: token.y + token.h / 2 },
-  ];
-  return corners.some((c) => pointInAnyPolygon(c, revealed));
-}
-
-/** Axis-aligned rectangle as a polygon, for the DM's rectangular reveal brush. */
-export function rectToPolygon(x: number, y: number, w: number, h: number): Polygon {
-  return [
-    { x, y },
-    { x: x + w, y },
-    { x: x + w, y: y + h },
-    { x, y: y + h },
-  ];
 }
 
 /** Clamps a token so it cannot be dragged off the map entirely. */

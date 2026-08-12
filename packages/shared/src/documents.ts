@@ -256,14 +256,6 @@ export type ItemSystem =
   | ClassSystem
   | OriginSystem;
 
-export const itemInputSchema = z.object({
-  type: itemTypeSchema,
-  name: z.string().min(1).max(80).trim(),
-  imageUrl: z.string().max(500).nullable().default(null),
-  system: z.unknown(),
-  sortOrder: z.number().int().default(0),
-});
-
 /** Validates an item's `system` blob against the schema for its declared type. */
 export function parseItemSystem(type: ItemType, system: unknown): ItemSystem {
   return itemSystemSchemas[type].parse(system ?? {}) as ItemSystem;

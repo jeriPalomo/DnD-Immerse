@@ -65,6 +65,12 @@ the participants' personal socket rooms - never to the campaign room carrying a
 (a secret roll is stored as a whisper to the DM) so it survives a history
 reload.
 
+**Cull walls to the vision radius before the sweep.** The sweep casts three
+rays per wall corner and tests each against every wall, so cost grows with the
+*square* of the wall count — 300 walls measured at 13.8 ms per token before
+culling, which blows a 30 Hz drag budget several times over once every player
+is recomputed. Culling makes it flat: 0.07 ms at 300 walls, 0.13 ms at 2000.
+
 **Vision is computed on the server, never the client.** `realtime/vision.ts`
 produces each player's polygon and sends them the polygon plus the tokens inside
 it. Wall geometry is never in a player payload — doors are, because a door is a

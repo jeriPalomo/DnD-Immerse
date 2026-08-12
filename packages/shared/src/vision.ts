@@ -76,6 +76,22 @@ function rayHitsSegment(
   return t;
 }
 
+/** Shortest distance from a point to a segment, for radius culling. */
+function distanceToSegment(point: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = dx * dx + dy * dy;
+
+  if (lengthSquared < EPSILON) return Math.hypot(point.x - a.x, point.y - a.y);
+
+  // Project the point onto the segment, clamped to its ends.
+  const t = Math.max(
+    0,
+    Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared),
+  );
+  return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+}
+
 /**
  * The polygon visible from `origin`, bounded by `radius`.
  *
@@ -93,7 +109,16 @@ export function computeVisibility(
   walls: VisionWall[],
   radius: number,
 ): Polygon {
-  const blocking = walls.filter(blocksSight);
+  // Walls beyond the vision radius cannot occlude anything inside it, and
+  // dropping them early matters a great deal: the sweep casts three rays per
+  // wall corner and tests each against every wall, so cost grows with the
+  // SQUARE of the wall count. Culling to the local neighbourhood keeps a big
+  // dungeon as cheap as a small room.
+  const blocking = walls.filter(
+    (wall) =>
+      blocksSight(wall) &&
+      distanceToSegment(origin, { x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 }) <= radius,
+  );
 
   const angles: number[] = [];
 

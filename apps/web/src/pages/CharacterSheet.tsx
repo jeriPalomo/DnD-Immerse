@@ -19,6 +19,7 @@ import {
 } from '../components/sheet/Abilities.js';
 import { AttackList, CombatStats, SpellcastingHeader } from '../components/sheet/Combat.js';
 import { FeaturePanel, InventoryPanel, SpellPanel } from '../components/sheet/ItemPanels.js';
+import { CampaignAssign } from '../components/sheet/CampaignAssign.js';
 import { ShareSheet } from '../components/sheet/ShareSheet.js';
 import { useSheet } from '../store/sheet.js';
 import { useTable } from '../store/table.js';
@@ -192,6 +193,16 @@ export default function CharacterSheet() {
               onRemove={(itemId) => void sheet.removeItem(itemId)}
             />
           </Section>
+
+          {editable && (
+            <Section title="At the table">
+              <CampaignAssign
+                actorId={actor.id}
+                assigned={sheet.campaigns}
+                onChanged={() => void sheet.load(actor.id)}
+              />
+            </Section>
+          )}
 
           {editable && (
             <Section title="Who can see this">

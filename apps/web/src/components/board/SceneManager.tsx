@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../ui.js';
 import { api } from '../../lib/api.js';
+import { MonsterBrowser } from './MonsterBrowser.js';
 import { useTable } from '../../store/table.js';
 import type { WireScene } from '@dnd/shared';
 
@@ -27,6 +28,7 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<'scenes' | 'tokens' | 'grid' | 'vision'>('scenes');
   const [localDarkness, setLocalDarkness] = useState(0);
+  const [browsing, setBrowsing] = useState(false);
 
   useEffect(() => {
     if (scene) setLocalDarkness(scene.darkness);
@@ -240,6 +242,10 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
           <p className="mb-2 text-[11px] text-ink-500">
             Drops a token at the top-left of the map, sized from the actor's stat block.
           </p>
+
+          <Button size="sm" variant="secondary" onClick={() => setBrowsing(true)} className="mb-2">
+            Add from bestiary
+          </Button>
           <div className="flex flex-wrap gap-1.5">
             {actors.map((actor) => (
               <button
@@ -257,6 +263,13 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
           </div>
           {!scene && <p className="mt-2 text-xs text-ink-600">Activate a scene first.</p>}
         </div>
+      )}
+      {browsing && (
+        <MonsterBrowser
+          campaignId={campaignId}
+          onAdded={() => void load()}
+          onClose={() => setBrowsing(false)}
+        />
       )}
     </div>
   );

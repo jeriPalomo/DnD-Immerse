@@ -92,15 +92,40 @@ describe('computeVisibility', () => {
     expect(pointInPolygon({ x: 8, y: 0 }, polygon)).toBe(false);
   });
 
-  it('stays fast enough to recompute on every drag frame', () => {
-    // 300 walls is a dense dungeon; the budget is a few milliseconds.
-    const walls = Array.from({ length: 300 }, (_, i) =>
-      wall(i % 30, Math.floor(i / 30), (i % 30) + 1, Math.floor(i / 30) + 1),
-    );
+  it('ignores walls beyond the vision radius', () => {
+    const near = wall(5, -5, 5, 5);
+    const faraway = wall(500, -5, 500, 5);
 
-    const started = performance.now();
-    computeVisibility({ x: 15, y: 5 }, walls, 60);
-    expect(performance.now() - started).toBeLessThan(150);
+    // A wall 500 squares away cannot occlude anything within 12, so the
+    // polygon must be identical whether or not it is in the list.
+    const withFar = computeVisibility({ x: 0, y: 0 }, [near, faraway], 12);
+    const without = computeVisibility({ x: 0, y: 0 }, [near], 12);
+    expect(withFar).toEqual(without);
+  });
+
+  it('costs about the same in a big dungeon as a small one', () => {
+    // The sweep casts three rays per corner and tests each against every wall,
+    // so without radius culling cost grows with the SQUARE of the wall count -
+    // 300 walls measured at 13.8ms before culling, which blows a 30Hz budget
+    // several times over once every player is recomputed.
+    const build = (count: number) =>
+      Array.from({ length: count }, (_, i) =>
+        wall((i % 40) * 3, Math.floor(i / 40) * 3, (i % 40) * 3 + 2, Math.floor(i / 40) * 3),
+      );
+
+    const time = (walls: VisionWall[]) => {
+      for (let i = 0; i < 20; i++) computeVisibility({ x: 5, y: 5 }, walls, 12);
+      const started = performance.now();
+      for (let i = 0; i < 50; i++) computeVisibility({ x: 5, y: 5 }, walls, 12);
+      return (performance.now() - started) / 50;
+    };
+
+    const small = time(build(100));
+    const large = time(build(1200));
+
+    // Flat rather than quadratic: a twelvefold dungeon must not cost
+    // twelvefold, let alone a hundredfold.
+    expect(large).toBeLessThan(Math.max(small * 4, 2));
   });
 });
 
