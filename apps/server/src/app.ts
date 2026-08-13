@@ -7,7 +7,6 @@ import { ZodError } from 'zod';
 import { HttpError, attachUser } from './auth/guards.js';
 import { authRoutes } from './routes/auth.js';
 import { actorRoutes } from './routes/actors.js';
-import { audioRoutes } from './routes/audio.js';
 import { campaignRoutes } from './routes/campaigns.js';
 import { itemRoutes } from './routes/items.js';
 import { journalRoutes } from './routes/journal.js';
@@ -66,7 +65,6 @@ export async function buildApp() {
   await app.register(actorRoutes);
   await app.register(itemRoutes);
   await app.register(sceneRoutes);
-  await app.register(audioRoutes);
   await app.register(journalRoutes);
 
   await serveClient(app);

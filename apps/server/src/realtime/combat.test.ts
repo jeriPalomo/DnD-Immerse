@@ -3,11 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { io as connect, type Socket } from 'socket.io-client';
-import type { WireAudioState, WireToken } from '@dnd/shared';
+import type { WireToken } from '@dnd/shared';
 
 /**
- * Combat music, death saves, and whether a linked token's hit points stay in
- * step with its sheet.
+ * Death saves, and whether a linked token's hit points stay in step with its
+ * sheet.
  *
  * That last one is the reason this file exists: damage writes to both the
  * token and the actor, but rests and sheet edits write only to the actor,
@@ -76,31 +76,6 @@ function next<T>(socket: Socket, event: string, timeoutMs = 3000): Promise<T | n
     };
     socket.on(event, handler);
   });
-}
-
-async function uploadTrack(playlistId: string, cookie: string, name: string) {
-  const wav = Buffer.concat([
-    Buffer.from('RIFF'),
-    Buffer.from(new Uint32Array([836]).buffer),
-    Buffer.from('WAVEfmt '),
-    Buffer.from(new Uint32Array([16]).buffer),
-    Buffer.from(new Uint16Array([1, 1]).buffer),
-    Buffer.from(new Uint32Array([8000, 8000]).buffer),
-    Buffer.from(new Uint16Array([1, 8]).buffer),
-    Buffer.from('data'),
-    Buffer.from(new Uint32Array([800]).buffer),
-    Buffer.alloc(800, 128),
-  ]);
-
-  const form = new FormData();
-  form.append('file', new Blob([wav], { type: 'audio/wav' }), `${name}.wav`);
-
-  const response = await fetch(`${baseUrl}/api/playlists/${playlistId}/tracks`, {
-    method: 'POST',
-    headers: { cookie },
-    body: form,
-  });
-  return (await response.json()) as { track: { id: string; fileUrl: string } };
 }
 
 let dm: Account;
@@ -245,51 +220,6 @@ describe('death saves', () => {
     const failure = next<{ message: string }>(aliceSocket, 'error');
     aliceSocket.emit('death:save', { tokenId: npcToken });
     expect((await failure)?.message).toMatch(/not your character/i);
-  });
-});
-
-describe('combat music', () => {
-  let combatTrackUrl: string;
-  let calmTrackUrl: string;
-
-  beforeAll(async () => {
-    const calm = await api<{ playlist: { id: string } }>(
-      'POST', `/api/campaigns/${campaignId}/playlists`, { name: 'Tavern' }, dm.cookie,
-    );
-    const calmTrack = await uploadTrack(calm.playlist.id, dm.cookie, 'tavern');
-    calmTrackUrl = calmTrack.track.fileUrl;
-
-    const fight = await api<{ playlist: { id: string } }>(
-      'POST', `/api/campaigns/${campaignId}/playlists`, { name: 'Battle' }, dm.cookie,
-    );
-    await api('PATCH', `/api/playlists/${fight.playlist.id}`, { role: 'combat' }, dm.cookie);
-    const combatTrack = await uploadTrack(fight.playlist.id, dm.cookie, 'battle');
-    combatTrackUrl = combatTrack.track.fileUrl;
-
-    // Something calm is playing before the fight starts.
-    dmSocket.emit('audio:control', {
-      playlistId: calm.playlist.id, trackId: calmTrack.track.id, playing: true, loop: true,
-    });
-    await new Promise((r) => setTimeout(r, 400));
-  });
-
-  it('switches to the combat playlist when an encounter starts', async () => {
-    const audio = next<WireAudioState>(aliceSocket, 'audio:state', 4000);
-    dmSocket.emit('encounter:start', { sceneId });
-
-    const state = await audio;
-    expect(state?.playing).toBe(true);
-    expect(state?.trackUrl).toBe(combatTrackUrl);
-  });
-
-  it('goes back to what was playing when the encounter ends', async () => {
-    const audio = next<WireAudioState>(aliceSocket, 'audio:state', 4000);
-    dmSocket.emit('encounter:end', {});
-
-    const state = await audio;
-    // The tavern was playing before the fight; it should be playing after.
-    expect(state?.trackUrl).toBe(calmTrackUrl);
-    expect(state?.playing).toBe(true);
   });
 });
 

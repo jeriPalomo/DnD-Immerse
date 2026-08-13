@@ -504,9 +504,6 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     const updated = await tokenOf(input.tokenId);
     if (updated) await broadcastToken(io, ctx.campaignId, updated);
 
-    // Sound occlusion depends on where the listener is standing.
-    const { broadcastSounds } = await import('./ambience.js');
-    await broadcastSounds(io, ctx.campaignId);
   });
 
   socket.on('token:create', async (payload) => {
@@ -789,11 +786,9 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     io.to(campaignRoom(ctx.campaignId)).emit('door:updated', {
       door: toWireDoor({ ...wall, doorState }),
     });
-    // Everyone's sight - and hearing - changes the moment a door swings.
+    // Everyone's sight changes the moment a door swings.
     await broadcastSceneState(io, ctx.campaignId);
 
-    const { broadcastSounds } = await import('./ambience.js');
-    await broadcastSounds(io, ctx.campaignId);
   });
 
   /**

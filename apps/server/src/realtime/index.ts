@@ -5,13 +5,7 @@ import type { ClientToServerEvents, ServerToClientEvents, WirePresence } from '@
 import { SESSION_COOKIE, validateSession } from '../auth/session.js';
 import { getMembership } from '../auth/guards.js';
 import { registerChatHandlers } from './chat.js';
-import {
-  broadcastAudio,
-  broadcastPlaylists,
-  broadcastSounds,
-  broadcastTemplates,
-  registerAmbienceHandlers,
-} from './ambience.js';
+import { broadcastTemplates, registerOverlayHandlers } from './overlays.js';
 import { broadcastEncounter, registerCombatHandlers } from './combat.js';
 import { broadcastSceneState, registerSceneHandlers } from './scene.js';
 import type { MemberRole } from '@dnd/shared';
@@ -147,10 +141,7 @@ export function attachRealtime(app: FastifyInstance): IOServer {
       await broadcastPresence(io, campaignId);
       await broadcastSceneState(io, campaignId);
       await broadcastEncounter(io, campaignId);
-      await broadcastAudio(io, campaignId);
-      await broadcastSounds(io, campaignId);
       await broadcastTemplates(io, campaignId);
-      if (membership.isDM) await broadcastPlaylists(io, campaignId);
     });
 
     socket.on('campaign:leave', async ({ campaignId }) => {
@@ -167,7 +158,7 @@ export function attachRealtime(app: FastifyInstance): IOServer {
     registerChatHandlers(io, socket);
     registerSceneHandlers(io, socket);
     registerCombatHandlers(io, socket);
-    registerAmbienceHandlers(io, socket);
+    registerOverlayHandlers(io, socket);
 
     socket.on('disconnect', async () => {
       for (const campaignId of socket.data.rooms.keys()) {

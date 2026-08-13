@@ -19,8 +19,6 @@ export interface VisionWall {
   blocksSight: number;
   /** 0 none, 1 blocks. */
   blocksMovement: number;
-  /** 0 none, 1 muffles. */
-  blocksSound: number;
   /** 0 wall, 1 door, 2 secret door. */
   door: number;
   /** 0 closed, 1 open, 2 locked. */
@@ -228,51 +226,6 @@ export function movementBlocked(a: Point, b: Point, walls: VisionWall[]): boolea
   }
 
   return false;
-}
-
-/* --------------------------------------------------------------- sound */
-
-/** A wall muffles sound unless it is an open door. */
-export function blocksSound(wall: VisionWall): boolean {
-  if (!wall.blocksSound) return false;
-  if (wall.door > 0 && wall.doorState === 1) return false;
-  return true;
-}
-
-/**
- * How much a wall between a sound and a listener muffles it.
- *
- * Returns a multiplier rather than a boolean: a waterfall behind a closed
- * stone door should be quieter, not silent — going fully silent is a more
- * obvious wrong than being slightly too loud, because the sound pops in and
- * out as people walk about.
- */
-export const OCCLUDED_VOLUME = 0.3;
-
-export function soundOcclusion(
-  source: Point,
-  listener: Point,
-  walls: VisionWall[],
-): number {
-  const dx = listener.x - source.x;
-  const dy = listener.y - source.y;
-  const length = Math.hypot(dx, dy);
-  if (length < EPSILON) return 1;
-
-  for (const wall of walls) {
-    if (!blocksSound(wall)) continue;
-
-    const t = rayHitsSegment(
-      source,
-      dx / length,
-      dy / length,
-      { x: wall.x1, y: wall.y1 },
-      { x: wall.x2, y: wall.y2 },
-    );
-    if (t !== null && t <= length) return OCCLUDED_VOLUME;
-  }
-
-  return 1;
 }
 
 /* ------------------------------------------------------------ lighting */

@@ -18,8 +18,9 @@ Four decisions set the scope:
    first-class Item document, not a JSON blob.
 2. **Wall-based dynamic vision** — real line-of-sight with automatic fog
    exploration, not DM-painted fog.
-3. **Playlists plus positional ambient sounds** — audio emitters placed on the
-   map, audible by proximity.
+3. ~~**Playlists plus positional ambient sounds**~~ — built in phase 7 and
+   removed on 2026-08-13. The group plays over Discord, which already carries
+   the music; the whole subsystem was compiled and tested for nobody.
 4. **Heavy rules automation** — active effects, automatic saves, concentration,
    resistance math.
 
@@ -59,7 +60,7 @@ apps/
   server/   Fastify + Socket.IO + Drizzle
 packages/
   shared/   Zod schemas, socket contract, 5e rules, grid + vision math
-data/       gitignored: app.db, srd/, uploads/{maps,tokens,avatars,audio}/
+data/       gitignored: app.db, srd/, uploads/{maps,tokens,avatars,handouts}/
 ```
 
 `packages/shared` is load-bearing. Every socket payload, the 5e rules math, and
@@ -111,7 +112,6 @@ encounters, initiative_entries
 active_effects    id, ownerActorId?, ownerItemId?, name, icon, changes (json),
                   duration (json), disabled, transfer
 
-playlists, playlist_tracks, ambient_sounds(sceneId, x, y, radius, trackUrl, walls, hidden)
 journal_entries, journal_pages, map_notes(sceneId, x, y, journalPageId, icon, hidden)
 srd_spells, srd_monsters, srd_items
 ```
@@ -283,7 +283,7 @@ than no rules engine.
 | 4 | Scenes, map upload, grid calibration, token CRUD, sized tokens, linked/unlinked, token HUD, targeting + action panel, realtime drag | **Working battle map** |
 | 5 ✅ | Walls, doors, server-side vision, bitmap fog exploration | Real line-of-sight |
 | 6 ✅ | Initiative tracker, active effects, damage application, concentration | Full automation |
-| 7 ✅ | Playlists, positional ambient sounds, journal with sharing, AoE templates | Immersion layer |
+| 7 ✅ | ~~Playlists, positional ambient sounds~~ (removed), journal with sharing, AoE templates | Immersion layer |
 
 ---
 

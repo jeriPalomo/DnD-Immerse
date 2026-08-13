@@ -4,10 +4,8 @@ import { OWNERSHIP, abilityModifier, formatModifier, templateForSpell } from '@d
 import { Alert, Badge, Card, Spinner } from '../components/ui.js';
 import { ChatPanel } from '../components/ChatPanel.js';
 import { BattleMap } from '../components/board/BattleMap.js';
-import { AudioPlayer } from '../components/board/AudioPlayer.js';
 import { InitiativeTracker } from '../components/board/InitiativeTracker.js';
 import { JournalPanel } from '../components/board/JournalPanel.js';
-import { Soundboard } from '../components/board/Soundboard.js';
 import { SceneManager } from '../components/board/SceneManager.js';
 import { TargetPanel } from '../components/board/TargetPanel.js';
 import { TokenHUD } from '../components/board/TokenHUD.js';
@@ -204,8 +202,6 @@ export default function CampaignTable() {
             HUD you have to hunt for after clicking a token is worse than one
             that is simply always in the same place. */}
         <div className={`flex flex-col gap-3 xl:h-[calc(100vh-8rem)] ${focusBoard ? 'hidden' : ''}`}>
-          <AudioPlayer isDM={Boolean(isDM)} />
-
           {targeted && scene && (
             <TargetPanel
               self={myToken ?? selected}
@@ -258,7 +254,6 @@ export default function CampaignTable() {
               ...(isDM && id
                 ? [
                     { id: 'scene', label: 'Scene', node: <SceneManager campaignId={id} /> },
-                    { id: 'sound', label: 'Sound', node: <Soundboard campaignId={id} /> },
                   ]
                 : []),
               ...(id

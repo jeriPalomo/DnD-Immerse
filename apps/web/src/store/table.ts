@@ -7,13 +7,10 @@ import type {
   ServerToClientEvents,
   WireChatMessage,
   WirePresence,
-  WireAmbientSound,
-  WireAudioState,
   WireDoor,
   WireDrawing,
   WireEncounter,
   WireMapNote,
-  WirePlaylist,
   WireTemplate,
   WireScene,
   WireToken,
@@ -43,9 +40,6 @@ interface TableState {
   /** DM wall-drawing mode. */
   wallTool: 'off' | 'wall' | 'door' | 'note' | 'draw' | 'arrow';
   encounter: WireEncounter | null;
-  audio: WireAudioState | null;
-  playlists: WirePlaylist[];
-  sounds: WireAmbientSound[];
   templates: WireTemplate[];
   /**
    * Recent reversible actions, newest last. Bounded, because an undo stack
@@ -107,12 +101,8 @@ interface TableState {
   removeFromInitiative: (entryId: string) => void;
   nextTurn: () => void;
   previousTurn: () => void;
-  playTrack: (playlistId: string, trackId: string | null, playing: boolean) => void;
-  setMusicVolume: (volume: number) => void;
   placeTemplate: (payload: Record<string, unknown>) => void;
   clearTemplate: (templateId: string) => void;
-  placeAmbient: (payload: Record<string, unknown>) => void;
-  removeAmbient: (soundId: string) => void;
   groupRoll: (kind: 'skill' | 'save' | 'ability', key: string, dc: number | null, secret: boolean) => void;
   rollDeathSave: (tokenId: string) => void;
   showHandout: (pageId: string) => void;
@@ -193,9 +183,6 @@ export const useTable = create<TableState>((set, get) => ({
   undoStack: [],
   toast: null,
   reveal: null,
-  audio: null,
-  playlists: [],
-  sounds: [],
   templates: [],
 
   setActiveActor(actorId) {
@@ -254,9 +241,6 @@ export const useTable = create<TableState>((set, get) => ({
       set({ doors: get().doors.map((d) => (d.id === door.id ? door : d)) }),
     );
     socket.on('initiative:state', ({ encounter }) => set({ encounter }));
-    socket.on('audio:state', (audio) => set({ audio }));
-    socket.on('audio:playlists', ({ playlists }) => set({ playlists }));
-    socket.on('audio:sounds', ({ sounds }) => set({ sounds }));
     socket.on('template:state', ({ templates }) => set({ templates }));
     socket.on('journal:changed', () => set({ journalVersion: get().journalVersion + 1 }));
     socket.on('handout:reveal', (reveal) => {
@@ -311,7 +295,7 @@ export const useTable = create<TableState>((set, get) => ({
     });
     socket.on('error', ({ message }) => set({ error: message }));
 
-    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null, sounds: [], templates: [], audio: null, notes: [], drawings: [], undoStack: [], toast: null });
+    set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null, templates: [], notes: [], drawings: [], undoStack: [], toast: null });
   },
 
   disconnect() {
@@ -468,7 +452,7 @@ export const useTable = create<TableState>((set, get) => ({
     if (!sceneId) return;
     get().socket?.emit('wall:create', {
       sceneId, x1, y1, x2, y2,
-      blocksMovement: 1, blocksSight: 1, blocksSound: 0,
+      blocksMovement: 1, blocksSight: 1,
       door: isDoor ? 1 : 0, doorState: 0,
     });
   },
@@ -506,27 +490,6 @@ export const useTable = create<TableState>((set, get) => ({
     get().socket?.emit('turn:previous', {});
   },
 
-  playTrack(playlistId, trackId, playing) {
-    get().socket?.emit('audio:control', {
-      playlistId,
-      trackId,
-      playing,
-      loop: true,
-      volume: get().audio?.volume ?? 0.6,
-    });
-  },
-
-  setMusicVolume(volume) {
-    const audio = get().audio;
-    get().socket?.emit('audio:control', {
-      playlistId: audio?.playlistId ?? null,
-      trackId: audio?.trackId ?? null,
-      playing: audio?.playing ?? false,
-      loop: true,
-      volume,
-    });
-  },
-
   placeTemplate(payload) {
     const sceneId = get().scene?.id;
     if (sceneId) get().socket?.emit('template:create', { sceneId, ...payload } as never);
@@ -534,15 +497,6 @@ export const useTable = create<TableState>((set, get) => ({
 
   clearTemplate(templateId) {
     get().socket?.emit('template:delete', { templateId });
-  },
-
-  placeAmbient(payload) {
-    const sceneId = get().scene?.id;
-    if (sceneId) get().socket?.emit('ambient:create', { sceneId, ...payload } as never);
-  },
-
-  removeAmbient(soundId) {
-    get().socket?.emit('ambient:delete', { soundId });
   },
 
   // Pins go over REST but the server pushes a scene refresh, so every client

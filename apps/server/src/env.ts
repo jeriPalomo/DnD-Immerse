@@ -33,7 +33,7 @@ export const paths = {
   srd: path.join(env.dataDir, 'srd'),
 } as const;
 
-export const UPLOAD_SUBDIRS = ['maps', 'tokens', 'avatars', 'audio', 'handouts'] as const;
+export const UPLOAD_SUBDIRS = ['maps', 'tokens', 'avatars', 'handouts'] as const;
 
 /**
  * Creates the data directories if they are missing.

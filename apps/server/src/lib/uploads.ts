@@ -5,18 +5,15 @@ import { newId } from './id.js';
 import { paths } from '../env.js';
 import { HttpError } from '../auth/guards.js';
 
-export type UploadKind = 'maps' | 'tokens' | 'avatars' | 'audio' | 'handouts';
+export type UploadKind = 'maps' | 'tokens' | 'avatars' | 'handouts';
 
 /** Maps are large; portraits and tokens are not. Sizes in bytes. */
 const MAX_BYTES: Record<UploadKind, number> = {
   maps: 25 * 1024 * 1024,
   tokens: 4 * 1024 * 1024,
   avatars: 4 * 1024 * 1024,
-  audio: 30 * 1024 * 1024,
   handouts: 20 * 1024 * 1024,
 };
-
-const AUDIO_TYPES = new Set(['audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm', 'audio/mp4']);
 
 export interface StoredImage {
   url: string;
@@ -34,7 +31,7 @@ export interface StoredImage {
  */
 export async function storeImage(
   buffer: Buffer,
-  kind: Exclude<UploadKind, 'audio'>,
+  kind: UploadKind,
   options: { maxDimension?: number } = {},
 ): Promise<StoredImage> {
   if (buffer.byteLength > MAX_BYTES[kind]) {
@@ -62,24 +59,6 @@ export async function storeImage(
     width: output.info.width,
     height: output.info.height,
   };
-}
-
-/**
- * Audio cannot be re-encoded cheaply, so it is validated by MIME type and
- * stored under a generated name with a fixed extension.
- */
-export async function storeAudio(buffer: Buffer, mimeType: string): Promise<string> {
-  if (buffer.byteLength > MAX_BYTES.audio) {
-    throw new HttpError(413, 'Audio file too large (max 30MB)');
-  }
-  if (!AUDIO_TYPES.has(mimeType)) {
-    throw new HttpError(415, 'Unsupported audio format');
-  }
-
-  const ext = mimeType === 'audio/mpeg' ? 'mp3' : mimeType.split('/')[1];
-  const filename = `${newId()}.${ext}`;
-  await fs.writeFile(path.join(paths.uploads, 'audio', filename), buffer);
-  return `/uploads/audio/${filename}`;
 }
 
 /** Deletes a previously stored upload, ignoring anything already gone. */

@@ -12,37 +12,29 @@ Phases 1-7 are done; this is the punch list from actually using the thing.
 
 ## Where this stands
 
-**Done** (2026-08-13): everything below except Table 1 (YouTube audio) and
-Character sheet 6 (compendium dropdowns). Migrations `0005`–`0007` are applied
-on the desktop; run `npm run db:migrate` after pulling on the laptop.
+**Done** (2026-08-13): everything below except Character sheet 6, which is in
+progress. Table 1 was resolved by deleting the audio system rather than
+extending it. Migrations `0005`–`0008` are applied on the desktop; run
+`npm run db:migrate` after pulling on the laptop.
 
-**Still open:** Table 1, Character sheet 6, and the Online/Local split at the
-bottom.
+**Still open:** Character sheet 6, and the Online/Local split at the bottom,
+which is deferred by choice.
 
 ---
 
 ## Table
 
-### 1. Ambient audio from YouTube links — OPEN, approach decided
-Today a track is an uploaded file (`POST /api/playlists/:id/tracks`, a URL on
-disk). The wish is to paste a YouTube link instead.
+### 1. Ambient audio from YouTube links — CLOSED, feature removed instead
+The ask was to paste a YouTube link rather than upload a file. The answer was
+that Discord already carries the music at this table, so on 2026-08-13 the
+audio system came out entirely: playlists, uploaded tracks, the soundboard,
+combat auto-switching, positional emitters and wall sound-occlusion, four
+tables and the `walls.blocks_sound` column (migration `0008`).
 
-Workable, and it keeps the **synced by timestamp, never streamed** invariant —
-every client loads its own IFrame player and seeks to the same offset, exactly
-as the `<audio>` element does now. What changes:
-
-- A track needs a `source` discriminator (`upload` | `youtube`) and a video id.
-- Playback goes through the YouTube IFrame API instead of an `Audio` element.
-  `setVolume(0-100)` still exists, so **positional volume and the server's
-  per-listener `occlusion` multiplier keep working** — that invariant survives.
-- Autoplay: the API needs a user gesture before the first `playVideo()`. There
-  is already an "unmute" style gate at the table; it has to cover this too.
-- No Web Audio graph over an iframe, so any future crossfade/filter work on
-  YouTube tracks is off the table. Uploads keep theirs.
-- `deleteOrphanedUploads` must skip YouTube tracks — there is no file to orphan.
-
-**Decided: alongside uploads, not replacing them.** The mixed model costs one
-discriminator and keeps a session working when the wifi at the table is bad.
+What was knowingly given up: positional ambience — a waterfall that gets louder
+as you walk toward it, and muffles behind a door — which Discord cannot do.
+That was the call, not an oversight. See the Status note in `CLAUDE.md` before
+rebuilding any of it.
 
 ### 2. Journal "show" button does not work — DONE
 Two separate faults, both real:

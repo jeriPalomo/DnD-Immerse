@@ -7,15 +7,6 @@ import {
   tokensInTemplate,
   type Template,
 } from './aoe.js';
-import {
-  RESEEK_THRESHOLD_SECONDS,
-  ambientVolume,
-  ambientVolumeForListener,
-  effectiveVolume,
-  nextTrackIndex,
-  playbackDrift,
-  playbackOffsetSeconds,
-} from './audio.js';
 
 const context = { feetPerSquare: 5 };
 
@@ -162,109 +153,5 @@ describe('templateForSpell', () => {
   it('returns null for a spell with no area', () => {
     expect(templateForSpell(null, { x: 0, y: 0 })).toBeNull();
     expect(templateForSpell({ shape: 'sphere', size: 0 }, { x: 0, y: 0 })).toBeNull();
-  });
-});
-
-/* ------------------------------------------------------------------ audio */
-
-describe('playback sync', () => {
-  const state = { trackId: 't', playing: true, startedAt: 1_000_000, volume: 0.7 };
-
-  it('returns null when nothing is playing', () => {
-    expect(playbackOffsetSeconds({ ...state, playing: false }, 1_005_000)).toBeNull();
-    expect(playbackOffsetSeconds({ ...state, startedAt: null }, 1_005_000)).toBeNull();
-  });
-
-  it('reports elapsed time since playback started', () => {
-    expect(playbackOffsetSeconds(state, 1_010_000)).toBe(10);
-  });
-
-  it('wraps a looping track rather than running past its end', () => {
-    // Twenty minutes into a three-minute loop.
-    expect(playbackOffsetSeconds(state, 1_000_000 + 1_200_000, 180)).toBe(1200 % 180);
-  });
-
-  it('never returns a negative offset for a clock skew', () => {
-    expect(playbackOffsetSeconds(state, 999_000)).toBe(0);
-  });
-
-  it('measures drift and has a threshold worth correcting', () => {
-    expect(playbackDrift(10.2, 10)).toBeCloseTo(0.2);
-    expect(RESEEK_THRESHOLD_SECONDS).toBeGreaterThan(0.5);
-  });
-});
-
-describe('positional audio', () => {
-  const fountain = { x: 10, y: 10, radius: 6, volume: 1, easing: true };
-
-  it('is loudest at the source', () => {
-    expect(ambientVolume(fountain, 0)).toBe(1);
-  });
-
-  it('falls to silence at the radius', () => {
-    expect(ambientVolume(fountain, 6)).toBe(0);
-    expect(ambientVolume(fountain, 10)).toBe(0);
-  });
-
-  it('fades smoothly in between', () => {
-    const near = ambientVolume(fountain, 1);
-    const far = ambientVolume(fountain, 5);
-    expect(near).toBeGreaterThan(far);
-    expect(far).toBeGreaterThan(0);
-  });
-
-  it('applies wall occlusion on top of distance falloff', () => {
-    const muffled = { ...fountain, occlusion: 0.3 };
-    // Same spot, a third of the volume, because a wall is in the way.
-    expect(ambientVolume(muffled, 0)).toBeCloseTo(0.3);
-    expect(ambientVolume(muffled, 0)).toBeLessThan(ambientVolume(fountain, 0));
-  });
-
-  it('respects a hard edge when easing is off', () => {
-    const hard = { ...fountain, easing: false };
-    expect(ambientVolume(hard, 5)).toBe(1);
-    expect(ambientVolume(hard, 6)).toBe(0);
-  });
-
-  it('uses the closest of the listener tokens', () => {
-    const tokens = [
-      { x: 30, y: 30, w: 1, h: 1 },
-      { x: 10, y: 11, w: 1, h: 1 },
-    ];
-    // The nearby token is what the listener hears.
-    expect(ambientVolumeForListener(fountain, tokens)).toBeGreaterThan(0);
-  });
-
-  it('is silent with no tokens on the board', () => {
-    expect(ambientVolumeForListener(fountain, [])).toBe(0);
-  });
-});
-
-describe('playlist advance', () => {
-  it('wraps sequentially', () => {
-    expect(nextTrackIndex(0, 3, 'sequential')).toBe(1);
-    expect(nextTrackIndex(2, 3, 'sequential')).toBe(0);
-  });
-
-  it('never repeats the same track immediately when shuffling', () => {
-    for (let i = 0; i < 30; i++) {
-      expect(nextTrackIndex(1, 4, 'shuffle')).not.toBe(1);
-    }
-  });
-
-  it('stays put when a shuffle playlist has one track', () => {
-    expect(nextTrackIndex(0, 1, 'shuffle')).toBe(0);
-  });
-
-  it('returns null for an empty playlist', () => {
-    expect(nextTrackIndex(0, 0, 'sequential')).toBeNull();
-  });
-});
-
-describe('effectiveVolume', () => {
-  it('multiplies source by master and clamps', () => {
-    expect(effectiveVolume(0.5, 0.5)).toBe(0.25);
-    expect(effectiveVolume(2, 2)).toBe(1);
-    expect(effectiveVolume(-1, 1)).toBe(0);
   });
 });

@@ -12,7 +12,14 @@ choices below. Keep it updated in the same commit as the work it describes.
 **All seven phases are done.** Accounts, campaigns, 5e sheets, the SRD
 compendium, a live table with chat and server-rolled dice, a battle map with
 sized tokens, wall-based dynamic vision with three-state fog, initiative and
-rules automation, and ambient audio with a journal and AoE templates.
+rules automation, a journal and AoE templates.
+
+**Audio is deliberately absent.** Playlists, positional emitters and the
+soundboard were built in phase 7 and removed afterwards: this group plays over
+Discord, which already carries the music, so the whole subsystem was code that
+had to compile and pass tests for nobody's benefit. Do not rebuild it without
+being asked — the loss of positional ambience was a known cost, not an
+oversight.
 
 Current work is the punch list in **[docs/BACKLOG.md](docs/BACKLOG.md)** — fixes
 and features raised after playing the finished build. Read it before starting
@@ -88,24 +95,12 @@ over base numbers and is never stored — the same rule as ability modifiers.
 Modes apply multiply before add, so a +2 bonus is not itself doubled, and
 `applied` names every effect that contributed so a total is explainable.
 
-**Sound occlusion is computed server-side, like vision.** Volume falloff is
-client-side from the listener's own tokens, but a wall between the source and
-the ear can only be judged where the walls are — so the server sends a per-
-listener `occlusion` multiplier. Muffled, not silenced: sound popping in and
-out as people move reads as a bug.
-
-**Audio is synced by timestamp, never streamed.** The server records which
-track started and when; each client seeks its own copy. Positional volume is
-computed client-side from the listener's own tokens, so the server never sends
-a different mix per player. Only the DM's client advances the playlist — every
-browser firing `ended` would skip several tracks at once.
-
 **AoE outlines and target lists come from the same geometry.** `templateCovers`
 decides both what is drawn and who is caught, so they cannot disagree.
 
 **Uploaded files are deleted with the record that owns them**, except where
-another row still points at the same file — placing an ambient sound copies a
-track's URL, and a token stamped from an actor reuses its portrait. Rows
+another row still points at the same file — a token stamped from an actor
+reuses its portrait, and one piece of art can be the map for two scenes. Rows
 cascade; files do not, so deletion paths call `deleteOrphanedUploads`, which
 re-checks every table that can hold a URL before removing anything. Deleting a
 shared file turns a disk-space bug into a broken-image bug, which is worse.

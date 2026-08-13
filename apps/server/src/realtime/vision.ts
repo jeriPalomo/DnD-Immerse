@@ -53,7 +53,6 @@ export function toWireWall(wall: Wall): WireWall {
     y2: wall.y2,
     blocksMovement: wall.blocksMovement,
     blocksSight: wall.blocksSight,
-    blocksSound: wall.blocksSound,
     door: wall.door,
     doorState: wall.doorState,
   };

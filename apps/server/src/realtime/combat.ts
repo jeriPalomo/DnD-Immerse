@@ -28,7 +28,6 @@ import { activeEffects, actors, encounters, initiativeEntries, tokens } from '..
 import { getMembership } from '../auth/guards.js';
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
-import { setCombatMusic } from './ambience.js';
 import { invalidateDragCache } from './scene.js';
 import type { IOServer, SocketData } from './index.js';
 import type { Token } from '../db/schema.js';
@@ -178,7 +177,6 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
     });
 
     await broadcastEncounter(io, ctx.campaignId);
-    await setCombatMusic(io, ctx.campaignId, true);
   });
 
   socket.on('encounter:end', async () => {
@@ -191,7 +189,6 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       .where(eq(encounters.campaignId, ctx.campaignId));
 
     await broadcastEncounter(io, ctx.campaignId);
-    await setCombatMusic(io, ctx.campaignId, false);
   });
 
   socket.on('initiative:add', async (payload) => {

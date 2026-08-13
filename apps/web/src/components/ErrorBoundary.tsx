@@ -5,8 +5,8 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
  *
  * Placed around each sidebar tab and the board separately, not just at the
  * top: a single outer boundary still takes the whole table down, which is
- * barely better than the white page it replaces. A soundboard that throws
- * should cost you the soundboard.
+ * barely better than the white page it replaces. A journal panel that throws
+ * should cost you the journal panel.
  */
 interface Props {
   children: ReactNode;

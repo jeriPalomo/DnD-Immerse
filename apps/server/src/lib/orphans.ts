@@ -2,10 +2,8 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   actors,
-  ambientSounds,
   campaigns,
   journalPages,
-  playlistTracks,
   scenes,
   tokens,
   users,
@@ -16,14 +14,13 @@ import { deleteUpload } from './uploads.js';
  * Removes uploaded files that nothing points at any more.
  *
  * Deleting rows cascades; the files on disk do not, so a deleted campaign used
- * to orphan its banner, every map, every token image, every audio track and
- * every handout permanently.
+ * to orphan its banner, every map, every token image and every handout
+ * permanently.
  *
  * Each URL is re-checked against every table that can hold one before it is
- * removed, because several are shared on purpose: placing an ambient sound
- * copies a track's URL, and a token stamped from an actor reuses its portrait.
- * Deleting a file that something still references would turn a disk-space bug
- * into a broken-image bug, which is worse.
+ * removed, because some are shared on purpose: a token stamped from an actor
+ * reuses its portrait. Deleting a file that something still references would
+ * turn a disk-space bug into a broken-image bug, which is worse.
  */
 const FILE_COLUMNS = [
   { table: campaigns, column: campaigns.bannerUrl },
@@ -31,8 +28,6 @@ const FILE_COLUMNS = [
   { table: actors, column: actors.portraitUrl },
   { table: tokens, column: tokens.imageUrl },
   { table: scenes, column: scenes.mapImageUrl },
-  { table: playlistTracks, column: playlistTracks.fileUrl },
-  { table: ambientSounds, column: ambientSounds.fileUrl },
   { table: journalPages, column: journalPages.fileUrl },
 ] as const;
 
@@ -87,19 +82,7 @@ export async function campaignFileUrls(campaignId: string): Promise<string[]> {
   const owned = await db.select({ id: scenes.id }).from(scenes).where(eq(scenes.campaignId, campaignId));
   for (const scene of owned) urls.push(...(await sceneFileUrls(scene.id)));
 
-  const { playlists, journalEntries } = await import('../db/schema.js');
-
-  const lists = await db
-    .select({ id: playlists.id })
-    .from(playlists)
-    .where(eq(playlists.campaignId, campaignId));
-  for (const list of lists) {
-    const tracks = await db
-      .select({ url: playlistTracks.fileUrl })
-      .from(playlistTracks)
-      .where(eq(playlistTracks.playlistId, list.id));
-    urls.push(...tracks.map((row) => row.url));
-  }
+  const { journalEntries } = await import('../db/schema.js');
 
   const entries = await db
     .select({ id: journalEntries.id })

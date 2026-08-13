@@ -355,7 +355,6 @@ export const walls = sqliteTable(
     blocksMovement: integer('blocks_movement').notNull().default(1),
     /** 0 none, 1 blocks, 2 terrain (blocks only beyond one square). */
     blocksSight: integer('blocks_sight').notNull().default(1),
-    blocksSound: integer('blocks_sound').notNull().default(0),
     /** 0 wall, 1 door, 2 secret door. */
     door: integer('door').notNull().default(0),
     /** 0 closed, 1 open, 2 locked. */
@@ -522,87 +521,6 @@ export const activeEffects = sqliteTable(
   ],
 );
 
-/* ----------------------------------------------------------------- audio */
-
-export const playlists = sqliteTable(
-  'playlists',
-  {
-    id: id(),
-    campaignId: text('campaign_id')
-      .notNull()
-      .references(() => campaigns.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    mode: text('mode', { enum: ['sequential', 'shuffle', 'simultaneous'] })
-      .notNull()
-      .default('sequential'),
-    /** Marking one as combat music lets an encounter switch to it by itself. */
-    role: text('role', { enum: ['none', 'combat'] })
-      .notNull()
-      .default('none'),
-    fadeMs: integer('fade_ms').notNull().default(1500),
-    createdAt: epoch('created_at'),
-  },
-  (t) => [index('playlists_campaign_idx').on(t.campaignId)],
-);
-
-export const playlistTracks = sqliteTable(
-  'playlist_tracks',
-  {
-    id: id(),
-    playlistId: text('playlist_id')
-      .notNull()
-      .references(() => playlists.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    fileUrl: text('file_url').notNull(),
-    volume: real('volume').notNull().default(0.7),
-    loop: integer('loop', { mode: 'boolean' }).notNull().default(false),
-    sortOrder: integer('sort_order').notNull().default(0),
-  },
-  (t) => [index('playlist_tracks_playlist_idx').on(t.playlistId)],
-);
-
-/**
- * Positional audio emitters. The client computes falloff from its own tokens'
- * distance, which is why volume is not synced from the server.
- */
-export const ambientSounds = sqliteTable(
-  'ambient_sounds',
-  {
-    id: id(),
-    sceneId: text('scene_id')
-      .notNull()
-      .references(() => scenes.id, { onDelete: 'cascade' }),
-    name: text('name').notNull().default(''),
-    fileUrl: text('file_url').notNull(),
-    x: real('x').notNull(),
-    y: real('y').notNull(),
-    /** Audible radius in grid units. */
-    radius: real('radius').notNull().default(10),
-    volume: real('volume').notNull().default(0.7),
-    /** Whether walls muffle this sound. */
-    blockedByWalls: integer('blocked_by_walls', { mode: 'boolean' }).notNull().default(true),
-    easing: integer('easing', { mode: 'boolean' }).notNull().default(true),
-    hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
-  },
-  (t) => [index('ambient_sounds_scene_idx').on(t.sceneId)],
-);
-
-/** One row per campaign, tracking what the DM is currently playing. */
-export const audioState = sqliteTable('audio_state', {
-  campaignId: text('campaign_id')
-    .primaryKey()
-    .references(() => campaigns.id, { onDelete: 'cascade' }),
-  playlistId: text('playlist_id').references(() => playlists.id, { onDelete: 'set null' }),
-  trackId: text('track_id').references(() => playlistTracks.id, { onDelete: 'set null' }),
-  playing: integer('playing', { mode: 'boolean' }).notNull().default(false),
-  /** Server epoch ms; clients derive their own seek offset from this. */
-  startedAt: integer('started_at'),
-  volume: real('volume').notNull().default(0.6),
-  /** What to go back to when combat ends. */
-  resumePlaylistId: text('resume_playlist_id'),
-  resumeTrackId: text('resume_track_id'),
-});
-
 /* --------------------------------------------------------------- journal */
 
 export const journalEntries = sqliteTable(
@@ -758,9 +676,6 @@ export type ChatMessage = typeof chatMessages.$inferSelect;
 export type Encounter = typeof encounters.$inferSelect;
 export type InitiativeEntry = typeof initiativeEntries.$inferSelect;
 export type ActiveEffect = typeof activeEffects.$inferSelect;
-export type Playlist = typeof playlists.$inferSelect;
-export type PlaylistTrack = typeof playlistTracks.$inferSelect;
-export type AmbientSound = typeof ambientSounds.$inferSelect;
 export type JournalEntry = typeof journalEntries.$inferSelect;
 export type JournalPage = typeof journalPages.$inferSelect;
 export type MapNote = typeof mapNotes.$inferSelect;

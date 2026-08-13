@@ -3,17 +3,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { io as connect, type Socket } from 'socket.io-client';
-import type { WireAmbientSound, WireAudioState, WireTemplate } from '@dnd/shared';
+import type { WireTemplate } from '@dnd/shared';
 
 /**
- * Audio, templates and the journal.
+ * Templates, map pins and the journal.
  *
  * The journal sharing test is the important one: an unshared entry must be
  * absent from a player's payload, the same invariant as hidden tokens and wall
  * geometry. It was verified once by hand; this stops it regressing quietly.
  */
 
-const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-ambience-'));
+const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-overlays-'));
 process.env.DATA_DIR = DATA_DIR;
 process.env.NODE_ENV = 'test';
 
@@ -76,43 +76,12 @@ function next<T>(socket: Socket, event: string, timeoutMs = 3000): Promise<T | n
   });
 }
 
-/** Uploads a small silent WAV, exercising the real audio upload path. */
-async function uploadTrack(playlistId: string, cookie: string): Promise<{ id: string; fileUrl: string }> {
-  const header = Buffer.concat([
-    Buffer.from('RIFF'),
-    Buffer.from(new Uint32Array([36 + 800]).buffer),
-    Buffer.from('WAVEfmt '),
-    Buffer.from(new Uint32Array([16]).buffer),
-    Buffer.from(new Uint16Array([1, 1]).buffer),
-    Buffer.from(new Uint32Array([8000, 8000]).buffer),
-    Buffer.from(new Uint16Array([1, 8]).buffer),
-    Buffer.from('data'),
-    Buffer.from(new Uint32Array([800]).buffer),
-    Buffer.alloc(800, 128),
-  ]);
-
-  const form = new FormData();
-  form.append('file', new Blob([header], { type: 'audio/wav' }), 'ambience.wav');
-
-  const response = await fetch(`${baseUrl}/api/playlists/${playlistId}/tracks`, {
-    method: 'POST',
-    headers: { cookie },
-    body: form,
-  });
-  const payload = (await response.json()) as { error?: string; track: { id: string; fileUrl: string } };
-  if (!response.ok) throw new Error(payload.error);
-  return payload.track;
-}
-
 let dm: Account;
 let alice: Account;
 let campaignId: string;
 let sceneId: string;
 let dmSocket: Socket;
 let aliceSocket: Socket;
-let playlistId: string;
-let trackId: string;
-let trackUrl: string;
 
 beforeAll(async () => {
   const { buildApp } = await import('../app.js');
@@ -130,11 +99,11 @@ beforeAll(async () => {
     await app.close();
   };
 
-  dm = await register('dm@ambience.local', 'DM');
-  alice = await register('alice@ambience.local', 'Alice');
+  dm = await register('dm@overlays.local', 'DM');
+  alice = await register('alice@overlays.local', 'Alice');
 
   const campaign = await api<{ campaign: { id: string; inviteCode: string } }>(
-    'POST', '/api/campaigns', { name: 'Ambience Test' }, dm.cookie,
+    'POST', '/api/campaigns', { name: 'Overlay Test' }, dm.cookie,
   );
   campaignId = campaign.campaign.id;
   await api('POST', '/api/campaigns/join', { inviteCode: campaign.campaign.inviteCode }, alice.cookie);
@@ -143,15 +112,6 @@ beforeAll(async () => {
     'POST', `/api/campaigns/${campaignId}/scenes`, { name: 'Cavern' }, dm.cookie,
   );
   sceneId = scene.scene.id;
-
-  const playlist = await api<{ playlist: { id: string } }>(
-    'POST', `/api/campaigns/${campaignId}/playlists`, { name: 'Ambience' }, dm.cookie,
-  );
-  playlistId = playlist.playlist.id;
-
-  const track = await uploadTrack(playlistId, dm.cookie);
-  trackId = track.id;
-  trackUrl = track.fileUrl;
 
   [dmSocket, aliceSocket] = await Promise.all([open(dm), open(alice)]);
   for (const socket of [dmSocket, aliceSocket]) socket.emit('campaign:join', { campaignId });
@@ -173,113 +133,6 @@ afterAll(async () => {
   } catch {
     // Not worth failing a passing suite over.
   }
-});
-
-describe('audio upload and playback', () => {
-  it('stores an uploaded track under a generated filename', () => {
-    expect(trackUrl).toMatch(/^\/uploads\/audio\/[A-Za-z0-9]+\.wav$/);
-    // Never the name the user supplied.
-    expect(trackUrl).not.toContain('ambience.wav');
-  });
-
-  it('rejects a non-audio upload', async () => {
-    const form = new FormData();
-    form.append('file', new Blob([Buffer.from('not audio')], { type: 'text/plain' }), 'x.txt');
-
-    const response = await fetch(`${baseUrl}/api/playlists/${playlistId}/tracks`, {
-      method: 'POST',
-      headers: { cookie: dm.cookie },
-      body: form,
-    });
-    expect(response.ok).toBe(false);
-  });
-
-  it('broadcasts playback with a server-stamped start time', async () => {
-    const waiting = next<WireAudioState>(aliceSocket, 'audio:state');
-    dmSocket.emit('audio:control', { playlistId, trackId, playing: true, loop: true });
-
-    const state = await waiting;
-    expect(state?.playing).toBe(true);
-    expect(state?.trackUrl).toBe(trackUrl);
-    // Stamped by the server, not by whichever browser pressed play.
-    expect(state?.startedAt).toBeGreaterThan(Date.now() - 10_000);
-  });
-
-  it('refuses to let a player control the music', async () => {
-    const failure = next<{ message: string }>(aliceSocket, 'error');
-    aliceSocket.emit('audio:control', { playlistId, trackId, playing: false, loop: true });
-    expect((await failure)?.message).toMatch(/only the dm/i);
-  });
-
-  it('stops playback and clears the start time', async () => {
-    const waiting = next<WireAudioState>(aliceSocket, 'audio:state');
-    dmSocket.emit('audio:control', { playlistId, trackId: null, playing: false, loop: true });
-
-    const state = await waiting;
-    expect(state?.playing).toBe(false);
-    expect(state?.startedAt).toBeNull();
-  });
-});
-
-describe('ambient sounds', () => {
-  it('reaches players when placed', async () => {
-    const waiting = next<{ sounds: WireAmbientSound[] }>(aliceSocket, 'audio:sounds');
-    dmSocket.emit('ambient:create', {
-      sceneId, name: 'Waterfall', fileUrl: trackUrl, x: 5, y: 5, radius: 8, volume: 0.8, easing: true,
-    });
-
-    const payload = await waiting;
-    expect(payload?.sounds.some((s) => s.name === 'Waterfall')).toBe(true);
-  });
-
-  it('muffles a sound the listener cannot hear directly', async () => {
-    // Alice's token on one side of a sound-blocking wall, the sound on the other.
-    const actor = await api<{ actor: { id: string } }>(
-      'POST', '/api/actors', { name: 'Alice PC' }, alice.cookie,
-    );
-    await api('POST', `/api/actors/${actor.actor.id}/campaigns/${campaignId}`, {}, alice.cookie);
-
-    const placed = next<{ token: { id: string } }>(dmSocket, 'token:created');
-    dmSocket.emit('token:create', {
-      sceneId, actorId: actor.actor.id, x: 20, y: 5, ownerUserId: alice.userId, name: 'Alice PC',
-    } as never);
-    await placed;
-
-    dmSocket.emit('wall:create', {
-      sceneId, x1: 12, y1: 0, x2: 12, y2: 12, blocksSight: 1, blocksMovement: 1, blocksSound: 1,
-    } as never);
-    await new Promise((r) => setTimeout(r, 400));
-
-    const waiting = next<{ sounds: WireAmbientSound[] }>(aliceSocket, 'audio:sounds');
-    dmSocket.emit('ambient:create', {
-      sceneId, name: 'Forge', fileUrl: trackUrl, x: 2, y: 5, radius: 40, volume: 1,
-      easing: true, blockedByWalls: true,
-    });
-
-    const forge = (await waiting)?.sounds.find((s) => s.name === 'Forge');
-    // Muffled, not silenced: a forge behind a wall is still audible.
-    expect(forge?.occlusion).toBeLessThan(1);
-    expect(forge?.occlusion).toBeGreaterThan(0);
-  });
-
-  it('leaves a sound with a clear path unmuffled', async () => {
-    const waiting = next<{ sounds: WireAmbientSound[] }>(aliceSocket, 'audio:sounds');
-    dmSocket.emit('ambient:create', {
-      sceneId, name: 'Nearby brook', fileUrl: trackUrl, x: 21, y: 5, radius: 20, volume: 1,
-      easing: true, blockedByWalls: true,
-    });
-
-    const brook = (await waiting)?.sounds.find((s) => s.name === 'Nearby brook');
-    expect(brook?.occlusion).toBe(1);
-  });
-
-  it('refuses to let a player place one', async () => {
-    const failure = next<{ message: string }>(aliceSocket, 'error');
-    aliceSocket.emit('ambient:create', {
-      sceneId, name: 'Fake', fileUrl: trackUrl, x: 0, y: 0, radius: 5, volume: 1, easing: true,
-    });
-    expect((await failure)?.message).toMatch(/only the dm/i);
-  });
 });
 
 describe('area templates', () => {
@@ -478,31 +331,6 @@ describe('uploads are cleaned up', () => {
 
     await api('DELETE', `/api/journal/pages/${uploaded.page.id}`, undefined, dm.cookie);
     // Otherwise every replaced handout stays on disk for the life of the server.
-    expect(fs.existsSync(onDisk)).toBe(false);
-  });
-
-  it('keeps a track file that an ambient emitter still plays', async () => {
-    const track = await uploadTrack(playlistId, dm.cookie);
-    const onDisk = path.join(DATA_DIR, 'uploads', ...track.fileUrl.split('/').slice(2));
-
-    dmSocket.emit('ambient:create', {
-      sceneId, name: 'Keeps playing', fileUrl: track.fileUrl, x: 1, y: 1,
-      radius: 5, volume: 1, easing: true, blockedByWalls: false,
-    });
-    await new Promise((r) => setTimeout(r, 500));
-
-    await api('DELETE', `/api/tracks/${track.id}`, undefined, dm.cookie);
-
-    // Placing a sound copies the URL, so deleting the track must not break it.
-    expect(fs.existsSync(onDisk)).toBe(true);
-  });
-
-  it('removes a track file nothing references', async () => {
-    const track = await uploadTrack(playlistId, dm.cookie);
-    const onDisk = path.join(DATA_DIR, 'uploads', ...track.fileUrl.split('/').slice(2));
-    expect(fs.existsSync(onDisk)).toBe(true);
-
-    await api('DELETE', `/api/tracks/${track.id}`, undefined, dm.cookie);
     expect(fs.existsSync(onDisk)).toBe(false);
   });
 });

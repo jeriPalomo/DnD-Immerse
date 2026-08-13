@@ -12,8 +12,8 @@ export interface SidebarTab {
  *
  * Stacking put the wall tool and the initiative order several screens apart,
  * which meant scrolling between them mid-combat. Only the active tab is
- * mounted, so the soundboard and journal are not fetching in the background
- * while you fight.
+ * mounted, so the scene manager and journal are not fetching in the
+ * background while you fight.
  */
 export function SidebarTabs({ tabs }: { tabs: SidebarTab[] }) {
   const [active, setActive] = useState(tabs[0]?.id ?? '');
