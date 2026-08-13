@@ -1,5 +1,5 @@
-import { and, asc, desc, eq, like, or, sql } from 'drizzle-orm';
-import { itemTypeSchema, parseItemSystem } from '@dnd/shared';
+import { and, asc, desc, eq, like, or, sql, type SQL } from 'drizzle-orm';
+import { itemCategorySchema, itemTypeSchema, parseItemSystem } from '@dnd/shared';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
@@ -7,7 +7,7 @@ import { items, srdItems, srdMonsters, srdSpells } from '../db/schema.js';
 import { HttpError, assertUser, requireAuth } from '../auth/guards.js';
 import { requireActorRead, requireActorWrite } from '../lib/access.js';
 import { newId } from '../lib/id.js';
-import type { ItemType } from '@dnd/shared';
+import type { ItemCategory, ItemType } from '@dnd/shared';
 
 const createSchema = z.object({
   type: itemTypeSchema,
@@ -16,6 +16,51 @@ const createSchema = z.object({
   system: z.unknown().optional(),
   sortOrder: z.number().int().default(0),
 });
+
+/**
+ * Maps a browsable category onto the SRD's own category strings.
+ *
+ * Those strings are inconsistent by source, not by our doing - "Weapon" and
+ * "Weapons", "Ring" and "Rings", "Staff" and "Staffs" all appear, because the
+ * 2014 and 2024 datasets name their shelves differently. Matching on substrings
+ * here means the mess is confined to one function next to the data, rather than
+ * leaking into a dropdown the player has to read.
+ */
+function categoryFilter(category: ItemCategory): SQL {
+  /**
+   * Matches a needle at the start of a word, not anywhere in the string.
+   *
+   * A bare `%ring%` puts every piece of adventu-RING gear in the magic ring
+   * drawer. Padding the category with spaces and requiring one before the
+   * needle fixes that while still catching plurals, which is the reason the
+   * match is not exact in the first place: the shelf is "Ring" in one dataset
+   * and "Rings" in the other.
+   */
+  const anyOf = (...needles: string[]) =>
+    or(
+      ...needles.map(
+        (n) => sql`' ' || lower(${srdItems.category}) || ' ' like ${`% ${n}%`}`,
+      ),
+    )!;
+
+  switch (category) {
+    // Weapons are the one group the importer already types reliably.
+    case 'weapon':
+      return eq(srdItems.itemType, 'weapon');
+    case 'armor':
+      return anyOf('armor', 'armour', 'shield');
+    case 'gear':
+      return anyOf('gear', 'ammunition', 'equipment pack');
+    case 'tools':
+      return anyOf('tool', 'instrument', 'gaming', 'foci', 'focus', 'kit');
+    case 'consumable':
+      return anyOf('potion', 'scroll');
+    case 'magic':
+      return anyOf('wondrous', 'ring', 'wand', 'staff', 'rod');
+    case 'vehicle':
+      return anyOf('mount', 'vehicle', 'tack', 'harness');
+  }
+}
 
 export async function itemRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
@@ -173,8 +218,10 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
         q: z.string().max(80).optional(),
         level: z.coerce.number().int().min(0).max(9).optional(),
         class: z.string().max(30).optional(),
+        school: z.string().max(30).optional(),
         ruleset: z.enum(['2014', '2024']).optional(),
         limit: z.coerce.number().int().min(1).max(200).default(60),
+        offset: z.coerce.number().int().min(0).max(5000).default(0),
       })
       .parse(request.query);
 
@@ -183,6 +230,7 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
     if (query.level !== undefined) filters.push(eq(srdSpells.level, query.level));
     // classes is a JSON array; match it as text rather than joining a table.
     if (query.class) filters.push(sql`lower(${srdSpells.classes}) like ${`%${query.class.toLowerCase()}%`}`);
+    if (query.school) filters.push(sql`lower(${srdSpells.school}) = ${query.school.toLowerCase()}`);
     // 2024 spells are not published, so a 2024 campaign still gets the 2014
     // list rather than an empty one.
     filters.push(eq(srdSpells.ruleset, '2014'));
@@ -203,24 +251,28 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       .from(srdSpells)
       .where(filters.length ? and(...filters) : undefined)
       .orderBy(asc(srdSpells.level), asc(srdSpells.name))
-      .limit(query.limit);
+      .limit(query.limit)
+      .offset(query.offset);
 
-    return { spells: rows };
+    // A short page is the end of the list; the client stops offering "more"
+    // rather than issuing a request that comes back empty.
+    return { spells: rows, more: rows.length === query.limit };
   });
 
   app.get('/api/compendium/items', async (request) => {
     const query = z
       .object({
         q: z.string().max(80).optional(),
-        type: z.string().max(30).optional(),
+        category: itemCategorySchema.optional(),
         ruleset: z.enum(['2014', '2024']).default('2014'),
         limit: z.coerce.number().int().min(1).max(200).default(60),
+        offset: z.coerce.number().int().min(0).max(5000).default(0),
       })
       .parse(request.query);
 
     const filters = [eq(srdItems.ruleset, query.ruleset)];
     if (query.q) filters.push(like(srdItems.name, `%${query.q}%`));
-    if (query.type) filters.push(eq(srdItems.itemType, query.type));
+    if (query.category) filters.push(categoryFilter(query.category));
 
     const rows = await db
       .select({
@@ -235,9 +287,10 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       .from(srdItems)
       .where(filters.length ? and(...filters) : undefined)
       .orderBy(asc(srdItems.name))
-      .limit(query.limit);
+      .limit(query.limit)
+      .offset(query.offset);
 
-    return { items: rows };
+    return { items: rows, more: rows.length === query.limit };
   });
 
   app.get('/api/compendium/monsters', async (request) => {

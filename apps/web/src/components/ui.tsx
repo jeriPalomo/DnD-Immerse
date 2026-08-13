@@ -92,6 +92,35 @@ export function Textarea({ className, ...rest }: TextareaHTMLAttributes<HTMLText
   return <textarea {...rest} className={cx(CONTROL, 'resize-y', className)} />;
 }
 
+/**
+ * A text box with a dropdown of known answers attached.
+ *
+ * Deliberately not a `<select>`. Class, species and background are the fields
+ * people reach for the list on nine times out of ten and type something the SRD
+ * has never heard of on the tenth - a homebrew species, a multiclass string, a
+ * background the table invented. A select forces an "Other…" escape hatch and a
+ * second input; a datalist offers the list and still takes anything.
+ */
+export function Suggest({
+  options,
+  className,
+  ...rest
+}: InputHTMLAttributes<HTMLInputElement> & { options: readonly string[] }) {
+  // Options are fixed reference lists, so the id is stable across renders.
+  const listId = `suggest-${options.join('-').replace(/[^a-z]/gi, '').slice(0, 32)}`;
+
+  return (
+    <>
+      <input {...rest} list={listId} className={className} />
+      <datalist id={listId}>
+        {options.map((option) => (
+          <option key={option} value={option} />
+        ))}
+      </datalist>
+    </>
+  );
+}
+
 /* ----------------------------------------------------------------- misc */
 
 export function Card({

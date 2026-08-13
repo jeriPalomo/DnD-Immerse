@@ -117,6 +117,17 @@ conditions decorative. Before adding a feature, check that the last one is
 actually reachable: `grep` the export and see whether anything outside its own
 module and tests uses it.
 
+**Compendium categories are curated, not taken from the data.** The SRD's own
+`category` strings are inconsistent by source — "Weapon" and "Weapons", "Ring"
+and "Rings" — so `categoryFilter` maps seven browsable shelves onto them, and
+matches at word starts. A bare `%ring%` files every piece of *adventuring* gear
+in the magic ring drawer.
+
+**A hand-entered item fills the same `system` blob an imported one does.** The
+manual form's fields are the ones the attack table and target panel read, not a
+name and a description; anything left blank falls back to the Zod schema's
+default on the server. An item you cannot swing is decorative.
+
 **Enemy hit points are redacted from players in the tracker.** Knowing the boss
 is on 7 HP changes how a table plays; that is the DM's to reveal.
 

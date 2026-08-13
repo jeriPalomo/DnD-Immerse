@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CLASS_NAMES,
   abilityModifier,
+  classInfo,
   formatModifier,
+  hitDicePool,
   levelFromXP,
   passiveSkill,
   proficiencyBonus,
@@ -108,5 +111,44 @@ describe('levelFromXP', () => {
     expect(levelFromXP(48000)).toBe(9);
     expect(levelFromXP(355000)).toBe(20);
     expect(levelFromXP(999999)).toBe(20);
+  });
+});
+
+describe('class reference data', () => {
+  it('knows the hit die and casting ability of every SRD class', () => {
+    expect(CLASS_NAMES).toHaveLength(12);
+    expect(classInfo('Barbarian')).toEqual({ hitDie: 12, casting: null });
+    expect(classInfo('Wizard')).toEqual({ hitDie: 6, casting: 'int' });
+    expect(classInfo('Paladin')).toEqual({ hitDie: 10, casting: 'cha' });
+    expect(classInfo('Ranger')).toEqual({ hitDie: 10, casting: 'wis' });
+  });
+
+  it('matches loosely, because the field people type into is free text', () => {
+    expect(classInfo('wizard')?.hitDie).toBe(6);
+    expect(classInfo('  Cleric  ')?.casting).toBe('wis');
+  });
+
+  it('returns null for homebrew rather than guessing', () => {
+    // A wrong hit die silently changes how much a rest heals, which is worse
+    // than leaving the value alone.
+    expect(classInfo('Blood Hunter')).toBeNull();
+    expect(classInfo('Fighter 3 / Rogue 2')).toBeNull();
+    expect(classInfo('')).toBeNull();
+  });
+
+  it('builds a hit dice pool from class and level', () => {
+    expect(hitDicePool('Fighter', 5)).toBe('5d10');
+    expect(hitDicePool('Sorcerer', 1)).toBe('1d6');
+    // The default that everyone was stuck on before this existed.
+    expect(hitDicePool('Cleric', 1)).toBe('1d8');
+  });
+
+  it('leaves the pool blank for a class it does not know', () => {
+    expect(hitDicePool('Blood Hunter', 5)).toBe('');
+  });
+
+  it('clamps a level outside 1-20 rather than emitting nonsense', () => {
+    expect(hitDicePool('Wizard', 0)).toBe('1d6');
+    expect(hitDicePool('Wizard', 99)).toBe('20d6');
   });
 });

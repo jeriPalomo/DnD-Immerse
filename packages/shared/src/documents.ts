@@ -421,3 +421,92 @@ export function emptyActor(name: string, type: ActorType = 'character'): ActorIn
     prototypeToken: { actorLinked: type === 'character', disposition: type === 'character' ? 'friendly' : 'hostile' },
   });
 }
+
+/* -------------------------------------------------- browsing the compendium */
+
+/**
+ * The shelves a player actually browses equipment by.
+ *
+ * The SRD's own `category` strings cannot be used as a filter list: the same
+ * shelf shows up as both "Weapon" and "Weapons", "Ring" and "Rings", and there
+ * are thirty of them across two rulesets. These seven are stable, and the
+ * server maps each one to the messy strings behind it - so the client sends a
+ * token rather than guessing at prose.
+ */
+export const ITEM_CATEGORIES = [
+  'weapon',
+  'armor',
+  'gear',
+  'tools',
+  'consumable',
+  'magic',
+  'vehicle',
+] as const;
+
+export const itemCategorySchema = z.enum(ITEM_CATEGORIES);
+export type ItemCategory = z.infer<typeof itemCategorySchema>;
+
+export const ITEM_CATEGORY_LABELS: Record<ItemCategory, string> = {
+  weapon: 'Weapons',
+  armor: 'Armour & shields',
+  gear: 'Adventuring gear',
+  tools: 'Tools & focuses',
+  consumable: 'Potions & scrolls',
+  magic: 'Wondrous & magic',
+  vehicle: 'Mounts & vehicles',
+};
+
+/** The eight schools of magic, in the order every spell list prints them. */
+export const SPELL_SCHOOLS = [
+  'Abjuration',
+  'Conjuration',
+  'Divination',
+  'Enchantment',
+  'Evocation',
+  'Illusion',
+  'Necromancy',
+  'Transmutation',
+] as const;
+
+/** Spellcasting classes in the SRD. Half-casters included; Artificer is not. */
+export const SPELL_CLASSES = [
+  'Bard',
+  'Cleric',
+  'Druid',
+  'Paladin',
+  'Ranger',
+  'Sorcerer',
+  'Warlock',
+  'Wizard',
+] as const;
+
+/** Damage types a hand-entered weapon or spell can deal. */
+export const DAMAGE_TYPES = [
+  'bludgeoning',
+  'piercing',
+  'slashing',
+  'acid',
+  'cold',
+  'fire',
+  'force',
+  'lightning',
+  'necrotic',
+  'poison',
+  'psychic',
+  'radiant',
+  'thunder',
+] as const;
+
+/** The 5e weapon properties, for a hand-entered weapon. */
+export const WEAPON_PROPERTIES = [
+  'ammunition',
+  'finesse',
+  'heavy',
+  'light',
+  'loading',
+  'reach',
+  'special',
+  'thrown',
+  'two-handed',
+  'versatile',
+] as const;

@@ -43,7 +43,7 @@ interface SheetState {
   patch: (fields: Partial<ActorInput>) => void;
   flush: () => Promise<void>;
 
-  addItem: (type: ItemType, name: string) => Promise<void>;
+  addItem: (type: ItemType, name: string, system?: Record<string, unknown>) => Promise<void>;
   addFromSrd: (kind: 'spell' | 'item', srdId: string) => Promise<void>;
   patchItem: (id: string, fields: { name?: string; system?: Record<string, unknown> }) => Promise<void>;
   removeItem: (id: string) => Promise<void>;
@@ -127,10 +127,20 @@ export const useSheet = create<SheetState>((set, get) => ({
     }
   },
 
-  async addItem(type, name) {
+  /**
+   * `system` is optional and validated server-side against that type's Zod
+   * schema, so a hand-entered weapon lands in the same shape as an imported
+   * one - and anything the form left alone falls back to the schema default
+   * rather than to undefined.
+   */
+  async addItem(type, name, system) {
     const actor = get().actor;
     if (!actor) return;
-    const { item } = await api.post<{ item: Item }>(`/api/actors/${actor.id}/items`, { type, name });
+    const { item } = await api.post<{ item: Item }>(`/api/actors/${actor.id}/items`, {
+      type,
+      name,
+      ...(system ? { system } : {}),
+    });
     set({ items: [...get().items, item] });
   },
 

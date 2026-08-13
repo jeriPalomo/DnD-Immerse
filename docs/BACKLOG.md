@@ -12,13 +12,11 @@ Phases 1-7 are done; this is the punch list from actually using the thing.
 
 ## Where this stands
 
-**Done** (2026-08-13): everything below except Character sheet 6, which is in
-progress. Table 1 was resolved by deleting the audio system rather than
-extending it. Migrations `0005`–`0008` are applied on the desktop; run
-`npm run db:migrate` after pulling on the laptop.
+**Done** (2026-08-13): everything below. Table 1 was resolved by deleting the
+audio system rather than extending it. Migrations `0005`–`0008` are applied on
+the desktop; run `npm run db:migrate` after pulling on the laptop.
 
-**Still open:** Character sheet 6, and the Online/Local split at the bottom,
-which is deferred by choice.
+**Still open:** the Online/Local split at the bottom, deferred by choice.
 
 ---
 
@@ -152,13 +150,33 @@ point was always that the table can see the scores were genuinely rolled — and
 The sheet shows the six results with an "Apply to sheet" button rather than
 making anyone retype them.
 
-### 6. Dropdowns for spells / inventory / attacks — OPEN
-`CompendiumPicker` already searches the SRD, but only from an "Add spell" /
-"Add item" modal — you cannot see what the database *has* without opening it and
-typing. Wanted: a browsable dropdown per panel, and when the thing genuinely is
-not in the SRD, an "add it manually" path. Note the SRD gap — the 2024 dataset
-publishes no spells and only three monsters, so a 2024 campaign is drawing from
-the 2014 list and manual entry matters more than it looks.
+### 6. Dropdowns for spells / inventory / attacks — DONE
+`CompendiumPicker` already listed the first 60 rows on open, so the missing
+half was narrowing, not browsing: no class, school or category filter, and a
+hard 60-row cap with 204 wizard spells behind it.
+
+*Shipped:*
+
+- **Filters.** Spells gain class and school alongside level; equipment gains a
+  category. The seven categories are curated rather than taken from the SRD's
+  own strings, which are inconsistent by source — the same shelf is "Weapon"
+  and "Weapons", "Ring" and "Rings". `categoryFilter` in `routes/items.ts` maps
+  each one, matching at word starts: a bare `%ring%` files every piece of
+  *adventuring* gear in the magic ring drawer, which a test caught.
+- **Load more**, via `offset`; the server reports `more` so the button
+  disappears at the end rather than fetching an empty page.
+- **Per-panel entry points.** Attacks opens on weapons, Spells on spells,
+  Inventory on everything.
+- **"Not in the list — add your own"**, a form per item type built from the Zod
+  `system` schemas. A hand-made Longsword +1 renders `+4 | 1d8+1 slashing` in
+  the attack table, which is the check that the blob is real rather than a name
+  in a box.
+
+*Also fixed on the way past,* because a class dropdown makes them reachable:
+`hitDiceTotal` and `spellcastingAbility` had no UI at all, so every character
+short-rested on the schema default of `1d8` and no caster ever saw a spell save
+DC. Picking a known class now fills both, and `alignment` — on the actor since
+phase 1, never once editable — got a control.
 
 ### 7. Short/long rest scrolls to the top — DONE
 Same root cause and same fix as Table item 7.

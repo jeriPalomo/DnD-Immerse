@@ -2,13 +2,20 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import {
   ABILITY_ROLL,
+  ALIGNMENTS,
+  BACKGROUNDS,
+  CLASS_NAMES,
   OWNERSHIP,
+  SPECIES,
+  classInfo,
+  hitDicePool,
   levelFromXP,
   type AbilityKey,
+  type ItemCategory,
   type ProficiencyLevel,
   type SkillKey,
 } from '@dnd/shared';
-import { Alert, Badge, Button, Card, Spinner } from '../components/ui.js';
+import { Alert, Badge, Button, Card, Spinner, Suggest } from '../components/ui.js';
 import { CompendiumPicker } from '../components/CompendiumPicker.js';
 import {
   AbilityScoresBlock,
@@ -35,7 +42,14 @@ export default function CharacterSheet() {
   const { id } = useParams<{ id: string }>();
   const sheet = useSheet();
   const location = useLocation();
-  const [picker, setPicker] = useState<'spell' | 'item' | null>(null);
+  /**
+   * Which panel opened the compendium, so it opens showing that panel's shelf.
+   * A generic "browse everything" modal on the Attacks panel means scrolling
+   * past 310 wondrous items to reach a sword.
+   */
+  const [picker, setPicker] = useState<{ kind: 'spell' | 'item'; category: ItemCategory | null } | null>(
+    null,
+  );
 
   /**
    * Where "back" goes.
@@ -151,8 +165,12 @@ export default function CharacterSheet() {
             title="Attacks"
             action={
               editable && (
-                <Button size="sm" variant="secondary" onClick={() => setPicker('item')}>
-                  Add weapon
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setPicker({ kind: 'item', category: 'weapon' })}
+                >
+                  Browse weapons
                 </Button>
               )
             }
@@ -164,8 +182,12 @@ export default function CharacterSheet() {
             title="Spells"
             action={
               editable && (
-                <Button size="sm" variant="secondary" onClick={() => setPicker('spell')}>
-                  Add spell
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setPicker({ kind: 'spell', category: null })}
+                >
+                  Browse spells
                 </Button>
               )
             }
@@ -185,8 +207,12 @@ export default function CharacterSheet() {
             title="Inventory"
             action={
               editable && (
-                <Button size="sm" variant="secondary" onClick={() => setPicker('item')}>
-                  Add item
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setPicker({ kind: 'item', category: null })}
+                >
+                  Browse equipment
                 </Button>
               )
             }
@@ -257,8 +283,10 @@ export default function CharacterSheet() {
 
       {picker && (
         <CompendiumPicker
-          kind={picker}
-          onAdd={async (srdId) => sheet.addFromSrd(picker, srdId)}
+          kind={picker.kind}
+          initialCategory={picker.category}
+          onAdd={async (srdId) => sheet.addFromSrd(picker.kind, srdId)}
+          onCreate={async (type, name, system) => sheet.addItem(type, name, system)}
           onClose={() => setPicker(null)}
         />
       )}
@@ -392,6 +420,24 @@ function Identity({
   const field =
     'rounded border border-transparent bg-transparent px-1 py-0.5 text-ink-200 hover:border-ink-700 focus:border-arcane-400 focus:bg-ink-850 focus:outline-none disabled:hover:border-transparent';
 
+  /**
+   * A recognised class carries its hit die and casting ability with it.
+   *
+   * Neither field is editable anywhere else, so before this they kept the
+   * schema defaults forever: every character short-rested on `1d8` whatever
+   * their class, and `spellcastingAbility` stayed null, which made the spell
+   * save DC header return null and never render. Typing homebrew still works -
+   * an unrecognised class simply leaves both alone.
+   */
+  function withClassDefaults(className: string, level: number): Record<string, unknown> {
+    const info = classInfo(className);
+    if (!info) return {};
+    return {
+      hitDiceTotal: hitDicePool(className, level),
+      ...(info.casting ? { spellcastingAbility: info.casting } : {}),
+    };
+  }
+
   return (
     <Card className="flex flex-wrap items-center gap-4 p-4">
       <label className="group relative size-20 shrink-0 cursor-pointer overflow-hidden rounded-lg border border-ink-700 bg-ink-800">
@@ -429,18 +475,27 @@ function Identity({
           className={`w-full font-display text-2xl font-bold ${field}`}
         />
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-          <input
+          <Suggest
             disabled={!editable}
+            options={SPECIES}
             value={actor.race}
             onChange={(e) => onChange({ race: e.target.value })}
-            placeholder="Race"
+            placeholder="Species"
+            aria-label="Species"
             className={`w-24 ${field}`}
           />
-          <input
+          <Suggest
             disabled={!editable}
+            options={CLASS_NAMES}
             value={actor.className}
-            onChange={(e) => onChange({ className: e.target.value })}
+            onChange={(e) =>
+              onChange({
+                className: e.target.value,
+                ...withClassDefaults(e.target.value, actor.level),
+              })
+            }
             placeholder="Class"
+            aria-label="Class"
             className={`w-28 ${field}`}
           />
           {/* Labelled: an unlabelled number box between class and background
@@ -454,7 +509,11 @@ function Identity({
               aria-label="Level"
               disabled={!editable}
               value={actor.level}
-              onChange={(e) => onChange({ level: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })}
+              onChange={(e) => {
+                const level = Math.max(1, Math.min(20, Number(e.target.value) || 1));
+                // The pool is level-many dice, so it has to follow the level.
+                onChange({ level, ...withClassDefaults(actor.className, level) });
+              }}
               className={`w-12 ${field}`}
             />
           </span>
@@ -464,17 +523,33 @@ function Identity({
             <button
               type="button"
               disabled={!editable}
-              onClick={() => onChange({ level: levelFromXP(actor.experience) })}
+              onClick={() => {
+                const level = levelFromXP(actor.experience);
+                onChange({ level, ...withClassDefaults(actor.className, level) });
+              }}
               className="rounded border border-ember-500/50 bg-ember-500/10 px-1.5 py-0.5 text-[10px] text-ember-300"
             >
               Level up to {levelFromXP(actor.experience)}
             </button>
           )}
-          <input
+          <Suggest
             disabled={!editable}
+            options={BACKGROUNDS}
             value={actor.background}
             onChange={(e) => onChange({ background: e.target.value })}
             placeholder="Background"
+            aria-label="Background"
+            className={`w-32 ${field}`}
+          />
+          {/* Alignment is on the actor and was never editable, so it stayed
+              blank on every sheet in the database. */}
+          <Suggest
+            disabled={!editable}
+            options={ALIGNMENTS}
+            value={actor.alignment}
+            onChange={(e) => onChange({ alignment: e.target.value })}
+            placeholder="Alignment"
+            aria-label="Alignment"
             className={`w-32 ${field}`}
           />
         </div>
