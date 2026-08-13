@@ -1,10 +1,14 @@
 import { and, asc, eq } from 'drizzle-orm';
 import {
+  DM_COLOR,
+  OWNERSHIP,
+  actorColor,
   campaignDmRoom,
   campaignRoom,
   clampToMap,
   drawingCreateSchema,
   movementBlocked,
+  pingSchema,
   snapTokenPosition,
   tokenCenter,
   tokenCommitSchema,
@@ -21,6 +25,7 @@ import type {
 } from '@dnd/shared';
 import { wallCreateSchema, wallUpdateSchema } from '@dnd/shared';
 import { db } from '../db/index.js';
+import { getActorAccess } from '../lib/access.js';
 import {
   actors,
   campaigns,
@@ -105,6 +110,7 @@ function toWireScene(scene: Scene): WireScene {
     darkness: scene.darkness,
     weather: scene.weather,
     weatherIntensity: scene.weatherIntensity,
+    playerDrawing: scene.playerDrawing,
   };
 }
 
@@ -177,6 +183,27 @@ async function sceneOf(sceneId: string): Promise<Scene | null> {
 async function tokenOf(tokenId: string): Promise<Token | null> {
   const rows = await db.select().from(tokens).where(eq(tokens.id, tokenId)).limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * What colour someone points in.
+ *
+ * The DM speaks as the table, so they get the one fixed colour. A player gets
+ * their character's - but the claim is checked here rather than trusted, or a
+ * modified client could point in someone else's name. Falling back to the user
+ * id still yields a stable colour of their own, so a player between characters
+ * is never invisible.
+ */
+async function pointerColor(
+  isDM: boolean,
+  actorId: string | null,
+  userId: string,
+): Promise<string> {
+  if (isDM) return DM_COLOR;
+  if (!actorId) return actorColor(userId);
+
+  const access = await getActorAccess(actorId, userId);
+  return actorColor(access && access.level >= OWNERSHIP.owner ? actorId : userId);
 }
 
 /* ------------------------------------------------------------ broadcasting */
@@ -630,6 +657,13 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     const scene = await sceneOf(input.sceneId);
     if (!scene || scene.campaignId !== ctx.campaignId) return;
 
+    // Enforced here, not by hiding the tool: a modified client would otherwise
+    // draw straight through the DM having closed it.
+    if (!ctx.isDM && !scene.playerDrawing) {
+      socket.emit('error', { message: 'The DM has closed drawing on this scene' });
+      return;
+    }
+
     await db.insert(drawingsTable).values({
       id: newId(),
       sceneId: input.sceneId,
@@ -762,16 +796,27 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     await broadcastSounds(io, ctx.campaignId);
   });
 
-  socket.on('ping:map', async ({ sceneId, x, y }) => {
+  /**
+   * A ping, which may be a dragged stroke rather than a dot.
+   *
+   * Never persisted: it is a gesture, not an annotation, and the client expires
+   * it a few seconds later. The colour is resolved here from the player's
+   * active character so nobody can ping in someone else's colour.
+   */
+  socket.on('ping:map', async (payload) => {
     const ctx = await context();
     if (!ctx) return;
 
+    const input = pingSchema.parse(payload);
+    const scene = await sceneOf(input.sceneId);
+    if (!scene || scene.campaignId !== ctx.campaignId) return;
+
+    if (!ctx.isDM && !scene.playerDrawing) return;
+
     io.to(campaignRoom(ctx.campaignId)).emit('ping:map', {
-      sceneId,
-      x,
-      y,
+      ...input,
       byUserId: user.id,
-      color: ctx.isDM ? '#e8853f' : '#8b7bf0',
+      color: await pointerColor(ctx.isDM, input.actorId, user.id),
     });
   });
 }

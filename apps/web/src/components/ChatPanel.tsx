@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { QUICK_DICE, validateExpression, type RollMode } from '@dnd/shared';
+import { DICE_LIMITS, DIE_TYPES, validateExpression, type RollMode } from '@dnd/shared';
 import { Button } from './ui.js';
 import { useTable } from '../store/table.js';
 import { useAuth } from '../store/auth.js';
@@ -84,16 +84,8 @@ export function ChatPanel() {
       </div>
 
       <div className="border-t border-ink-800 px-3 py-2">
-        <div className="mb-2 flex flex-wrap gap-1">
-          {QUICK_DICE.map((die) => (
-            <button
-              key={die}
-              onClick={() => roll(die, '', secret)}
-              className="rounded border border-ink-700 bg-ink-850 px-2 py-1 font-mono text-xs text-ink-300 transition-colors hover:border-ember-500 hover:text-ember-300"
-            >
-              {die}
-            </button>
-          ))}
+        <div className="mb-2 flex flex-wrap items-center gap-1">
+          <DiceBuilder onRoll={(expression) => roll(expression, '', secret)} />
           <button
             onClick={() => setSecret(!secret)}
             title="Secret rolls are seen only by you and the DM"
@@ -139,6 +131,66 @@ export function ChatPanel() {
           </Button>
         </form>
       </div>
+    </div>
+  );
+}
+
+/**
+ * How many of what, plus a modifier.
+ *
+ * Seven fixed buttons could only ever roll one die at a time, so 2d6 meant
+ * typing it. The expression is still only a string the server rolls - nothing
+ * here produces a number.
+ */
+function DiceBuilder({ onRoll }: { onRoll: (expression: string) => void }) {
+  const [count, setCount] = useState(1);
+  const [sides, setSides] = useState(20);
+  const [modifier, setModifier] = useState(0);
+
+  const expression =
+    `${count}d${sides}` + (modifier === 0 ? '' : modifier > 0 ? `+${modifier}` : `${modifier}`);
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        type="number"
+        min={1}
+        max={DICE_LIMITS.maxDiceCount}
+        value={count}
+        aria-label="How many dice"
+        onChange={(e) =>
+          setCount(Math.max(1, Math.min(DICE_LIMITS.maxDiceCount, Number(e.target.value) || 1)))
+        }
+        className="w-12 rounded border border-ink-700 bg-ink-850 px-1.5 py-1 text-center font-mono text-xs text-ink-200 focus:border-arcane-400 focus:outline-none"
+      />
+      <select
+        value={sides}
+        aria-label="Die type"
+        onChange={(e) => setSides(Number(e.target.value))}
+        className="rounded border border-ink-700 bg-ink-850 px-1.5 py-1 font-mono text-xs text-ink-200 focus:border-arcane-400 focus:outline-none"
+      >
+        {DIE_TYPES.map((die) => (
+          <option key={die} value={die}>
+            d{die}
+          </option>
+        ))}
+      </select>
+      <input
+        type="number"
+        min={-99}
+        max={99}
+        value={modifier}
+        aria-label="Modifier"
+        onChange={(e) => setModifier(Math.max(-99, Math.min(99, Number(e.target.value) || 0)))}
+        className="w-12 rounded border border-ink-700 bg-ink-850 px-1.5 py-1 text-center font-mono text-xs text-ink-200 focus:border-arcane-400 focus:outline-none"
+      />
+      <button
+        onClick={() => onRoll(expression)}
+        title={`Roll ${expression}`}
+        className="rounded border border-ink-700 bg-ink-850 px-2 py-1 font-mono text-xs text-ember-300 transition-colors hover:border-ember-500"
+      >
+        Roll {expression}
+      </button>
     </div>
   );
 }
@@ -190,6 +242,13 @@ function Message({
   );
 }
 
+/**
+ * What was rolled, what each die came up, then the total.
+ *
+ * The dice line is the point: "5" tells you nothing about whether the roll was
+ * lucky, and 4 + 1 does. The library's own `output` string is kept underneath
+ * because it is the only thing that explains a dropped or exploded die.
+ */
 function RollCard({ roll }: { roll: NonNullable<WireChatMessage['rollData']> }) {
   return (
     <div
@@ -201,11 +260,20 @@ function RollCard({ roll }: { roll: NonNullable<WireChatMessage['rollData']> }) 
             : 'border-ink-700 bg-ink-850'
       }`}
     >
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-ink-400">{roll.label || roll.expression}</span>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="font-mono text-xs text-ink-300">{roll.expression}</span>
+        {roll.label && <span className="min-w-0 truncate text-[11px] text-ink-500">{roll.label}</span>}
+      </div>
+
+      {roll.rolls.length > 0 && (
+        <div className="mt-1 font-mono text-sm text-ink-200">{roll.rolls.join(' + ')}</div>
+      )}
+
+      <div className="mt-0.5 flex items-baseline justify-between gap-3">
+        <span className="font-mono text-[11px] text-ink-500">{roll.output}</span>
         <span className="font-display text-2xl font-bold text-ink-100">{roll.total}</span>
       </div>
-      <div className="mt-0.5 font-mono text-[11px] text-ink-500">{roll.output}</div>
+
       {roll.isCritical && (
         <div className="mt-1 text-xs font-semibold text-emerald-400">Critical hit</div>
       )}

@@ -1,5 +1,7 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import {
+  ABILITIES,
+  ABILITY_ROLL,
   OWNERSHIP,
   actorInputSchema,
   applyRest,
@@ -382,6 +384,49 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
     }
 
     return { result };
+  });
+
+  /**
+   * Rolls a fresh set of ability scores.
+   *
+   * Over HTTP rather than the table socket: the character sheet is not the
+   * table page and holds no socket, so the socket version emitted into the void
+   * and looked like a dead button. The roll still happens on the server, and is
+   * still posted to the chat of every campaign the character belongs to - the
+   * point was always that the table can see the scores were genuinely rolled.
+   */
+  app.post('/api/actors/:id/roll-abilities', async (request) => {
+    const user = assertUser(request);
+    const { id } = request.params as { id: string };
+    const { actor } = await requireActorWrite(id, user.id);
+
+    const results = ABILITIES.map((ability) => ({
+      ability,
+      result: rollExpression(ABILITY_ROLL, `${actor.name} — ${ability.toUpperCase()}`),
+    }));
+
+    const assigned = await db
+      .select({ campaignId: actorCampaigns.campaignId })
+      .from(actorCampaigns)
+      .where(eq(actorCampaigns.actorId, id));
+
+    if (app.io) {
+      const { persistAndDeliver } = await import('../realtime/chat.js');
+      for (const row of assigned) {
+        for (const { result } of results) {
+          await persistAndDeliver(
+            app.io,
+            row.campaignId,
+            { userId: user.id, actorId: actor.id, kind: 'roll', body: result.label, rollData: result },
+            { authorName: user.displayName, actorName: actor.name },
+          );
+        }
+      }
+    }
+
+    // Returned as well as posted, so a character with no campaign yet still
+    // sees its numbers.
+    return { rolls: results.map((r) => ({ ability: r.ability, total: r.result.total, dice: r.result.rolls })) };
   });
 
   /* ----------------------------------------------------------- NPC creation */

@@ -3,7 +3,7 @@ import { campaignInputSchema } from '@dnd/shared';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
-import { campaignMembers, campaigns, users } from '../db/schema.js';
+import { campaignMembers, campaigns, encounters, scenes, users } from '../db/schema.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { newId, newInviteCode } from '../lib/id.js';
 import { storeImage } from '../lib/uploads.js';
@@ -77,6 +77,7 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
         role: membership.role,
         inviteCode: membership.isDM ? campaign.inviteCode : null,
       },
+      lastSession: await lastSession(campaign.id, campaign.activeSceneId),
     };
   });
 
@@ -217,4 +218,40 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
 
     return { bannerUrl: stored.url };
   });
+}
+
+/**
+ * Where the table left off: the scene that is live, and whether a fight is
+ * still open on it.
+ *
+ * Derived every time rather than stored, so it cannot go stale the way a
+ * written note does. An unfinished combat is the thing most worth knowing
+ * before a session starts.
+ */
+async function lastSession(
+  campaignId: string,
+  activeSceneId: string | null,
+): Promise<{
+  scene: { id: string; name: string; mapImageUrl: string | null } | null;
+  combat: { round: number } | null;
+}> {
+  const scene = activeSceneId
+    ? (
+        await db
+          .select({ id: scenes.id, name: scenes.name, mapImageUrl: scenes.mapImageUrl })
+          .from(scenes)
+          .where(eq(scenes.id, activeSceneId))
+          .limit(1)
+      )[0] ?? null
+    : null;
+
+  const open = (
+    await db
+      .select({ round: encounters.round })
+      .from(encounters)
+      .where(and(eq(encounters.campaignId, campaignId), eq(encounters.isActive, true)))
+      .limit(1)
+  )[0];
+
+  return { scene, combat: open ? { round: open.round } : null };
 }

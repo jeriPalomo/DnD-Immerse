@@ -143,5 +143,10 @@ export function initiativeExpression(scores: AbilityScores, mode: RollMode = 'no
 /** Standard array generation: roll 4d6, drop the lowest. */
 export const ABILITY_ROLL = '4d6dl1';
 
-/** Presets for the dice tray. */
-export const QUICK_DICE = ['1d4', '1d6', '1d8', '1d10', '1d12', '1d20', '1d100'] as const;
+/**
+ * The dice a table actually owns, for the tray's die-type picker.
+ *
+ * Replaced a list of fixed `1dN` presets, which could only ever roll one die at
+ * a time - rolling 2d6 meant typing it out.
+ */
+export const DIE_TYPES = [4, 6, 8, 10, 12, 20, 100] as const;

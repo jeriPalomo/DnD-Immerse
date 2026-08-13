@@ -11,5 +11,6 @@ export * from './aoe.js';
 export * from './audio.js';
 export * from './rest.js';
 export * from './gridDetect.js';
+export * from './colors.js';
 export * from './conditions.js';
 export * from './deathSaves.js';

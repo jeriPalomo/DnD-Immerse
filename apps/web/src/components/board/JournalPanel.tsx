@@ -30,7 +30,7 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
   const [entries, setEntries] = useState<Entry[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const { showHandout } = useTable();
+  const { showHandout, journalVersion } = useTable();
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
@@ -38,9 +38,11 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
     setEntries(res.entries);
   }, [campaignId]);
 
+  // Refetches when anyone shares an entry, so a player sees a note appear
+  // without reloading the table.
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, journalVersion]);
 
   async function create() {
     setBusy(true);
@@ -75,8 +77,13 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
     setEntries((current) =>
       current.map((e) => (e.id === entry.id ? { ...e, shared: !e.shared } : e)),
     );
-    await api.post(`/api/journal/${entry.id}/share`, { shared: !entry.shared });
-    await load();
+    try {
+      await api.post(`/api/journal/${entry.id}/share`, { shared: !entry.shared });
+    } finally {
+      // Reload either way: on failure this puts the pill back where it belongs
+      // rather than leaving it claiming the party can read something.
+      await load();
+    }
   }
 
   async function addImage(entryId: string, file: File) {

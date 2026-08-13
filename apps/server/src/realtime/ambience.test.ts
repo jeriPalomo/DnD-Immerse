@@ -383,6 +383,26 @@ describe('invariant: unshared journal entries never reach a player', () => {
     expect(hidden.entries.find((e) => e.id === entryId)?.shared).toBe(false);
   });
 
+  it('shares in a campaign the DM has not filled yet', async () => {
+    // The regression: sharedness used to be inferred from ownership grants,
+    // which were written per *other* member. A campaign with nobody else in it
+    // therefore stored nothing, reported shared: false straight back, and the
+    // button appeared to do nothing at all.
+    const solo = await api<{ campaign: { id: string } }>(
+      'POST', '/api/campaigns', { name: 'Session zero' }, dm.cookie,
+    );
+    const entry = await api<{ entry: { id: string } }>(
+      'POST', `/api/campaigns/${solo.campaign.id}/journal`, { title: 'Prep' }, dm.cookie,
+    );
+
+    await api('POST', `/api/journal/${entry.entry.id}/share`, { shared: true }, dm.cookie);
+
+    const read = await api<{ entries: { id: string; shared: boolean }[] }>(
+      'GET', `/api/campaigns/${solo.campaign.id}/journal`, undefined, dm.cookie,
+    );
+    expect(read.entries.find((e) => e.id === entry.entry.id)?.shared).toBe(true);
+  });
+
   it('refuses to let a player write to the journal', async () => {
     await expect(
       api('POST', `/api/campaigns/${campaignId}/journal`, { title: 'Mine' }, alice.cookie),

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import {
+  DM_COLOR,
   TOKEN_MOVE_THROTTLE_MS,
+  actorColor,
   gridToPixel,
   isDown,
   pixelToGrid,
@@ -12,11 +14,30 @@ import {
 import type Konva from 'konva';
 import type { WireScene, WireToken } from '@dnd/shared';
 import { DoorLayer, FogLayer, NoteLayer, WallLayer } from './FogLayer.js';
-import { DrawingLayer, colorForUser } from './DrawingLayer.js';
+import { DrawingLayer } from './DrawingLayer.js';
 import { TemplateLayer } from './TemplateLayer.js';
 import { LightLayer, WeatherLayer } from './AtmosphereLayer.js';
 import { useTable } from '../../store/table.js';
 import { useAuth } from '../../store/auth.js';
+
+/**
+ * A dragged ping is sampled every mousemove, so a slow hand over a big map can
+ * produce thousands of points. Trimmed to the schema's cap before sending.
+ */
+const PING_STROKE_LIMIT = 600;
+
+/** Grid-unit pairs to the flat pixel array Konva wants. */
+function toPixelPath(
+  points: number[],
+  grid: { gridSize: number; offsetX: number; offsetY: number },
+): number[] {
+  const out: number[] = [];
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    const point = gridToPixel({ x: points[i], y: points[i + 1] }, grid);
+    out.push(point.x, point.y);
+  }
+  return out;
+}
 
 /** Loads an image for Konva, re-resolving when the URL changes. */
 function useImage(url: string | null): HTMLImageElement | null {
@@ -55,7 +76,7 @@ export function BattleMap({
 }) {
   const {
     scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool, templates, notes,
-    drawings, encounter,
+    drawings, encounter, activeActorId,
     select, target, moveToken, commitToken, pingMap, createWall, deleteWall, toggleDoor, clearTemplate,
     placeNote, toggleNote, removeNote, addDrawing, eraseDrawing,
   } = useTable();
@@ -72,7 +93,12 @@ export function BattleMap({
   // The stroke in progress, kept local so it tracks the cursor with no round
   // trip; it is sent once on release.
   const [stroke, setStroke] = useState<number[] | null>(null);
-  const myColor = colorForUser(user?.id ?? '');
+  // The same, for an alt-drag ping - which is never persisted.
+  const [pingStroke, setPingStroke] = useState<number[] | null>(null);
+  // Read by the drag guard below, which fires before React has re-rendered with
+  // the state above, so the state would still be null there.
+  const pinging = useRef(false);
+  const myColor = isDM ? DM_COLOR : actorColor(activeActorId ?? user?.id ?? '');
   const drawingMode = wallTool === 'draw' || wallTool === 'arrow';
 
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -233,6 +259,9 @@ export function BattleMap({
   const grid = { gridSize: scene.gridSize, offsetX: scene.gridOffsetX, offsetY: scene.gridOffsetY };
   const selected = tokens.find((t) => t.id === selectedTokenId) ?? null;
   const targeted = tokens.find((t) => t.id === targetTokenId) ?? null;
+  // Mirrors the server's rule, so a player is not offered a gesture that will
+  // be silently dropped. The server decides; this only avoids the dead click.
+  const canPoint = isDM || scene.playerDrawing;
 
   return (
     <div
@@ -250,22 +279,57 @@ export function BattleMap({
         y={view.y}
         // Panning is suspended while drawing, or the map slides under the pen.
         draggable={!drawingMode}
+        // A ping is decided at mousedown, by which time Konva has already armed
+        // a stage drag - and a dragging stage swallows the mousemoves the
+        // stroke is made of, so the line came out as a stub near the release
+        // point. Cancelling the drag here is what makes alt-drag draw at all.
+        onDragStart={(e) => {
+          if (pinging.current) e.target.stopDrag();
+        }}
         onWheel={onWheel}
         onMouseDown={(e) => {
+          // Alt-drag points at something without leaving anything behind.
+          if (e.evt.altKey && !drawingMode && canPoint) {
+            const point = pointerGrid(e);
+            if (point) {
+              pinging.current = true;
+              setPingStroke([point.x, point.y]);
+            }
+            return;
+          }
           if (!drawingMode) return;
           const point = pointerGrid(e);
           if (point) setStroke([point.x, point.y]);
         }}
         onMouseMove={(e) => {
+          // Appended through the updater, never from the rendered value: mouse
+          // moves arrive faster than React re-renders, and reading the closed
+          // -over array meant each batch of moves overwrote the last, leaving a
+          // stub of a stroke instead of the line that was drawn.
+          if (pingStroke) {
+            const point = pointerGrid(e);
+            if (point) setPingStroke((current) => (current ? [...current, point.x, point.y] : current));
+            return;
+          }
           if (!drawingMode || !stroke) return;
           const point = pointerGrid(e);
           if (!point) return;
 
           // An arrow only ever needs its two ends.
-          if (wallTool === 'arrow') setStroke([stroke[0], stroke[1], point.x, point.y]);
-          else setStroke([...stroke, point.x, point.y]);
+          if (wallTool === 'arrow') setStroke((current) => (current ? [current[0], current[1], point.x, point.y] : current));
+          else setStroke((current) => (current ? [...current, point.x, point.y] : current));
         }}
         onMouseUp={() => {
+          if (pingStroke) {
+            // A drag draws; a click without one falls through to the plain dot
+            // the click handler already sends.
+            if (pingStroke.length >= 4) {
+              pingMap(pingStroke[0], pingStroke[1], pingStroke.slice(0, PING_STROKE_LIMIT));
+            }
+            pinging.current = false;
+            setPingStroke(null);
+            return;
+          }
           if (!drawingMode || !stroke) return;
           if (stroke.length >= 4) {
             addDrawing(wallTool === 'arrow' ? 'arrow' : 'freehand', stroke, myColor);
@@ -305,7 +369,7 @@ export function BattleMap({
           }
 
           if (e.evt.altKey) {
-            pingMap(point.x, point.y);
+            if (canPoint) pingMap(point.x, point.y);
           } else {
             select(null);
             target(null);
@@ -413,20 +477,46 @@ export function BattleMap({
           {selected && targeted && selected.id !== targeted.id && (
             <ReachLine from={selected} to={targeted} scene={scene} grid={grid} />
           )}
-          {pings.map((ping) => {
-            const point = gridToPixel({ x: ping.x, y: ping.y }, grid);
-            return (
+          {/* A dragged ping is a line in the pointer's own colour; a clicked
+              one is still a ring. Both expire on their own - neither is a
+              drawing, and neither is ever written down. */}
+          {pings.map((ping) =>
+            ping.points.length >= 4 ? (
+              <Line
+                key={ping.id}
+                points={toPixelPath(ping.points, grid)}
+                stroke={ping.color}
+                strokeWidth={4}
+                lineCap="round"
+                lineJoin="round"
+                tension={0.3}
+                opacity={0.85}
+              />
+            ) : (
               <Circle
                 key={ping.id}
-                x={point.x}
-                y={point.y}
+                x={gridToPixel({ x: ping.x, y: ping.y }, grid).x}
+                y={gridToPixel({ x: ping.x, y: ping.y }, grid).y}
                 radius={scene.gridSize * 0.6}
                 stroke={ping.color}
                 strokeWidth={3}
                 opacity={0.9}
               />
-            );
-          })}
+            ),
+          )}
+          {/* The local drag, before release - so it tracks the cursor with no
+              round trip. */}
+          {pingStroke && pingStroke.length >= 4 && (
+            <Line
+              points={toPixelPath(pingStroke, grid)}
+              stroke={myColor}
+              strokeWidth={4}
+              lineCap="round"
+              lineJoin="round"
+              tension={0.3}
+              opacity={0.6}
+            />
+          )}
         </Layer>
         {/* Weather is drawn last, in view space, so panning does not drag the
             rain sideways with the terrain. */}
@@ -489,7 +579,7 @@ export function BattleMap({
           ? wallTool === 'note'
             ? 'click to drop a pin — click a pin to reveal it, alt-click to delete'
             : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
-          : 'scroll to zoom · drag to pan · alt-click to ping · shift-click a token to target · ? for keys'}
+          : 'scroll to zoom · drag to pan · alt-click to ping, alt-drag to draw one · shift-click a token to target · ? for keys'}
       </div>
 
       {wallStart && (

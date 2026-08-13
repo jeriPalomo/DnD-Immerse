@@ -69,8 +69,14 @@ export const useSheet = create<SheetState>((set, get) => ({
   saving: false,
   error: null,
 
+  /**
+   * `loading` means "there is nothing to show yet", not "a request is in
+   * flight". A refetch after a rest used to flip it true, which swapped the
+   * whole sheet for a spinner - and unmounting the page throws away the scroll
+   * position, so every rest bounced the user to the top.
+   */
   async load(id) {
-    set({ loading: true, error: null });
+    set({ loading: get().actor?.id !== id, error: null });
     try {
       const res = await api.get<{
         actor: Actor;

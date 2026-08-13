@@ -90,6 +90,7 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
         darkness: z.number().min(0).max(1).optional(),
         weather: z.enum(['none', 'rain', 'storm', 'snow', 'fog', 'ash']).optional(),
         weatherIntensity: z.number().min(0).max(1).optional(),
+        playerDrawing: z.boolean().optional(),
       })
       .parse(request.body);
 

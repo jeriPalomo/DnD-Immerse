@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { OWNERSHIP, abilityModifier, formatModifier, templateForSpell } from '@dnd/shared';
 import { Alert, Badge, Card, Spinner } from '../components/ui.js';
 import { ChatPanel } from '../components/ChatPanel.js';
@@ -306,6 +306,7 @@ export default function CampaignTable() {
 }
 
 function PartyRow({ member, isSelf }: { member: PartyMember; isSelf: boolean }) {
+  const location = useLocation();
   const detailed = (member.access ?? 0) >= OWNERSHIP.observer;
   const hpPercent =
     detailed && member.hpMax ? Math.max(0, Math.min(100, ((member.hpCurrent ?? 0) / member.hpMax) * 100)) : 0;
@@ -324,6 +325,7 @@ function PartyRow({ member, isSelf }: { member: PartyMember; isSelf: boolean }) 
         </div>
         <Link
           to={`/characters/${member.id}`}
+          state={{ path: location.pathname, label: 'Back to the table' }}
           className="min-w-0 flex-1 truncate text-xs text-ink-100 hover:text-ember-300"
         >
           {member.name}

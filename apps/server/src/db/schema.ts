@@ -62,6 +62,12 @@ export const campaigns = sqliteTable('campaigns', {
     .notNull()
     .default('2014'),
   bannerUrl: text('banner_url'),
+  /**
+   * What happened last time, in the DM's own words. Written rather than
+   * generated: a summary of the chat log reads back the dice, not the story,
+   * and "you left the duke's study through the window" is the useful half.
+   */
+  recap: text('recap').notNull().default(''),
   createdAt: epoch('created_at'),
 });
 
@@ -260,6 +266,14 @@ export const scenes = sqliteTable(
       .notNull()
       .default('none'),
     weatherIntensity: real('weather_intensity').notNull().default(0.5),
+
+    /**
+     * Whether players may draw and ping on this scene. On by default - pointing
+     * at the map is how a table talks - but the DM can close it while they are
+     * describing something, or during a puzzle where the party scribbling over
+     * the board gets in the way.
+     */
+    playerDrawing: integer('player_drawing', { mode: 'boolean' }).notNull().default(true),
 
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: epoch('created_at'),
@@ -599,6 +613,13 @@ export const journalEntries = sqliteTable(
       .notNull()
       .references(() => campaigns.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
+    /**
+     * Whether the party can read this. Stored rather than inferred from
+     * ownership grants: a campaign the DM has not filled yet has no other
+     * members to grant to, so the grant-counting version reported every entry
+     * as unshared and the show button snapped straight back.
+     */
+    shared: integer('shared', { mode: 'boolean' }).notNull().default(false),
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: epoch('created_at'),
   },

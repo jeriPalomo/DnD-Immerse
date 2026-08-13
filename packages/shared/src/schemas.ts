@@ -74,6 +74,8 @@ export const currencySchema = z.object({
 export const campaignInputSchema = z.object({
   name: z.string().min(1).max(80).trim(),
   description: z.string().max(5000).default(''),
+  /** What happened last session, written by the DM and read by everyone. */
+  recap: z.string().max(5000).default(''),
 });
 
 export const memberRoleSchema = z.enum(['dm', 'player']);

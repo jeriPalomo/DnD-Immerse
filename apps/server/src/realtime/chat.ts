@@ -79,7 +79,12 @@ async function dmOf(campaignId: string): Promise<string | null> {
   return rows[0]?.dmUserId ?? null;
 }
 
-async function persistAndDeliver(
+/**
+ * Writes a message to the log and routes it. Exported so REST routes can post
+ * to the table too - a roll made on the character sheet is still a roll the
+ * table should be able to see.
+ */
+export async function persistAndDeliver(
   io: IOServer,
   campaignId: string,
   row: {

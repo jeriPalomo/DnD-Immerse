@@ -125,6 +125,29 @@ module and tests uses it.
 **Enemy hit points are redacted from players in the tracker.** Knowing the boss
 is on 7 HP changes how a table plays; that is the DM's to reveal.
 
+**Visibility is stored, not inferred from grants.** Journal sharedness is a
+column on the entry. Deriving it from "does an ownership row exist" meant a
+campaign with no players yet wrote no rows, reported every entry unshared, and
+the show button appeared dead — a state you only hit while prepping alone,
+which is exactly when nobody is around to notice it is broken.
+
+**A client names its actor; the server decides what that means.** Ping colour
+comes from the sender's character, but the `actorId` on the wire is a claim:
+`pointerColor` checks the sender actually controls it before deriving anything.
+Colours are computed from the id via `actorColor()`, never stored, so client and
+server agree without a round trip.
+
+**`loading` means "nothing to show yet", never "a request is in flight".** A
+refetch that flips it true swaps the page for a spinner, and unmounting a page
+throws away its scroll position — which is why every rest bounced the user to
+the top of the sheet. Keep the last good data rendered while refreshing.
+
+**A dragging Konva stage swallows mousemoves.** Any gesture built from a stroke
+has to cancel the stage pan in `onDragStart`, or it collects two points near
+where the mouse was released. Stroke handlers also use functional state updates:
+mouse moves arrive faster than React re-renders, so reading the closed-over
+array loses most of the line.
+
 **Walls block sight and movement independently.** `blocksSight` and
 `blocksMovement` are separate flags, so a railing can be seen over but not
 crossed and a curtain the reverse. Collision is enforced on `token:commit` for

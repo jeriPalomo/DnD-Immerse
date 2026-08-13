@@ -90,11 +90,3 @@ export function DrawingLayer({
     </Group>
   );
 }
-
-/** A stable colour per person, so you can tell who drew what. */
-export function colorForUser(userId: string): string {
-  const palette = ['#e8853f', '#6d5ce7', '#3fb950', '#e15c8a', '#3fb4d9', '#d9a13f'];
-  let hash = 0;
-  for (const char of userId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return palette[hash % palette.length];
-}

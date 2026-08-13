@@ -74,6 +74,8 @@ export interface WireScene {
   /** Cosmetic overlay; never affects who can see what. */
   weather: 'none' | 'rain' | 'storm' | 'snow' | 'fog' | 'ash';
   weatherIntensity: number;
+  /** Whether players may draw and ping here. Enforced on the server. */
+  playerDrawing: boolean;
 }
 
 export interface WireCard {
@@ -305,6 +307,18 @@ export const pingSchema = z.object({
   sceneId: z.string(),
   x: z.number(),
   y: z.number(),
+  /**
+   * An optional stroke, in GRID UNITS, when the ping was dragged rather than
+   * clicked: "he came round *this* way" is a line, not a dot. Capped well below
+   * the persisted drawing limit because a ping is thrown away seconds later.
+   */
+  points: z.array(z.number()).max(600).default([]),
+  /**
+   * Who is pointing. The colour is derived from this on the SERVER, after
+   * checking the sender actually controls the character - otherwise anyone
+   * could point in someone else's colour.
+   */
+  actorId: z.string().nullable().default(null),
 });
 
 export const damageApplySchema = z.object({
@@ -448,6 +462,11 @@ export interface ServerToClientEvents {
   'template:state': (payload: { templates: WireTemplate[] }) => void;
   /** Shown large on every screen for a moment, then it settles into the journal. */
   'handout:reveal': (payload: { imageUrl: string; title: string }) => void;
+  /**
+   * A journal entry was shown to the party or taken back. Carries nothing: the
+   * panel refetches, so what a player may read is still decided server-side.
+   */
+  'journal:changed': (payload: Record<string, never>) => void;
 
   'ping:map': (payload: PingPayload & { byUserId: string; color: string }) => void;
 

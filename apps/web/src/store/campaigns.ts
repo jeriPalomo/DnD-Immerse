@@ -10,6 +10,8 @@ export interface Campaign {
   /** Null for players - the invite code is a credential only the DM holds. */
   inviteCode: string | null;
   bannerUrl: string | null;
+  /** What happened last session, in the DM's words. */
+  recap?: string;
   createdAt: number;
   role: 'dm' | 'player';
   ruleset?: '2014' | '2024';

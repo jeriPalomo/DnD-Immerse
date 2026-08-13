@@ -1,15 +1,9 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { campaignRoom } from '@dnd/shared';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
-import {
-  campaignMembers,
-  journalEntries,
-  journalPages,
-  mapNotes,
-  ownership,
-  scenes,
-} from '../db/schema.js';
+import { journalEntries, journalPages, mapNotes, scenes } from '../db/schema.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
 import { deleteUpload, storeImage } from '../lib/uploads.js';
@@ -18,9 +12,8 @@ import { deleteUpload, storeImage } from '../lib/uploads.js';
  * The campaign journal and the map pins that open its pages.
  *
  * Sharing is explicit: an entry is DM-only until they show it to the party,
- * recorded in the same ownership table actors use. A pin the DM has not
- * revealed is filtered out of the player payload entirely rather than hidden
- * on the client.
+ * recorded as a flag on the entry itself. A pin the DM has not revealed is
+ * filtered out of the player payload entirely rather than hidden on the client.
  */
 export async function journalRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
@@ -40,27 +33,13 @@ export async function journalRoutes(app: FastifyInstance): Promise<void> {
 
     const pages = await db.select().from(journalPages).orderBy(asc(journalPages.sortOrder));
 
-    // Which entries have been shown to anyone. The DM's UI needs this or the
-    // share button has to guess, and guesses wrong after a reload.
-    const allGrants = await db
-      .select({ documentId: ownership.documentId, userId: ownership.userId })
-      .from(ownership)
-      .where(eq(ownership.documentType, 'journal'));
-
-    let visible = entries;
-    if (!membership.isDM) {
-      const mine = new Set(
-        allGrants.filter((grant) => grant.userId === user.id).map((grant) => grant.documentId),
-      );
-      visible = entries.filter((entry) => mine.has(entry.id));
-    }
-
-    const sharedIds = new Set(allGrants.map((grant) => grant.documentId));
+    // Unshared entries are absent from a player's payload, not merely undrawn -
+    // the DM's notes on the villain never reach the browser.
+    const visible = membership.isDM ? entries : entries.filter((entry) => entry.shared);
 
     return {
       entries: visible.map((entry) => ({
         ...entry,
-        shared: sharedIds.has(entry.id),
         pages: pages.filter((page) => page.entryId === entry.id),
       })),
     };
@@ -217,34 +196,11 @@ export async function journalRoutes(app: FastifyInstance): Promise<void> {
 
     const { shared } = z.object({ shared: z.boolean() }).parse(request.body);
 
-    const members = await db
-      .select({ userId: campaignMembers.userId })
-      .from(campaignMembers)
-      .where(eq(campaignMembers.campaignId, rows[0].campaignId));
+    await db.update(journalEntries).set({ shared }).where(eq(journalEntries.id, id));
 
-    for (const member of members) {
-      if (member.userId === user.id) continue;
-
-      if (shared) {
-        await db
-          .insert(ownership)
-          .values({ documentType: 'journal', documentId: id, userId: member.userId, level: 2 })
-          .onConflictDoUpdate({
-            target: [ownership.documentType, ownership.documentId, ownership.userId],
-            set: { level: 2 },
-          });
-      } else {
-        await db
-          .delete(ownership)
-          .where(
-            and(
-              eq(ownership.documentType, 'journal'),
-              eq(ownership.documentId, id),
-              eq(ownership.userId, member.userId),
-            ),
-          );
-      }
-    }
+    // Players already at the table refetch on this; without it the DM presses
+    // show, nothing appears on anyone's screen, and the button takes the blame.
+    app.io?.to(campaignRoom(rows[0].campaignId)).emit('journal:changed', {});
 
     return { ok: true, shared };
   });

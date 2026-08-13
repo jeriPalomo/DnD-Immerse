@@ -145,7 +145,17 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
               }`}
             >
               <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-sm text-ink-100">{row.name}</span>
+                <SceneName
+                  name={row.name}
+                  onRename={(name) => {
+                    // Optimistic: the list is the DM's own, and a rename that
+                    // waits for a round trip feels broken while you type.
+                    setScenes((current) =>
+                      current.map((s) => (s.id === row.id ? { ...s, name } : s)),
+                    );
+                    void patchScene(row.id, { name });
+                  }}
+                />
                 {row.id === activeSceneId ? (
                   <span className="text-[10px] text-ember-400 uppercase">Live</span>
                 ) : (
@@ -238,6 +248,21 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
           <p className="text-[11px] text-ink-500">
             With vision on, each player sees only what their tokens can see. Walls
             are computed on the server, so players never receive the geometry.
+          </p>
+
+          <label className="flex items-center gap-2 text-xs text-ink-300">
+            <input
+              type="checkbox"
+              checked={scene.playerDrawing}
+              onChange={(e) => void patchScene(scene.id, { playerDrawing: e.target.checked })}
+              className="accent-ember-500"
+            />
+            Let players draw and ping
+          </label>
+          <p className="text-[11px] text-ink-500">
+            Off, only you can mark the map — useful while you are describing
+            something, or during a puzzle. Enforced on the server, so it holds
+            whatever the players' clients think.
           </p>
 
           <div>
@@ -407,6 +432,52 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
  * until the overlay matches the map's own squares. Because token positions are
  * stored in grid units, recalibrating here never moves the tokens.
  */
+/**
+ * The scene name, editable in place.
+ *
+ * Held locally while typing and committed on blur or Enter, so a rename is one
+ * write rather than one per keystroke. Escape puts back what was there.
+ */
+function SceneName({ name, onRename }: { name: string; onRename: (name: string) => void }) {
+  const [draft, setDraft] = useState(name);
+  const [editing, setEditing] = useState(false);
+
+  // Follow a rename made elsewhere, but never yank the field out from under
+  // someone mid-edit.
+  useEffect(() => {
+    if (!editing) setDraft(name);
+  }, [name, editing]);
+
+  function commit() {
+    setEditing(false);
+    const next = draft.trim();
+    if (!next || next === name) {
+      setDraft(name);
+      return;
+    }
+    onRename(next.slice(0, 80));
+  }
+
+  return (
+    <input
+      value={draft}
+      aria-label={`Scene name: ${name}`}
+      onFocus={() => setEditing(true)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+        if (e.key === 'Escape') {
+          setDraft(name);
+          setEditing(false);
+          e.currentTarget.blur();
+        }
+      }}
+      className="min-w-0 flex-1 truncate rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-ink-100 hover:border-ink-700 focus:border-arcane-400 focus:bg-ink-850 focus:outline-none"
+    />
+  );
+}
+
 function GridCalibration({
   scene,
   onChange,

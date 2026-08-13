@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import {
-  ABILITIES,
   ABILITY_ROLL,
   OWNERSHIP,
   levelFromXP,
@@ -23,7 +22,6 @@ import { CampaignAssign } from '../components/sheet/CampaignAssign.js';
 import { RestControl } from '../components/sheet/RestControl.js';
 import { ShareSheet } from '../components/sheet/ShareSheet.js';
 import { useSheet } from '../store/sheet.js';
-import { useTable } from '../store/table.js';
 import { api } from '../lib/api.js';
 
 /** Stable anchor from a section title, so the nav and the sections agree. */
@@ -36,7 +34,18 @@ const NAV = ['Attacks', 'Spells', 'Inventory', 'Rest', 'Features & Traits', 'Not
 export default function CharacterSheet() {
   const { id } = useParams<{ id: string }>();
   const sheet = useSheet();
+  const location = useLocation();
   const [picker, setPicker] = useState<'spell' | 'item' | null>(null);
+
+  /**
+   * Where "back" goes.
+   *
+   * Whoever linked here says where here was; opening a sheet from the table and
+   * being returned to the character list is disorienting. Falls back to the
+   * list when the sheet was opened cold, in a new tab or from a bookmark.
+   */
+  const from = (location.state ?? null) as { path?: string; label?: string } | null;
+  const back = { path: from?.path ?? '/characters', label: from?.label ?? 'All characters' };
 
   useEffect(() => {
     if (id) void sheet.load(id);
@@ -60,8 +69,8 @@ export default function CharacterSheet() {
     return (
       <div className="mx-auto max-w-3xl px-4 py-10">
         <Alert>{sheet.error}</Alert>
-        <Link to="/characters" className="mt-4 inline-block text-sm text-ember-400 hover:underline">
-          Back to characters
+        <Link to={back.path} className="mt-4 inline-block text-sm text-ember-400 hover:underline">
+          &larr; {back.label}
         </Link>
       </div>
     );
@@ -79,8 +88,8 @@ export default function CharacterSheet() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
       <div className="mb-4 flex items-center justify-between">
-        <Link to="/characters" className="text-sm text-ink-400 hover:text-ink-200">
-          &larr; All characters
+        <Link to={back.path} className="text-sm text-ink-400 hover:text-ink-200">
+          &larr; {back.label}
         </Link>
         <span className="text-xs text-ink-500">
           {sheet.saving ? 'Saving…' : editable ? 'Saved' : 'View only'}
@@ -106,21 +115,7 @@ export default function CharacterSheet() {
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
         {/* Left rail: the derived numbers */}
         <div className="space-y-4">
-          {editable && (
-            <button
-              onClick={() => {
-                // Rolled in chat rather than locally, so the table can see the
-                // stats were genuinely rolled and not chosen.
-                for (const ability of ABILITIES) {
-                  useTable.getState().roll(ABILITY_ROLL, `${actor.name} — ${ability.toUpperCase()}`);
-                }
-              }}
-              className="w-full rounded-lg border border-ink-700 px-2 py-1.5 text-xs text-ink-400 transition-colors hover:border-ember-500 hover:text-ember-300"
-              title="Rolls 4d6 drop lowest for each ability, in the table chat"
-            >
-              Roll ability scores ({ABILITY_ROLL})
-            </button>
-          )}
+          {editable && <AbilityRoller actorId={actor.id} onApply={sheet.patch} />}
 
           <AbilityScoresBlock
             actor={actor}
@@ -271,6 +266,85 @@ export default function CharacterSheet() {
   );
 }
 
+/**
+ * Rolls a set of ability scores.
+ *
+ * Over HTTP, not the table socket: this page never connects one, so the socket
+ * version silently did nothing. The server still rolls, and still posts to the
+ * chat of any campaign the character is in.
+ */
+function AbilityRoller({
+  actorId,
+  onApply,
+}: {
+  actorId: string;
+  onApply: (fields: Record<string, unknown>) => void;
+}) {
+  const [rolls, setRolls] = useState<{ ability: AbilityKey; total: number; dice: number[] }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function roll() {
+    setBusy(true);
+    setFailed(false);
+    try {
+      const res = await api.post<{ rolls: { ability: AbilityKey; total: number; dice: number[] }[] }>(
+        `/api/actors/${actorId}/roll-abilities`,
+      );
+      setRolls(res.rolls);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-ink-700 p-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        loading={busy}
+        onClick={() => void roll()}
+        title={`Rolls ${ABILITY_ROLL} — 4d6, drop the lowest — for each ability`}
+        className="w-full"
+      >
+        Roll Ability Scores
+      </Button>
+
+      {failed && <p className="mt-1.5 text-[11px] text-red-400">Could not roll. Try again.</p>}
+
+      {rolls.length > 0 && (
+        <>
+          <ul className="mt-2 grid grid-cols-3 gap-1">
+            {rolls.map(({ ability, total, dice }) => (
+              <li
+                key={ability}
+                title={dice.join(', ')}
+                className="rounded border border-ink-700 bg-ink-850 px-1 py-0.5 text-center"
+              >
+                <div className="text-[9px] tracking-wide text-ink-500 uppercase">{ability}</div>
+                <div className="font-display text-sm text-ink-100">{total}</div>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={() => {
+              onApply(Object.fromEntries(rolls.map((r) => [r.ability, r.total])));
+              setRolls([]);
+            }}
+            className="mt-1.5 w-full rounded border border-ember-500/50 px-2 py-1 text-[11px] text-ember-300 transition-colors hover:bg-ember-500/15"
+          >
+            Apply to sheet
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Section({
   title,
   action,
@@ -369,16 +443,21 @@ function Identity({
             placeholder="Class"
             className={`w-28 ${field}`}
           />
-          <input
-            type="number"
-            min={1}
-            max={20}
-            aria-label="Level"
-            disabled={!editable}
-            value={actor.level}
-            onChange={(e) => onChange({ level: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })}
-            className={`w-14 ${field}`}
-          />
+          {/* Labelled: an unlabelled number box between class and background
+              reads as a mystery, and it is the one number people look for. */}
+          <span className="flex items-center gap-1 text-ink-500">
+            Level
+            <input
+              type="number"
+              min={1}
+              max={20}
+              aria-label="Level"
+              disabled={!editable}
+              value={actor.level}
+              onChange={(e) => onChange({ level: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })}
+              className={`w-12 ${field}`}
+            />
+          </span>
           {/* Experience is already tracked, so say when it has earned a level
               rather than leaving the player to check the table. */}
           {actor.experience > 0 && levelFromXP(actor.experience) > actor.level && (

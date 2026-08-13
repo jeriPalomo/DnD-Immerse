@@ -27,11 +27,15 @@ export function Button({
   className,
   children,
   disabled,
+  // A bare <button> inside a <form> submits it, which reloads the page and
+  // throws away where the user was. Submitting has to be asked for.
+  type = 'button',
   ...rest
 }: ButtonProps) {
   return (
     <button
       {...rest}
+      type={type}
       disabled={disabled || loading}
       className={cx(
         'inline-flex items-center justify-center gap-2 rounded-lg transition-colors',

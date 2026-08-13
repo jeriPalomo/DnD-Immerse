@@ -1,0 +1,1 @@
+ALTER TABLE `scenes` ADD `player_drawing` integer DEFAULT true NOT NULL;

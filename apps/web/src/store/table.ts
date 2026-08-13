@@ -57,10 +57,18 @@ interface TableState {
 
   /** Most recent damage results, shown briefly then cleared. */
   lastDamage: { tokenId: string; name: string; before: number; after: number; reason: string }[] | null;
+
+  /**
+   * Bumped when the journal changes. The panel refetches on it rather than
+   * receiving entries over the socket, so the server stays the only thing that
+   * decides which entries a player is allowed to hold.
+   */
+  journalVersion: number;
   selectedTokenId: string | null;
   /** The token a player has targeted, which drives the action panel. */
   targetTokenId: string | null;
-  pings: { id: number; x: number; y: number; color: string }[];
+  /** Ephemeral. A ping with `points` is a dragged stroke rather than a dot. */
+  pings: { id: number; x: number; y: number; color: string; points: number[] }[];
 
   /** The character the player is speaking and rolling as. */
   activeActorId: string | null;
@@ -81,7 +89,8 @@ interface TableState {
   commitToken: (tokenId: string, x: number, y: number) => void;
   updateToken: (tokenId: string, fields: Record<string, unknown>) => void;
   deleteToken: (tokenId: string) => void;
-  pingMap: (x: number, y: number) => void;
+  /** `points` carries a dragged stroke, in grid units; empty for a plain dot. */
+  pingMap: (x: number, y: number, points?: number[]) => void;
   setWallTool: (tool: 'off' | 'wall' | 'door' | 'note' | 'draw' | 'arrow') => void;
   addDrawing: (kind: 'freehand' | 'arrow' | 'text', points: number[], color: string, text?: string) => void;
   eraseDrawing: (id: string | 'mine' | 'all') => void;
@@ -180,6 +189,7 @@ export const useTable = create<TableState>((set, get) => ({
   wallTool: 'off',
   encounter: null,
   lastDamage: null,
+  journalVersion: 0,
   undoStack: [],
   toast: null,
   reveal: null,
@@ -248,6 +258,7 @@ export const useTable = create<TableState>((set, get) => ({
     socket.on('audio:playlists', ({ playlists }) => set({ playlists }));
     socket.on('audio:sounds', ({ sounds }) => set({ sounds }));
     socket.on('template:state', ({ templates }) => set({ templates }));
+    socket.on('journal:changed', () => set({ journalVersion: get().journalVersion + 1 }));
     socket.on('handout:reveal', (reveal) => {
       set({ reveal });
       // Long enough to take in, short enough not to block the table.
@@ -290,10 +301,13 @@ export const useTable = create<TableState>((set, get) => ({
     socket.on('token:moved', ({ tokenId, x, y }) =>
       set({ tokens: get().tokens.map((t) => (t.id === tokenId ? { ...t, x, y } : t)) }),
     );
-    socket.on('ping:map', ({ x, y, color }) => {
-      const ping = { id: Date.now() + Math.random(), x, y, color };
+    socket.on('ping:map', ({ x, y, color, points }) => {
+      // A stroke lingers longer than a dot: it is meant to be read, not just
+      // noticed, and it vanishes before anyone can treat it as an annotation.
+      const ping = { id: Date.now() + Math.random(), x, y, color, points: points ?? [] };
       set({ pings: [...get().pings, ping] });
-      setTimeout(() => set({ pings: get().pings.filter((p) => p.id !== ping.id) }), 2500);
+      const life = ping.points.length > 0 ? 5000 : 2500;
+      setTimeout(() => set({ pings: get().pings.filter((p) => p.id !== ping.id) }), life);
     });
     socket.on('error', ({ message }) => set({ error: message }));
 
@@ -438,9 +452,11 @@ export const useTable = create<TableState>((set, get) => ({
     set({ toast: null });
   },
 
-  pingMap(x, y) {
-    const sceneId = get().scene?.id;
-    if (sceneId) get().socket?.emit('ping:map', { sceneId, x, y });
+  pingMap(x, y, points = []) {
+    const { scene, activeActorId, socket } = get();
+    // The actor is a claim, not a colour: the server checks it before deciding
+    // what this is drawn in.
+    if (scene) socket?.emit('ping:map', { sceneId: scene.id, x, y, points, actorId: activeActorId });
   },
 
   setWallTool(tool) {

@@ -1,0 +1,1 @@
+ALTER TABLE `campaigns` ADD `recap` text DEFAULT '' NOT NULL;
