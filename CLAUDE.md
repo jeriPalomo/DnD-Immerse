@@ -14,6 +14,11 @@ compendium, a live table with chat and server-rolled dice, a battle map with
 sized tokens, wall-based dynamic vision with three-state fog, initiative and
 rules automation, and ambient audio with a journal and AoE templates.
 
+Current work is the punch list in **[docs/BACKLOG.md](docs/BACKLOG.md)** — fixes
+and features raised after playing the finished build. Read it before starting
+anything; it carries root causes already traced and is how work moves between
+the desktop and the laptop.
+
 ## Commands
 
 ```bash
