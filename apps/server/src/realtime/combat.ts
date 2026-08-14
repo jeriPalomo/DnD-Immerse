@@ -156,6 +156,26 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
     return ctx;
   }
 
+  /**
+   * Whether a player may damage this token.
+   *
+   * Monsters, yes; anybody's character, no. Owned tokens are somebody's
+   * character by construction, and a token linked to a `character` actor is one
+   * even if the DM placed it unowned - so both are checked rather than trusting
+   * the ownership column alone.
+   */
+  async function isFairGame(token: { ownerUserId: string | null; actorId: string | null }) {
+    if (token.ownerUserId) return false;
+    if (!token.actorId) return true;
+
+    const rows = await db
+      .select({ type: actors.type })
+      .from(actors)
+      .where(eq(actors.id, token.actorId))
+      .limit(1);
+    return rows[0]?.type !== 'character';
+  }
+
   socket.on('encounter:start', async ({ sceneId }) => {
     const ctx = await requireDM();
     if (!ctx) return;
@@ -309,6 +329,21 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
         }
       }
 
+      // Whose turn it is, so the battle log reads as a timeline of the fight
+      // rather than a list of numbers with no order to them.
+      // Ordered by sortOrder, the same as the tracker builds the list with -
+      // any other ordering here would name the wrong combatant.
+      const entries = await db
+        .select({ name: initiativeEntries.name })
+        .from(initiativeEntries)
+        .where(eq(initiativeEntries.encounterId, encounter.id))
+        .orderBy(asc(initiativeEntries.sortOrder));
+
+      const upNow = entries[next.activeIndex]?.name;
+      if (upNow) {
+        await postSystemMessage(io, ctx.campaignId, user.id, `Round ${next.round} — ${upNow}'s turn`);
+      }
+
       await broadcastEncounter(io, ctx.campaignId);
     });
   }
@@ -388,11 +423,29 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
    * the automation decided.
    */
   socket.on('damage:apply', async (payload) => {
-    const ctx = await requireDM();
+    const ctx = await context();
     if (!ctx) return;
 
     const input = damageApplySchema.parse(payload);
-    const targets = await db.select().from(tokens).where(inArray(tokens.id, input.tokenIds));
+    const requested = await db.select().from(tokens).where(inArray(tokens.id, input.tokenIds));
+
+    // A player may subtract from what they are fighting, and nothing else: the
+    // DM keeps every character's hit points, and healing stays theirs too.
+    let targets = requested;
+    if (!ctx.isDM) {
+      if (input.healing) {
+        socket.emit('error', { message: 'Only the DM can heal' });
+        return;
+      }
+
+      const allowed = await Promise.all(requested.map((token) => isFairGame(token)));
+      targets = requested.filter((_, i) => allowed[i]);
+
+      if (targets.length === 0) {
+        socket.emit('error', { message: 'You can only damage monsters, not other characters' });
+        return;
+      }
+    }
 
     const results: { tokenId: string; name: string; before: number; after: number; reason: string }[] = [];
     const lines: string[] = [];
@@ -459,7 +512,9 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
 
     if (targets[0]) invalidateDragCache(targets[0].sceneId);
 
-    socket.emit('damage:applied', { results });
+    // To the room, not the caller: emitted back to the sender alone, nobody
+    // else at the table ever saw the damage banner.
+    io.to(campaignRoom(ctx.campaignId)).emit('damage:applied', { results });
     await postSystemMessage(io, ctx.campaignId, user.id, lines.join('\n'));
 
     const { broadcastSceneState } = await import('./scene.js');
@@ -502,6 +557,12 @@ async function damageModifiersFor(token: Token) {
   return found[0]?.damageModifiers ?? {};
 }
 
+/**
+ * A line from the table itself.
+ *
+ * Everything this file posts is combat by definition, so it flags the row for
+ * the battle log rather than leaving it to clutter the conversation.
+ */
 async function postSystemMessage(
   io: IOServer,
   campaignId: string,
@@ -521,6 +582,7 @@ async function postSystemMessage(
     rollData: null,
     cardData: null,
     whisperToUserId: null,
+    combat: true,
     createdAt: Date.now(),
   };
 

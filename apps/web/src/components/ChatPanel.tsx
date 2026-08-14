@@ -5,19 +5,30 @@ import { useTable } from '../store/table.js';
 import { useAuth } from '../store/auth.js';
 import type { WireCard, WireChatMessage } from '@dnd/shared';
 
-export function ChatPanel() {
-  const { messages, members, connected, send, roll, cardAction, error } = useTable();
+export function ChatPanel({ isDM = false }: { isDM?: boolean }) {
+  const { messages, members, connected, send, roll, cardAction, clearChat, error } = useTable();
+  const { tokens, targetTokenId, applyDamage } = useTable();
   const { user } = useAuth();
+
+  // A damage roll can be applied to whatever is targeted, so long as it is not
+  // somebody's character - the server enforces that; this only offers it.
+  const target = tokens.find((t) => t.id === targetTokenId) ?? null;
+  const applyTo = target && !target.ownerUserId ? target.name : null;
 
   const [draft, setDraft] = useState('');
   const [whisperTo, setWhisperTo] = useState<string | null>(null);
   const [secret, setSecret] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
+  const [tab, setTab] = useState<'chat' | 'battle'>('chat');
   const bottom = useRef<HTMLDivElement>(null);
+
+  // One stored log, two views over it: a fight used to bury the conversation
+  // and the conversation used to bury the fight.
+  const shown = messages.filter((message) => (tab === 'battle' ? message.combat : !message.combat));
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+  }, [shown.length]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -49,7 +60,35 @@ export function ChatPanel() {
           className={`size-2 rounded-full ${connected ? 'bg-emerald-500' : 'bg-ink-600'}`}
           title={connected ? 'Connected' : 'Disconnected'}
         />
-        <h2 className="font-display text-sm text-ink-100">Table</h2>
+        <div role="tablist" aria-label="Log" className="flex gap-1">
+          {(['chat', 'battle'] as const).map((key) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => setTab(key)}
+              className={`rounded px-2 py-0.5 text-xs capitalize transition-colors ${
+                tab === key ? 'bg-ink-800 text-ink-100' : 'text-ink-500 hover:text-ink-300'
+              }`}
+            >
+              {key === 'battle' ? 'Battle' : 'Chat'}
+            </button>
+          ))}
+        </div>
+        {isDM && (
+          <button
+            onClick={() => {
+              // One table holds both tabs, so say so - "clear chat" would read
+              // as leaving the battle log alone.
+              if (confirm('Delete the whole log — chat and battle both? This cannot be undone.')) {
+                clearChat();
+              }
+            }}
+            className="text-xs text-ink-600 hover:text-red-400"
+          >
+            Clear
+          </button>
+        )}
         <span className="ml-auto text-xs text-ink-500">
           {members.filter((m) => m.online).length} of {members.length} here
         </span>
@@ -71,13 +110,28 @@ export function ChatPanel() {
       </ul>
 
       <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
-        {messages.length === 0 ? (
+        {shown.length === 0 ? (
           <p className="py-8 text-center text-sm text-ink-500">
-            Nothing yet. Say something, or type <code className="text-ink-400">/1d20</code> to roll.
+            {tab === 'battle' ? (
+              'No blows landed yet.'
+            ) : (
+              <>
+                Nothing yet. Say something, or type <code className="text-ink-400">/1d20</code> to roll.
+              </>
+            )}
           </p>
         ) : (
-          messages.map((message) => (
-            <Message key={message.id} message={message} selfId={user?.id ?? ''} onAction={cardAction} />
+          shown.map((message) => (
+            <Message
+              key={message.id}
+              message={message}
+              selfId={user?.id ?? ''}
+              onAction={cardAction}
+              applyTo={applyTo}
+              // Untyped: the roll card does not know which of a weapon's damage
+              // types this was, and the server treats '' as no resistance match.
+              onApply={(amount) => target && applyDamage([target.id], amount, '')}
+            />
           ))
         )}
         <div ref={bottom} />
@@ -224,6 +278,8 @@ function Message({
   message,
   selfId,
   onAction,
+  applyTo,
+  onApply,
 }: {
   message: WireChatMessage;
   selfId: string;
@@ -233,6 +289,8 @@ function Message({
     action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile',
     mode?: RollMode,
   ) => void;
+  applyTo?: string | null;
+  onApply?: (amount: number) => void;
 }) {
   const isWhisper = Boolean(message.whisperToUserId);
   const speaker = message.actorName ?? message.authorName;
@@ -257,7 +315,14 @@ function Message({
       </div>
 
       {message.kind === 'roll' && message.rollData ? (
-        <RollCard roll={message.rollData} />
+        <RollCard
+          roll={message.rollData}
+          // Only your own damage rolls, and only while something is targeted.
+          applyTo={
+            message.userId === selfId && /damage/i.test(message.rollData.label) ? applyTo : null
+          }
+          onApply={() => onApply?.(message.rollData!.total)}
+        />
       ) : message.kind === 'card' && message.cardData ? (
         <ItemCard card={message.cardData} onAction={onAction} />
       ) : (
@@ -274,7 +339,16 @@ function Message({
  * lucky, and 4 + 1 does. The library's own `output` string is kept underneath
  * because it is the only thing that explains a dropped or exploded die.
  */
-function RollCard({ roll }: { roll: NonNullable<WireChatMessage['rollData']> }) {
+function RollCard({
+  roll,
+  applyTo,
+  onApply,
+}: {
+  roll: NonNullable<WireChatMessage['rollData']>;
+  /** Name of the targeted token, when this roll can be applied to it. */
+  applyTo?: string | null;
+  onApply?: () => void;
+}) {
   return (
     <div
       className={`mt-1 rounded-lg border px-3 py-2 ${
@@ -303,6 +377,17 @@ function RollCard({ roll }: { roll: NonNullable<WireChatMessage['rollData']> }) 
         <div className="mt-1 text-xs font-semibold text-emerald-400">Critical hit</div>
       )}
       {roll.isFumble && <div className="mt-1 text-xs font-semibold text-red-400">Natural 1</div>}
+
+      {/* Offered rather than applied: damage gets rolled for all sorts of
+          reasons, including attacks that turned out to miss. */}
+      {applyTo && (
+        <button
+          onClick={onApply}
+          className="mt-2 w-full rounded border border-ember-500/50 px-2 py-1 text-[11px] text-ember-300 transition-colors hover:bg-ember-500/15"
+        >
+          Apply {roll.total} to {applyTo}
+        </button>
+      )}
     </div>
   );
 }

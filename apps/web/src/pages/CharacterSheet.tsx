@@ -8,6 +8,7 @@ import {
   OWNERSHIP,
   SPECIES,
   classInfo,
+  classSaves,
   hitDicePool,
   levelFromXP,
   type AbilityKey,
@@ -36,7 +37,9 @@ function sectionId(title: string): string {
   return `sheet-${title.toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '')}`;
 }
 
-const NAV = ['Attacks', 'Spells', 'Inventory', 'Rest', 'Features & Traits', 'Notes'];
+// Rest is not here: it moved into the hit point card, which is where you look
+// when you want it.
+const NAV = ['Attacks', 'Spells', 'Inventory', 'Features & Traits', 'Notes'];
 
 export default function CharacterSheet() {
   const { id } = useParams<{ id: string }>();
@@ -50,6 +53,8 @@ export default function CharacterSheet() {
   const [picker, setPicker] = useState<{ kind: 'spell' | 'item'; category: ItemCategory | null } | null>(
     null,
   );
+  /** Shown after a level is gained, until the hit points are taken. */
+  const [levellingUp, setLevellingUp] = useState(false);
 
   /**
    * Where "back" goes.
@@ -110,7 +115,21 @@ export default function CharacterSheet() {
         </span>
       </div>
 
-      <Identity actor={actor} editable={editable} onChange={sheet.patch} />
+      <Identity
+        actor={actor}
+        editable={editable}
+        onChange={sheet.patch}
+        onLevelUp={() => setLevellingUp(true)}
+      />
+
+      {levellingUp && editable && (
+        <LevelHitPoints
+          actorId={actor.id}
+          className={actor.className}
+          onDone={() => void sheet.load(actor.id)}
+          onClose={() => setLevellingUp(false)}
+        />
+      )}
 
       {/* Jumping beats scrolling a sheet this tall; hunting for the spell list
           was the actual complaint. */}
@@ -159,7 +178,19 @@ export default function CharacterSheet() {
         {/* Right: combat, then the item panels */}
         <div className="space-y-4">
           <DerivedStats actor={actor} />
-          <CombatStats actor={actor} editable={editable} onChange={sheet.patch} />
+          <CombatStats
+            actor={actor}
+            editable={editable}
+            onChange={sheet.patch}
+            rest={
+              <RestControl
+                actorId={actor.id}
+                hitDiceTotal={actor.hitDiceTotal}
+                hitDiceUsed={actor.hitDiceUsed}
+                onRested={() => void sheet.load(actor.id)}
+              />
+            }
+          />
 
           <Section
             title="Attacks"
@@ -228,15 +259,6 @@ export default function CharacterSheet() {
             />
           </Section>
 
-          <Section title="Rest">
-            <RestControl
-              actorId={actor.id}
-              hitDiceTotal={actor.hitDiceTotal}
-              hitDiceUsed={actor.hitDiceUsed}
-              onRested={() => void sheet.load(actor.id)}
-            />
-          </Section>
-
           <Section title="Features & Traits">
             <FeaturePanel
               features={features}
@@ -288,6 +310,8 @@ export default function CharacterSheet() {
           // The edition the character actually plays under. A 2024 campaign
           // browsed the 2014 equipment list until this was threaded through.
           ruleset={sheet.campaigns[0]?.ruleset ?? '2014'}
+          casterClass={actor.className}
+          casterLevel={actor.level}
           onAdd={async (srdId) => sheet.addFromSrd(picker.kind, srdId)}
           onCreate={async (type, name, system) => sheet.addItem(type, name, system)}
           onClose={() => setPicker(null)}
@@ -376,6 +400,86 @@ function AbilityRoller({
   );
 }
 
+/**
+ * Hit points for a new level.
+ *
+ * The handbook lets you roll the class die or take the fixed average, so both
+ * are offered rather than one being chosen for the table. The roll goes to the
+ * server like every other roll - a hit point total nobody watched being rolled
+ * is just a number somebody typed.
+ */
+function LevelHitPoints({
+  actorId,
+  className,
+  onDone,
+  onClose,
+}: {
+  actorId: string;
+  className: string;
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState<'roll' | 'average' | null>(null);
+  const [result, setResult] = useState<{ gained: number; hpMax: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const info = classInfo(className);
+
+  async function take(method: 'roll' | 'average') {
+    setBusy(method);
+    setError(null);
+    try {
+      const res = await api.post<{ gained: number; hpMax: number }>(
+        `/api/actors/${actorId}/level-hit-points`,
+        { method },
+      );
+      setResult(res);
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add hit points');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-ember-500/40 bg-ember-500/5 p-3">
+      {!info ? (
+        <p className="text-xs text-ink-400">
+          No hit die is known for &ldquo;{className}&rdquo;, so hit points stay yours to set.
+        </p>
+      ) : result ? (
+        <p className="text-xs text-emerald-300">
+          +{result.gained} hit points. Maximum is now {result.hpMax}.
+        </p>
+      ) : (
+        <>
+          <p className="mb-2 text-xs text-ink-300">
+            Hit points for the new level — roll your d{info.hitDie}, or take the average.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" loading={busy === 'roll'} onClick={() => void take('roll')}>
+              Roll 1d{info.hitDie}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={busy === 'average'}
+              onClick={() => void take('average')}
+            >
+              Take {Math.floor(info.hitDie / 2) + 1}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onClose}>
+              Later
+            </Button>
+          </div>
+        </>
+      )}
+      {error && <p className="mt-1.5 text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
 function Section({
   title,
   action,
@@ -400,10 +504,13 @@ function Identity({
   actor,
   editable,
   onChange,
+  onLevelUp,
 }: {
   actor: ReturnType<typeof useSheet.getState>['actor'] & object;
   editable: boolean;
   onChange: (fields: Record<string, unknown>) => void;
+  /** Opens the hit-point prompt; a level is worth hit points. */
+  onLevelUp: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
 
@@ -424,19 +531,29 @@ function Identity({
     'rounded border border-transparent bg-transparent px-1 py-0.5 text-ink-200 hover:border-ink-700 focus:border-arcane-400 focus:bg-ink-850 focus:outline-none disabled:hover:border-transparent';
 
   /**
-   * A recognised class carries its hit die and casting ability with it.
+   * A recognised class carries its hit die, casting ability and saving throws
+   * with it.
    *
-   * Neither field is editable anywhere else, so before this they kept the
+   * None of these are editable anywhere else, so before this they kept the
    * schema defaults forever: every character short-rested on `1d8` whatever
-   * their class, and `spellcastingAbility` stayed null, which made the spell
-   * save DC header return null and never render. Typing homebrew still works -
-   * an unrecognised class simply leaves both alone.
+   * their class, `spellcastingAbility` stayed null, which made the spell save
+   * DC header return null and never render, and the two saves the class grants
+   * had to be found in the handbook and toggled by hand. Typing homebrew still
+   * works - an unrecognised class simply leaves all of it alone.
+   *
+   * Saves are only ever added here, never cleared: a multiclass or a house rule
+   * has to be able to keep a proficiency this table does not know about.
    */
   function withClassDefaults(className: string, level: number): Record<string, unknown> {
     const info = classInfo(className);
     if (!info) return {};
+
+    const saves = { ...actor.saveProficiencies };
+    for (const ability of classSaves(className)) saves[ability] = true;
+
     return {
       hitDiceTotal: hitDicePool(className, level),
+      saveProficiencies: saves,
       ...(info.casting ? { spellcastingAbility: info.casting } : {}),
     };
   }
@@ -529,6 +646,7 @@ function Identity({
               onClick={() => {
                 const level = levelFromXP(actor.experience);
                 onChange({ level, ...withClassDefaults(actor.className, level) });
+                onLevelUp();
               }}
               className="rounded border border-ember-500/50 bg-ember-500/10 px-1.5 py-0.5 text-[10px] text-ember-300"
             >

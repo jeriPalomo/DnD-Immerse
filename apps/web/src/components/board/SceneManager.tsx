@@ -113,6 +113,20 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
     }
   }
 
+  /**
+   * Deletes a scene and everything on it.
+   *
+   * Tokens, walls, fog, drawings and pins go with it by cascade, and the
+   * server cleans up the map image unless another scene shares it - so the
+   * confirm has to say more than "are you sure".
+   */
+  async function removeScene(sceneId: string, name: string) {
+    if (!confirm(`Delete "${name}"? Its map, tokens, walls and fog go with it.`)) return;
+    await api.delete(`/api/scenes/${sceneId}`);
+    if (activeSceneId === sceneId) setActiveSceneId(null);
+    await load();
+  }
+
   async function patchScene(sceneId: string, fields: Record<string, unknown>) {
     await api.patch(`/api/scenes/${sceneId}`, fields);
     await load();
@@ -188,6 +202,13 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
                     {row.mapWidth}×{row.mapHeight}px
                   </span>
                 )}
+                <button
+                  onClick={() => void removeScene(row.id, row.name)}
+                  className="ml-auto text-[11px] text-ink-600 hover:text-red-400"
+                  title={`Delete ${row.name}`}
+                >
+                  Delete
+                </button>
               </div>
             </div>
           ))}
@@ -391,9 +412,11 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
 
       {tab === 'tokens' && (
         <div>
-          <Button size="sm" variant="secondary" onClick={() => setBrowsing(true)} className="mb-2">
-            Add from bestiary
-          </Button>
+          <div className="mb-2 flex justify-end">
+            <Button size="sm" variant="secondary" onClick={() => setBrowsing(true)}>
+              Add from bestiary
+            </Button>
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {actors.map((actor) => (
               <button

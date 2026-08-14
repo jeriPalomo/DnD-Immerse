@@ -25,12 +25,7 @@ export default function CampaignList() {
             label="Your avatar"
             onUploaded={() => void refresh()}
           />
-          <div>
-          <h1 className="font-display text-2xl font-bold text-ink-100">Your campaigns</h1>
-          <p className="mt-1 text-sm text-ink-400">
-            Run a story as Dungeon Master, or join one with an invite code.
-          </p>
-          </div>
+          <h1 className="font-display text-2xl font-bold text-ink-100">Campaigns</h1>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => setPanel(panel === 'join' ? 'none' : 'join')}>

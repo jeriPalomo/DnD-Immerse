@@ -442,11 +442,34 @@ describe('initiative and damage', () => {
     expect(sheet.actor.hpCurrent).toBeLessThan(30);
   });
 
-  it('refuses to let a player apply damage', async () => {
+  it('lets a player damage a monster', async () => {
+    // Rolling damage and then asking the DM to retype it is a step nobody
+    // enjoys, so a player may subtract from what they are fighting.
+    const applied = next<{ results: { after: number; before: number }[] }>(aliceSocket, 'damage:applied');
+    aliceSocket.emit('damage:apply', {
+      tokenIds: [orcTokenId], amount: 4, damageType: 'slashing', healing: false, halved: false,
+    });
+
+    const result = (await applied)?.results[0];
+    expect(result).toBeTruthy();
+    expect(result!.after).toBeLessThan(result!.before);
+  });
+
+  it('refuses to let a player damage a character', async () => {
+    // Anybody's character, including their own: hit points for the party are
+    // the DM's to take away.
     const failure = next<{ message: string }>(aliceSocket, 'error');
     aliceSocket.emit('damage:apply', {
-      tokenIds: [orcTokenId], amount: 999, damageType: 'slashing', healing: false, halved: false,
+      tokenIds: [pcTokenId], amount: 999, damageType: 'slashing', healing: false, halved: false,
     });
-    expect((await failure)?.message).toMatch(/only the dm/i);
+    expect((await failure)?.message).toMatch(/only damage monsters/i);
+  });
+
+  it('refuses to let a player heal', async () => {
+    const failure = next<{ message: string }>(aliceSocket, 'error');
+    aliceSocket.emit('damage:apply', {
+      tokenIds: [orcTokenId], amount: 10, damageType: '', healing: true, halved: false,
+    });
+    expect((await failure)?.message).toMatch(/only the dm can heal/i);
   });
 });

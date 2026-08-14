@@ -3,9 +3,13 @@ import {
   ABILITIES,
   ABILITY_ROLL,
   OWNERSHIP,
+  abilityModifier,
   actorInputSchema,
   applyRest,
+  classInfo,
   emptyActor,
+  hitPointsForLevel,
+  hitPointsGained,
   ownershipLevelSchema,
   parseHitDicePool,
 } from '@dnd/shared';
@@ -429,6 +433,68 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
     // Returned as well as posted, so a character with no campaign yet still
     // sees its numbers.
     return { rolls: results.map((r) => ({ ability: r.ability, total: r.result.total, dice: r.result.rolls })) };
+  });
+
+  /**
+   * Gains a level's worth of hit points.
+   *
+   * The handbook offers two ways and this offers both: roll the class hit die,
+   * or take the fixed average. Either is added to the Constitution modifier,
+   * and a level never grants less than one hit point however bad the
+   * constitution. Rolled on the server like every other roll, and posted to the
+   * table so the number is not simply asserted.
+   *
+   * `hpMax` was previously only ever typed in by hand, so levelling up healed
+   * nobody and the sheet quietly disagreed with the hit dice pool beside it.
+   */
+  app.post('/api/actors/:id/level-hit-points', async (request) => {
+    const user = assertUser(request);
+    const { id } = request.params as { id: string };
+    const { actor } = await requireActorWrite(id, user.id);
+
+    const input = z.object({ method: z.enum(['roll', 'average']) }).parse(request.body);
+
+    const info = classInfo(actor.className);
+    if (!info) throw new HttpError(400, `No hit die known for "${actor.className}"`);
+
+    const { roll, average } = hitPointsForLevel(info.hitDie);
+    const conMod = abilityModifier(actor.con);
+
+    let dieResult = average;
+    let rolled = null;
+    if (input.method === 'roll') {
+      rolled = rollExpression(roll, `${actor.name} — hit points`);
+      dieResult = rolled.total;
+    }
+
+    const gained = hitPointsGained(dieResult, conMod);
+    const hpMax = actor.hpMax + gained;
+
+    await db
+      .update(actors)
+      .set({ hpMax, hpCurrent: actor.hpCurrent + gained, updatedAt: Date.now() })
+      .where(eq(actors.id, id));
+
+    await syncLinkedTokens(app, id);
+
+    if (app.io && rolled) {
+      const assigned = await db
+        .select({ campaignId: actorCampaigns.campaignId })
+        .from(actorCampaigns)
+        .where(eq(actorCampaigns.actorId, id));
+
+      const { persistAndDeliver } = await import('../realtime/chat.js');
+      for (const row of assigned) {
+        await persistAndDeliver(
+          app.io,
+          row.campaignId,
+          { userId: user.id, actorId: actor.id, kind: 'roll', body: rolled.label, rollData: rolled },
+          { authorName: user.displayName, actorName: actor.name },
+        );
+      }
+    }
+
+    return { gained, hpMax, dieResult, conMod, method: input.method };
   });
 
   /* ----------------------------------------------------------- NPC creation */

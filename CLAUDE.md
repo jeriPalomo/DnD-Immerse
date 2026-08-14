@@ -117,6 +117,36 @@ conditions decorative. Before adding a feature, check that the last one is
 actually reachable: `grep` the export and see whether anything outside its own
 module and tests uses it.
 
+**Class and species facts live in `rules5e.ts`, never in the UI.** `CLASSES`
+carries hit die, casting ability, the two saving throws and the caster
+progression; `SPECIES_BONUSES` carries ability increases. Every one is unit
+tested against the handbook, because a wrong pair here is invisible — it just
+makes every save that character rolls quietly wrong for the rest of the
+campaign. Subraces and the Half-Elf's free +1s are deliberately absent rather
+than guessed.
+
+**Species bonuses are shown, never applied.** The handbook expects the score
+written on the sheet to already include them, so adding them again would
+double-count. The green chip is a reminder of what the species grants.
+
+**One log, two views.** Chat and the battle log are the same `chat_messages`
+rows filtered on a `combat` flag set at write time by the handlers that produce
+combat events — never derived from the message text, which would break the first
+time a label was reworded. Clearing takes both, and the confirm says so.
+
+**Konva bubbles drag events.** A token's `dragend` reaches the Stage, so the
+Stage's own drag handler must check `e.target === e.target.getStage()` the way
+its click handler does — unguarded, dropping a token wrote the token's pixel
+position into the map's pan origin and the scene jumped. A token that is not
+draggable also has to stop its mousedown, or the Stage starts panning under a
+player trying to move someone else's token.
+
+**A player may damage monsters, never characters.** `damage:apply` is open to
+members, but `isFairGame` refuses any token that is owned or linked to a
+`character` actor, and healing stays the DM's. Rolling damage and then asking
+the DM to retype it is the step this removes; deciding whose hit points move is
+not.
+
 **Every compendium shelf pages the same way.** `limit`, `offset` and a `more`
 flag, with the client sending an explicit `limit` and appending pages. Monsters
 were the shelf this was never applied to: the browser sent no limit, took the

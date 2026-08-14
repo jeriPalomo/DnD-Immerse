@@ -102,6 +102,8 @@ export interface WireChatMessage {
   rollData: RollResult | null;
   cardData: WireCard | null;
   whisperToUserId: string | null;
+  /** Belongs to the battle log rather than the conversation. */
+  combat: boolean;
   createdAt: number;
 }
 
@@ -372,6 +374,8 @@ export interface ServerToClientEvents {
 
   'chat:message': (payload: { message: WireChatMessage }) => void;
   'chat:history': (payload: { messages: WireChatMessage[] }) => void;
+  /** The DM cleared the log; everyone drops what they are holding. */
+  'chat:cleared': (payload: Record<string, never>) => void;
 
   'initiative:state': (payload: { encounter: WireEncounter | null }) => void;
   /** Result of applying damage, so chat can explain resistances. */
@@ -424,6 +428,8 @@ export interface ClientToServerEvents {
   'chat:groupRoll': (payload: GroupRollPayload) => void;
   'chat:card': (payload: z.infer<typeof cardRequestSchema>) => void;
   'chat:cardAction': (payload: z.infer<typeof cardActionSchema>) => void;
+  /** DM only. Deletes the campaign's log outright - chat and battle alike. */
+  'chat:clear': (payload: Record<string, never>) => void;
 
   'initiative:update': (payload: InitiativeUpdatePayload) => void;
   'encounter:start': (payload: { sceneId: string | null }) => void;

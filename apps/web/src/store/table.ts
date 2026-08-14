@@ -124,6 +124,8 @@ interface TableState {
     action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile',
     mode?: RollMode,
   ) => void;
+  /** DM only, enforced on the server. Takes the battle log with it. */
+  clearChat: () => void;
 }
 
 const MAX_MESSAGES = 300;
@@ -243,6 +245,7 @@ export const useTable = create<TableState>((set, get) => ({
     socket.on('initiative:state', ({ encounter }) => set({ encounter }));
     socket.on('template:state', ({ templates }) => set({ templates }));
     socket.on('journal:changed', () => set({ journalVersion: get().journalVersion + 1 }));
+    socket.on('chat:cleared', () => set({ messages: [] }));
     socket.on('handout:reveal', (reveal) => {
       set({ reveal });
       // Long enough to take in, short enough not to block the table.
@@ -526,6 +529,10 @@ export const useTable = create<TableState>((set, get) => ({
 
   applyDamage(tokenIds, amount, damageType, healing = false, halved = false) {
     get().socket?.emit('damage:apply', { tokenIds, amount, damageType, healing, halved });
+  },
+
+  clearChat() {
+    get().socket?.emit('chat:clear', {});
   },
 
   cardAction(itemId, actorId, action, mode = 'normal') {

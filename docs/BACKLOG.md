@@ -20,6 +20,46 @@ the desktop; run `npm run db:migrate` after pulling on the laptop.
 
 ---
 
+## Third pass — 2026-08-14
+
+Twenty items. The through-line was that the 5e layer knew almost nothing:
+`CLASSES` held a hit die and a casting ability and that was all.
+
+**Rules layer.** `rules5e.ts` gained saving throws per class, caster progression
+(`full` / `half` / `pact`) driving `maxSpellLevel`, `SPECIES_BONUSES`, and hit
+point helpers — all unit tested against the handbook, 32 tests in that file now.
+Picking a class fills its two saving throws; the Abilities block shows species
+increases as green chips and marks class-granted saves. The spell picker opens
+on the character's own class and lists every spell on it, refusing Add above
+their slot level with the reason on the row. Level up offers rolling the class
+die or taking the average, server-rolled and posted to the table.
+
+Found while looking: `chat.ts` rolled saves from item cards with `proficient`
+hardcoded `false`, so a save rolled off a card was short by the whole
+proficiency bonus.
+
+**The board.** Dragging a token moved the map — Konva bubbles `dragend` to the
+Stage, whose handler wrote the token's pixel position into the pan origin.
+Guarded, and the token's own handlers now stop the bubble; a non-draggable token
+also stops its mousedown, which was starting a real pan. Pings pulse instead of
+sitting there. Scenes can be deleted (the route existed and had never had a
+caller, and did not broadcast). The shortcut hint collapses to a corner toggle,
+remembered via a new `lib/prefs.ts` — the first persisted preference in the app.
+
+**Chat and combat.** A `combat` flag on `chat_messages` splits one log into Chat
+and Battle tabs. Turn changes are logged for the first time. The DM can clear
+the log. A player can apply their own damage roll to a targeted monster —
+`isFairGame` refuses characters and healing — and `damage:applied` now reaches
+the room rather than only the person who pressed the button.
+
+**Elsewhere.** Profile settings behind your name in the header (`PATCH
+/api/auth/me` had existed with no caller since accounts were built), with a new
+password-change route. Campaign header reworked, Last session shows the map
+large with the scene named beneath it, Rest moved into the hit point card, token
+art and an eye toggle in the HUD, and the requested text removals.
+
+---
+
 ## Second pass — 2026-08-14
 
 ### Campaign properties, and settings behind a gear — DONE

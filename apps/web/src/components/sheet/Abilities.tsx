@@ -4,11 +4,13 @@ import {
   SKILLS,
   SKILL_KEYS,
   abilityModifier,
+  classSaves,
   formatModifier,
   passiveSkill,
   proficiencyBonus,
   savingThrowBonus,
   skillBonus,
+  speciesBonuses,
   type AbilityKey,
   type AbilityScores,
   type ProficiencyLevel,
@@ -34,16 +36,29 @@ export function AbilityScoresBlock({
   onChange: (key: AbilityKey, value: number) => void;
 }) {
   const scores = scoresOf(actor);
+  // What the species grants, shown as a reminder. Never added to the score -
+  // the handbook expects the number on the sheet to include it already, so
+  // applying it here would count it twice.
+  const bonuses = speciesBonuses(actor.race);
 
   return (
     <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 lg:grid-cols-2">
       {ABILITIES.map((key) => {
         const modifier = abilityModifier(scores[key]);
+        const granted = bonuses[key];
         return (
           <div
             key={key}
-            className="rounded-lg border border-ink-700 bg-ink-850 px-2 py-3 text-center"
+            className="relative rounded-lg border border-ink-700 bg-ink-850 px-2 py-3 text-center"
           >
+            {granted !== undefined && (
+              <span
+                title={`${actor.race} grants +${granted} ${ABILITY_NAMES[key]} — the handbook expects your score to already include it`}
+                className="absolute top-1 right-1 rounded bg-emerald-500/15 px-1 text-[10px] font-semibold text-emerald-400"
+              >
+                +{granted}
+              </span>
+            )}
             <div className="text-[11px] font-semibold tracking-wider text-ink-400 uppercase">
               {ABILITY_NAMES[key].slice(0, 3)}
             </div>
@@ -80,6 +95,9 @@ export function SavingThrows({
   onToggle: (ability: AbilityKey, proficient: boolean) => void;
 }) {
   const scores = scoresOf(actor);
+  // The two the class grants, so a proficiency that does not belong is visible
+  // rather than having to be looked up in the handbook.
+  const fromClass = new Set(classSaves(actor.className));
 
   return (
     <div className="rounded-lg border border-ink-700 bg-ink-850 p-3">
@@ -90,6 +108,7 @@ export function SavingThrows({
         {ABILITIES.map((key) => {
           const proficient = Boolean(actor.saveProficiencies[key]);
           const bonus = savingThrowBonus(scores, actor.level, key, proficient);
+          const granted = fromClass.has(key);
           return (
             <li key={key} className="flex items-center gap-2 text-sm">
               <button
@@ -101,7 +120,17 @@ export function SavingThrows({
                   proficient ? 'border-ember-400 bg-ember-400' : 'border-ink-500'
                 } ${editable ? 'cursor-pointer hover:border-ember-300' : 'cursor-default'}`}
               />
-              <span className="flex-1 text-ink-300">{ABILITY_NAMES[key]}</span>
+              <span className="flex-1 text-ink-300">
+                {ABILITY_NAMES[key]}
+                {granted && (
+                  <span
+                    title={`${actor.className} is proficient in this save`}
+                    className="ml-1.5 text-[10px] text-emerald-400"
+                  >
+                    class
+                  </span>
+                )}
+              </span>
               <span className="font-mono text-ink-100">{formatModifier(bonus)}</span>
             </li>
           );

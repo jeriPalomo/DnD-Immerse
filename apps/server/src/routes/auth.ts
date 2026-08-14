@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { loginSchema, registerSchema } from '@dnd/shared';
+import { loginSchema, passwordChangeSchema, registerSchema } from '@dnd/shared';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
 import { users } from '../db/schema.js';
@@ -93,6 +93,30 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const rows = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
     return { user: publicUser(rows[0]) };
+  });
+
+  /**
+   * Changes the password.
+   *
+   * The current one has to be supplied even though the session already proves
+   * who you are: a session left open on a shared machine should not be enough
+   * to take the account away from its owner. Other sessions are deliberately
+   * left alone - this is a password change, not a "sign out everywhere".
+   */
+  app.post('/api/auth/me/password', { preHandler: requireAuth }, async (request) => {
+    const user = assertUser(request);
+    const input = passwordChangeSchema.parse(request.body);
+
+    if (!(await verifyPassword(user.passwordHash, input.currentPassword))) {
+      throw new HttpError(400, 'That is not your current password');
+    }
+
+    await db
+      .update(users)
+      .set({ passwordHash: await hashPassword(input.newPassword) })
+      .where(eq(users.id, user.id));
+
+    return { ok: true };
   });
 
   app.post('/api/auth/me/avatar', { preHandler: requireAuth }, async (request) => {

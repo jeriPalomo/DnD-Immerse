@@ -3,13 +3,18 @@ import {
   CLASS_NAMES,
   abilityModifier,
   classInfo,
+  classSaves,
   formatModifier,
   hitDicePool,
+  hitPointsForLevel,
+  hitPointsGained,
   levelFromXP,
+  maxSpellLevel,
   passiveSkill,
   proficiencyBonus,
   savingThrowBonus,
   skillBonus,
+  speciesBonuses,
   spellAttackBonus,
   spellSaveDC,
   type AbilityScores,
@@ -117,10 +122,10 @@ describe('levelFromXP', () => {
 describe('class reference data', () => {
   it('knows the hit die and casting ability of every SRD class', () => {
     expect(CLASS_NAMES).toHaveLength(12);
-    expect(classInfo('Barbarian')).toEqual({ hitDie: 12, casting: null });
-    expect(classInfo('Wizard')).toEqual({ hitDie: 6, casting: 'int' });
-    expect(classInfo('Paladin')).toEqual({ hitDie: 10, casting: 'cha' });
-    expect(classInfo('Ranger')).toEqual({ hitDie: 10, casting: 'wis' });
+    expect(classInfo('Barbarian')).toMatchObject({ hitDie: 12, casting: null });
+    expect(classInfo('Wizard')).toMatchObject({ hitDie: 6, casting: 'int' });
+    expect(classInfo('Paladin')).toMatchObject({ hitDie: 10, casting: 'cha' });
+    expect(classInfo('Ranger')).toMatchObject({ hitDie: 10, casting: 'wis' });
   });
 
   it('matches loosely, because the field people type into is free text', () => {
@@ -150,5 +155,102 @@ describe('class reference data', () => {
   it('clamps a level outside 1-20 rather than emitting nonsense', () => {
     expect(hitDicePool('Wizard', 0)).toBe('1d6');
     expect(hitDicePool('Wizard', 99)).toBe('20d6');
+  });
+});
+
+describe('saving throw proficiencies by class', () => {
+  it('matches the PHB for all twelve', () => {
+    // Written out in full rather than spot-checked: a wrong pair here silently
+    // changes every save a character rolls for the rest of the campaign.
+    expect(classSaves('Barbarian')).toEqual(['str', 'con']);
+    expect(classSaves('Bard')).toEqual(['dex', 'cha']);
+    expect(classSaves('Cleric')).toEqual(['wis', 'cha']);
+    expect(classSaves('Druid')).toEqual(['int', 'wis']);
+    expect(classSaves('Fighter')).toEqual(['str', 'con']);
+    expect(classSaves('Monk')).toEqual(['str', 'dex']);
+    expect(classSaves('Paladin')).toEqual(['wis', 'cha']);
+    expect(classSaves('Ranger')).toEqual(['str', 'dex']);
+    expect(classSaves('Rogue')).toEqual(['dex', 'int']);
+    expect(classSaves('Sorcerer')).toEqual(['con', 'cha']);
+    expect(classSaves('Warlock')).toEqual(['wis', 'cha']);
+    expect(classSaves('Wizard')).toEqual(['int', 'wis']);
+  });
+
+  it('grants exactly two to every class', () => {
+    for (const name of CLASS_NAMES) expect(classSaves(name)).toHaveLength(2);
+  });
+
+  it('grants none for homebrew, rather than guessing a pair', () => {
+    expect(classSaves('Blood Hunter')).toEqual([]);
+  });
+});
+
+describe('maxSpellLevel', () => {
+  it('advances a full caster one spell level every two character levels', () => {
+    expect(maxSpellLevel('Wizard', 1)).toBe(1);
+    expect(maxSpellLevel('Wizard', 2)).toBe(1);
+    expect(maxSpellLevel('Wizard', 3)).toBe(2);
+    expect(maxSpellLevel('Cleric', 9)).toBe(5);
+    expect(maxSpellLevel('Bard', 17)).toBe(9);
+    expect(maxSpellLevel('Sorcerer', 20)).toBe(9);
+  });
+
+  it('gives a half caster nothing until level 2, then caps at 5th', () => {
+    expect(maxSpellLevel('Paladin', 1)).toBe(0);
+    expect(maxSpellLevel('Paladin', 2)).toBe(1);
+    expect(maxSpellLevel('Ranger', 4)).toBe(1);
+    expect(maxSpellLevel('Ranger', 5)).toBe(2);
+    expect(maxSpellLevel('Paladin', 9)).toBe(3);
+    expect(maxSpellLevel('Paladin', 13)).toBe(4);
+    expect(maxSpellLevel('Ranger', 17)).toBe(5);
+    expect(maxSpellLevel('Ranger', 20)).toBe(5);
+  });
+
+  it('caps pact magic at 5th', () => {
+    expect(maxSpellLevel('Warlock', 1)).toBe(1);
+    expect(maxSpellLevel('Warlock', 5)).toBe(3);
+    expect(maxSpellLevel('Warlock', 9)).toBe(5);
+    expect(maxSpellLevel('Warlock', 20)).toBe(5);
+  });
+
+  it('reports -1 for a class that does not cast at all', () => {
+    // Distinct from 0, which means cantrips only - the picker has to tell a
+    // fighter "your class does not cast" rather than "cantrips only".
+    expect(maxSpellLevel('Fighter', 20)).toBe(-1);
+    expect(maxSpellLevel('Barbarian', 1)).toBe(-1);
+    expect(maxSpellLevel('Blood Hunter', 5)).toBe(-1);
+  });
+});
+
+describe('species ability increases', () => {
+  it('matches the PHB for the base races', () => {
+    expect(speciesBonuses('Dwarf')).toEqual({ con: 2 });
+    expect(speciesBonuses('Half-Orc')).toEqual({ str: 2, con: 1 });
+    expect(speciesBonuses('Tiefling')).toEqual({ int: 1, cha: 2 });
+    expect(speciesBonuses('Human')).toEqual({ str: 1, dex: 1, con: 1, int: 1, wis: 1, cha: 1 });
+  });
+
+  it('matches loosely, like the class lookup', () => {
+    expect(speciesBonuses('  elf ')).toEqual({ dex: 2 });
+  });
+
+  it('gives nothing for a species it does not know', () => {
+    expect(speciesBonuses('Aarakocra')).toEqual({});
+    expect(speciesBonuses('')).toEqual({});
+  });
+});
+
+describe('hit points on level up', () => {
+  it('offers the class die and the handbook average', () => {
+    expect(hitPointsForLevel(6)).toEqual({ roll: '1d6', average: 4 });
+    expect(hitPointsForLevel(8)).toEqual({ roll: '1d8', average: 5 });
+    expect(hitPointsForLevel(10)).toEqual({ roll: '1d10', average: 6 });
+    expect(hitPointsForLevel(12)).toEqual({ roll: '1d12', average: 7 });
+  });
+
+  it('never grants less than one hit point, however bad the constitution', () => {
+    expect(hitPointsGained(1, -3)).toBe(1);
+    expect(hitPointsGained(2, -5)).toBe(1);
+    expect(hitPointsGained(5, 3)).toBe(8);
   });
 });

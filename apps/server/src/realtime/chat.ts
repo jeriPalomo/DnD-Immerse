@@ -95,6 +95,8 @@ export async function persistAndDeliver(
     rollData?: RollResult | null;
     cardData?: WireCard | null;
     whisperToUserId?: string | null;
+    /** Routes this to the battle log instead of the conversation. */
+    combat?: boolean;
   },
   context: { authorName: string; actorName: string | null },
 ): Promise<WireChatMessage> {
@@ -109,6 +111,7 @@ export async function persistAndDeliver(
     rollData: row.rollData ?? null,
     cardData: row.cardData ?? null,
     whisperToUserId: row.whisperToUserId ?? null,
+    combat: row.combat ?? false,
     createdAt: Date.now(),
   };
 
@@ -122,6 +125,7 @@ export async function persistAndDeliver(
     rollData: row.rollData ?? null,
     cardData: (row.cardData ?? null) as Record<string, unknown> | null,
     whisperToUserId: row.whisperToUserId ?? null,
+    combat: message.combat,
     createdAt: message.createdAt,
   });
 
@@ -424,7 +428,11 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
 
       case 'save': {
         const ability = (s.save?.ability ?? 'dex') as AbilityKey;
-        expression = savingThrowExpression(scores, actor.level, ability, false, input.mode);
+        // Proficiency was hardcoded false here, so a save rolled off a card
+        // ignored the character's proficiency and came out short by the whole
+        // proficiency bonus - silently, and only on this path.
+        const proficient = Boolean(actor.saveProficiencies?.[ability]);
+        expression = savingThrowExpression(scores, actor.level, ability, proficient, input.mode);
         label = `${item.name} — ${ability.toUpperCase()} save`;
         break;
       }
@@ -446,9 +454,39 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
     await persistAndDeliver(
       io,
       campaignId,
-      { userId: user.id, actorId: actor.id, kind: 'roll', body: label, rollData: result },
+      {
+        userId: user.id,
+        actorId: actor.id,
+        kind: 'roll',
+        body: label,
+        rollData: result,
+        // Swinging something is combat; rolling a save off a card is not
+        // necessarily, so it stays in the conversation.
+        combat: input.action !== 'save',
+      },
       { authorName: user.displayName, actorName: actor.name },
     );
+  });
+
+  /**
+   * Wipes the campaign's log.
+   *
+   * One table holds both tabs, so this takes the battle log with it - the
+   * client's confirm says as much. DM-only, re-checked here rather than trusted
+   * from the room the socket happens to be in.
+   */
+  socket.on('chat:clear', async () => {
+    const campaignId = activeCampaign();
+    if (!campaignId) return;
+
+    const membership = await getMembership(campaignId, user.id);
+    if (!membership?.isDM) {
+      socket.emit('error', { message: 'Only the DM can clear the log' });
+      return;
+    }
+
+    await db.delete(chatMessages).where(eq(chatMessages.campaignId, campaignId));
+    io.to(campaignRoom(campaignId)).emit('chat:cleared', {});
   });
 
   /** Recent history, filtered to what this user is allowed to have seen. */
@@ -493,6 +531,7 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         rollData: message.rollData ?? null,
         cardData: (message.cardData ?? null) as WireCard | null,
         whisperToUserId: message.whisperToUserId,
+        combat: message.combat,
         createdAt: message.createdAt,
       }))
       .reverse();

@@ -15,10 +15,13 @@ export function CombatStats({
   actor,
   editable,
   onChange,
+  rest,
 }: {
   actor: Actor;
   editable: boolean;
   onChange: (fields: Partial<Actor>) => void;
+  /** The rest controls, rendered inside the hit point card. */
+  rest?: React.ReactNode;
 }) {
   const hpPercent = actor.hpMax > 0 ? Math.max(0, Math.min(100, (actor.hpCurrent / actor.hpMax) * 100)) : 0;
   const bloodied = actor.hpCurrent <= actor.hpMax / 2;
@@ -101,6 +104,10 @@ export function CombatStats({
             style={{ width: `${hpPercent}%` }}
           />
         </div>
+
+        {/* Resting is what you do about hit points, so it lives with them
+            rather than in a section of its own further down the sheet. */}
+        {rest && <div className="mt-3 border-t border-ink-700 pt-3">{rest}</div>}
       </div>
 
       {down && <DeathSaves actor={actor} editable={editable} onChange={onChange} />}
@@ -164,9 +171,7 @@ export function AttackList({ actor, weapons }: { actor: Actor; weapons: Item[] }
   const scores = { str: actor.str, dex: actor.dex, con: actor.con, int: actor.int, wis: actor.wis, cha: actor.cha };
   const prof = proficiencyBonus(actor.level);
 
-  if (weapons.length === 0) {
-    return <p className="px-1 py-3 text-sm text-ink-500">No weapons yet. Add one from the compendium.</p>;
-  }
+  if (weapons.length === 0) return null;
 
   return (
     <table className="w-full text-sm">

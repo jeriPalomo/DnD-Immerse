@@ -286,7 +286,7 @@ export default function CampaignTable() {
         {/* Chat */}
         <div className={`h-[calc(100vh-8rem)] min-h-[420px] ${focusBoard ? 'hidden' : ''}`}>
           <ErrorBoundary label="Chat">
-            <ChatPanel />
+            <ChatPanel isDM={Boolean(isDM)} />
           </ErrorBoundary>
         </div>
       </div>

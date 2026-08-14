@@ -84,14 +84,11 @@ export default function CampaignDetail() {
         &larr; All campaigns
       </Link>
 
-      <header className="mt-4 mb-8 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-ink-100">{campaign.name}</h1>
-          {campaign.description && (
-            <p className="mt-2 max-w-prose text-sm text-ink-400">{campaign.description}</p>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
+      {/* Code and gear pinned to the top corner; entering the table is the
+          bigger decision and gets its own line under them. */}
+      <div className="mt-4 flex items-start justify-between gap-4">
+        <h1 className="font-display text-2xl font-bold text-ink-100">{campaign.name}</h1>
+        <div className="flex shrink-0 items-center gap-2">
           {/* The invite code is a credential; the server sends it to the DM
               alone, so this is never a player's to read. */}
           {campaign.inviteCode && <InviteCode code={campaign.inviteCode} />}
@@ -107,10 +104,18 @@ export default function CampaignDetail() {
           ) : (
             <Badge tone="player">Player</Badge>
           )}
-          <Link to={`/campaigns/${campaign.id}/table`}>
-            <Button>Enter the table</Button>
-          </Link>
         </div>
+      </div>
+
+      <header className="mt-2 mb-8 flex flex-wrap items-end justify-between gap-4">
+        {campaign.description ? (
+          <p className="max-w-prose text-sm text-ink-400">{campaign.description}</p>
+        ) : (
+          <span />
+        )}
+        <Link to={`/campaigns/${campaign.id}/table`} className="shrink-0">
+          <Button>Enter the table</Button>
+        </Link>
       </header>
 
       {campaign.bannerUrl && (
@@ -242,19 +247,26 @@ function LastSession({
         {isDM && !saved && <span className="text-xs text-ink-600">Saving…</span>}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-3">
+      {/* The map, at a size you can actually recognise a room from, with the
+          scene named underneath it. */}
+      <div className="mt-3">
         {session?.scene ? (
           <>
-            {session.scene.mapImageUrl && (
+            {session.scene.mapImageUrl ? (
               <img
                 src={session.scene.mapImageUrl}
                 alt=""
-                className="h-14 w-24 shrink-0 rounded border border-ink-700 object-cover"
+                className="h-48 w-full rounded-lg border border-ink-700 object-cover"
               />
+            ) : (
+              // A scene with no map still has a name worth reading.
+              <div className="flex h-24 w-full items-center justify-center rounded-lg border border-dashed border-ink-700 text-xs text-ink-600">
+                No map uploaded
+              </div>
             )}
-            <div className="min-w-0">
-              <div className="text-sm text-ink-100">{session.scene.name}</div>
-              <div className="text-xs text-ink-500">
+            <div className="mt-3 text-center">
+              <div className="font-display text-xl text-ink-100">{session.scene.name}</div>
+              <div className="mt-0.5 text-xs text-ink-500">
                 {session.combat
                   ? `Combat still open — round ${session.combat.round}`
                   : 'No combat in progress'}

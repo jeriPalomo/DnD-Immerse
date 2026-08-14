@@ -65,19 +65,72 @@ export function TokenHUD({
 
   return (
     <div className="rounded-xl border border-arcane-500/40 bg-ink-900 p-4">
-      <div className="mb-2 flex items-start justify-between gap-2">
-        <div className="min-w-0">
+      <div className="mb-2 flex items-start gap-2">
+        {/* The art, so you can see what you have selected without looking back
+            at the board. Doubles as the upload control for whoever owns it. */}
+        <label
+          className={`relative size-11 shrink-0 overflow-hidden rounded-lg border border-ink-700 bg-ink-800 ${
+            canEdit ? 'group cursor-pointer' : ''
+          }`}
+          title={canEdit ? 'Change token art' : undefined}
+        >
+          {token.imageUrl ? (
+            <img src={token.imageUrl} alt="" className="size-full object-cover" />
+          ) : (
+            <div className="flex size-full items-center justify-center text-xs text-ink-500">
+              {(token.name || '?').slice(0, 2).toUpperCase()}
+            </div>
+          )}
+          {canEdit && (
+            <>
+              <input
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                aria-label="Token art"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void uploadArt(file);
+                }}
+              />
+              <span className="absolute inset-0 flex items-center justify-center bg-black/60 text-[9px] text-ink-100 opacity-0 transition-opacity group-hover:opacity-100">
+                {uploadingArt ? '…' : 'Change'}
+              </span>
+            </>
+          )}
+        </label>
+
+        <div className="min-w-0 flex-1">
           <h3 className="truncate font-display text-ink-100">{token.name || 'Token'}</h3>
           <p className="text-[11px] text-ink-500">
             {token.w}×{token.h} squares · {token.disposition}
             {token.actorLinked ? ' · linked' : token.actorId ? ' · unlinked copy' : ''}
           </p>
         </div>
-        {token.ac !== null && (
-          <span className="shrink-0 rounded bg-ink-800 px-2 py-0.5 text-xs text-ink-300">
-            AC {token.ac}
-          </span>
-        )}
+
+        <div className="flex shrink-0 items-center gap-1.5">
+          {token.ac !== null && (
+            <span className="rounded bg-ink-800 px-2 py-0.5 text-xs text-ink-300">AC {token.ac}</span>
+          )}
+          {/* Visibility is the thing a DM reaches for mid-sentence, so it sits
+              here rather than at the bottom of the panel. */}
+          {isDM && (
+            <button
+              onClick={() => onUpdate({ hidden: !token.hidden })}
+              title={
+                token.hidden
+                  ? 'Hidden — players are not sent this token at all'
+                  : 'Visible to players'
+              }
+              aria-label={token.hidden ? 'Show to players' : 'Hide from players'}
+              className={`rounded px-1.5 py-0.5 text-sm transition-colors ${
+                token.hidden ? 'text-ember-400 hover:text-ember-300' : 'text-ink-500 hover:text-ink-200'
+              }`}
+            >
+              {token.hidden ? '🙈' : '👁'}
+            </button>
+          )}
+        </div>
       </div>
 
       {token.maxHp !== null && (
@@ -163,22 +216,8 @@ export function TokenHUD({
 
       {canEdit && (
         <div className="mt-3 space-y-2">
-          {/* Art for this token alone. Without it every goblin stamped from
-              the same NPC looks identical. */}
-          <label className="block cursor-pointer text-center text-[10px] text-arcane-400 hover:underline">
-            {uploadingArt ? 'Uploading…' : token.imageUrl ? 'Replace token art' : 'Set token art'}
-            <input
-              type="file"
-              accept="image/*"
-              className="sr-only"
-              aria-label="Token art"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void uploadArt(file);
-              }}
-            />
-          </label>
-
+          {/* Art moved to the thumbnail in the header - it is the same upload,
+              somewhere you can see what you are replacing. */}
           <button
             onClick={() => setShowConditions(!showConditions)}
             className="w-full rounded border border-ink-700 px-2 py-1 text-xs text-ink-300 hover:border-ink-600"
@@ -262,18 +301,8 @@ export function TokenHUD({
                 </div>
               )}
 
+            {/* Visibility moved to the eye in the header. */}
             <div className="flex gap-1.5">
-              <button
-                onClick={() => onUpdate({ hidden: !token.hidden })}
-                className={`flex-1 rounded border px-2 py-1 text-xs transition-colors ${
-                  token.hidden
-                    ? 'border-arcane-400 bg-arcane-500/20 text-arcane-400'
-                    : 'border-ink-700 text-ink-400 hover:text-ink-200'
-                }`}
-                title="Hidden tokens are not sent to players at all"
-              >
-                {token.hidden ? 'Hidden' : 'Visible'}
-              </button>
               <button
                 onClick={() => onUpdate({ locked: !token.locked })}
                 className={`flex-1 rounded border px-2 py-1 text-xs transition-colors ${

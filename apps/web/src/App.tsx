@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Button, Spinner } from './components/ui.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
+import { ProfileSettings } from './components/ProfileSettings.js';
 import AuthPage from './pages/AuthPage.js';
 import CampaignDetail from './pages/CampaignDetail.js';
 import CampaignList from './pages/CampaignList.js';
@@ -112,6 +113,7 @@ function NavLink({ to, children }: { to: string; children: ReactNode }) {
 
 function Shell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
+  const [profileOpen, setProfileOpen] = useState(false);
 
   return (
     <div className="bg-vellum min-h-full">
@@ -127,7 +129,22 @@ function Shell({ children }: { children: ReactNode }) {
             </nav>
           </div>
           <div className="flex items-center gap-3">
-            <span className="hidden text-sm text-ink-400 sm:inline">{user?.displayName}</span>
+            {/* Your name is where people look for their own settings. */}
+            <button
+              onClick={() => setProfileOpen(true)}
+              title="Your profile"
+              aria-label="Your profile"
+              className="flex items-center gap-2 rounded-lg px-2 py-1 text-sm text-ink-400 transition-colors hover:bg-ink-850 hover:text-ink-100"
+            >
+              {user?.avatarUrl ? (
+                <img src={user.avatarUrl} alt="" className="size-6 rounded-full object-cover" />
+              ) : (
+                <span className="flex size-6 items-center justify-center rounded-full bg-ink-700 text-[10px] font-semibold text-ink-200">
+                  {(user?.displayName ?? '?').slice(0, 2).toUpperCase()}
+                </span>
+              )}
+              <span className="hidden sm:inline">{user?.displayName}</span>
+            </button>
             <Button variant="ghost" size="sm" onClick={() => void logout()}>
               Sign out
             </Button>
@@ -139,6 +156,8 @@ function Shell({ children }: { children: ReactNode }) {
           {children}
         </ErrorBoundary>
       </main>
+
+      {profileOpen && <ProfileSettings onClose={() => setProfileOpen(false)} />}
     </div>
   );
 }

@@ -20,7 +20,7 @@ export function SpellPanel({
   const [expanded, setExpanded] = useState<string | null>(null);
 
   if (spells.length === 0) {
-    return <p className="px-1 py-3 text-sm text-ink-500">No spells known.</p>;
+    return null;
   }
 
   const byLevel = new Map<number, Item[]>();

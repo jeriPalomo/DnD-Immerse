@@ -455,6 +455,14 @@ export const chatMessages = sqliteTable(
     /** Item card payload: buttons for attack, damage, save. */
     cardData: text('card_data', { mode: 'json' }).$type<Record<string, unknown> | null>(),
     whisperToUserId: text('whisper_to_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * Whether this belongs in the battle log rather than the conversation.
+     *
+     * Flagged at write time by the handlers that produce combat events, not
+     * derived from the text - a log that reads its own prose to decide what it
+     * is breaks the first time a label is reworded.
+     */
+    combat: integer('combat', { mode: 'boolean' }).notNull().default(false),
     createdAt: epoch('created_at'),
   },
   (t) => [index('chat_campaign_created_idx').on(t.campaignId, t.createdAt)],

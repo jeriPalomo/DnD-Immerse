@@ -13,8 +13,15 @@ export const loginSchema = z.object({
   password: z.string().max(200),
 });
 
+/** The current password is required, so a borrowed session cannot lock you out. */
+export const passwordChangeSchema = z.object({
+  currentPassword: z.string().max(200),
+  newPassword: z.string().min(8).max(200),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type PasswordChangeInput = z.infer<typeof passwordChangeSchema>;
 
 /* ------------------------------------------------------- character sheet */
 

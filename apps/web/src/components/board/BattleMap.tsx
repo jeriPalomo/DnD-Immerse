@@ -19,6 +19,7 @@ import { TemplateLayer } from './TemplateLayer.js';
 import { LightLayer, WeatherLayer } from './AtmosphereLayer.js';
 import { useTable } from '../../store/table.js';
 import { useAuth } from '../../store/auth.js';
+import { getPref, setPref } from '../../lib/prefs.js';
 
 /**
  * A dragged ping is sampled every mousemove, so a slow hand over a big map can
@@ -95,6 +96,8 @@ export function BattleMap({
   const [stroke, setStroke] = useState<number[] | null>(null);
   // The same, for an alt-drag ping - which is never persisted.
   const [pingStroke, setPingStroke] = useState<number[] | null>(null);
+  // Remembered across reloads: it is a hint, not a setting worth re-making.
+  const [hints, setHints] = useState(() => getPref('board-hints', true));
   // Read by the drag guard below, which fires before React has re-rendered with
   // the state above, so the state would still be null there.
   const pinging = useRef(false);
@@ -336,7 +339,14 @@ export function BattleMap({
           }
           setStroke(null);
         }}
-        onDragEnd={(e) => setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }))}
+        // Guarded like onClick below, and for the same reason: Konva bubbles
+        // drag events, so a token's dragend arrives here with the TOKEN as
+        // target. Unguarded, dropping a token wrote the token's pixel position
+        // into the map's pan origin and the whole scene jumped.
+        onDragEnd={(e) => {
+          if (e.target !== e.target.getStage()) return;
+          setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }));
+        }}
         onClick={(e) => {
           if (e.target !== e.target.getStage() && e.target.name() !== 'map') return;
 
@@ -497,15 +507,7 @@ export function BattleMap({
                 opacity={0.85}
               />
             ) : (
-              <Circle
-                key={ping.id}
-                x={gridToPixel({ x: ping.x, y: ping.y }, grid).x}
-                y={gridToPixel({ x: ping.x, y: ping.y }, grid).y}
-                radius={scene.gridSize * 0.6}
-                stroke={ping.color}
-                strokeWidth={3}
-                opacity={0.9}
-              />
+              <PingPulse key={ping.id} ping={ping} grid={grid} gridSize={scene.gridSize} />
             ),
           )}
           {/* The local drag, before release - so it tracks the cursor with no
@@ -578,12 +580,29 @@ export function BattleMap({
         </button>
       </div>
 
-      <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-ink-950/80 px-2 py-1 text-[10px] text-ink-500">
-        {wallTool !== 'off'
-          ? wallTool === 'note'
-            ? 'click to drop a pin — click a pin to reveal it, alt-click to delete'
-            : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
-          : 'scroll to zoom · drag to pan · alt-click to ping, alt-drag to draw one · shift-click a token to target · ? for keys'}
+      {/* Collapsed to a corner button by default: the hint is worth reading
+          once and then in the way of the map for every session after. Tool
+          hints stay visible, because those change under you. */}
+      <div className="absolute bottom-2 left-2 flex items-end gap-1.5">
+        <button
+          onClick={() => {
+            setHints(!hints);
+            setPref('board-hints', !hints);
+          }}
+          title={hints ? 'Hide the shortcut hints' : 'Show the shortcut hints'}
+          className="rounded bg-ink-950/80 px-1.5 py-1 text-[10px] text-ink-500 transition-colors hover:text-ink-200"
+        >
+          {hints ? '×' : '?'}
+        </button>
+        {(hints || wallTool !== 'off') && (
+          <div className="pointer-events-none rounded bg-ink-950/80 px-2 py-1 text-[10px] text-ink-500">
+            {wallTool !== 'off'
+              ? wallTool === 'note'
+                ? 'click to drop a pin — click a pin to reveal it, alt-click to delete'
+                : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
+              : 'scroll to zoom · drag to pan · alt-click to ping, alt-drag to draw one · shift-click a token to target · ? for keys'}
+          </div>
+        )}
       </div>
 
       {wallStart && (
@@ -592,6 +611,55 @@ export function BattleMap({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A ping, as a ring that expands and fades a few times.
+ *
+ * A static circle was easy to miss on a busy board - the whole point of a ping
+ * is to pull eyes to a spot. Animated with `requestAnimationFrame` and a tick,
+ * the same approach `AtmosphereLayer` already uses; Konva's own tweens would
+ * mean reaching around react-konva to mutate nodes directly.
+ */
+function PingPulse({
+  ping,
+  grid,
+  gridSize,
+}: {
+  ping: { x: number; y: number; color: string };
+  grid: { gridSize: number; offsetX: number; offsetY: number };
+  gridSize: number;
+}) {
+  const start = useRef(Date.now());
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    let frame = 0;
+    const step = () => {
+      setTick((t) => (t + 1) % 1000);
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const PERIOD = 900;
+  // Where we are within the current pulse, 0..1.
+  const phase = ((Date.now() - start.current) % PERIOD) / PERIOD;
+  const point = gridToPixel({ x: ping.x, y: ping.y }, grid);
+
+  // Grows from a third of a square to about 1.2, fading as it goes - big
+  // enough to catch the eye, small enough not to cover the board.
+  const radius = gridSize * (0.35 + phase * 0.85);
+  const opacity = 0.9 * (1 - phase);
+
+  return (
+    <>
+      <Circle x={point.x} y={point.y} radius={radius} stroke={ping.color} strokeWidth={3} opacity={opacity} />
+      {/* A steady dot underneath, so the mark is readable between pulses. */}
+      <Circle x={point.x} y={point.y} radius={gridSize * 0.12} fill={ping.color} opacity={0.85} />
+    </>
   );
 }
 
@@ -696,7 +764,19 @@ function TokenShape({
         e.cancelBubble = true;
         onSelect(e.evt.shiftKey);
       }}
+      onMouseDown={(e) => {
+        // A token you cannot drag registers no drag listener of its own, so the
+        // mousedown reached the Stage and started a pan - the map slid away
+        // under a player trying to move someone else's token. Alt still passes
+        // through, because pinging over a token is fair.
+        if (!draggable && !e.evt.altKey) e.cancelBubble = true;
+      }}
       onDragMove={(e) => {
+        // Konva bubbles drag events up to the Stage, which pans on them.
+        // Moving a token is not panning, so stop it here as well as guarding
+        // the Stage's own handler.
+        e.cancelBubble = true;
+
         // Throttled to ~30Hz: the wire carries position only, and the server
         // rebroadcasts without touching the database.
         const now = Date.now();
@@ -707,6 +787,7 @@ function TokenShape({
         onMove(token.id, point.x, point.y);
       }}
       onDragEnd={(e) => {
+        e.cancelBubble = true;
         const raw = pixelToGrid({ x: e.target.x(), y: e.target.y() }, grid);
         const snapped = snapTokenPosition(raw, token.w, token.h);
         // Settle locally on the snapped position so it does not visibly jump

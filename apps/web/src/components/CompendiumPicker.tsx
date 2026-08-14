@@ -4,6 +4,7 @@ import {
   ITEM_CATEGORY_LABELS,
   SPELL_CLASSES,
   SPELL_SCHOOLS,
+  maxSpellLevel,
   type ItemCategory,
   type ItemType,
 } from '@dnd/shared';
@@ -50,6 +51,8 @@ export function CompendiumPicker({
   kind,
   initialCategory = null,
   ruleset = '2014',
+  casterClass = '',
+  casterLevel = 20,
   onAdd,
   onCreate,
   onClose,
@@ -58,6 +61,13 @@ export function CompendiumPicker({
   /** Opens pre-filtered, so the Attacks panel offers weapons rather than everything. */
   initialCategory?: ItemCategory | null;
   ruleset?: '2014' | '2024';
+  /**
+   * The character browsing. Their class pre-filters the list, and their level
+   * decides what they can actually take - every spell on the class list stays
+   * visible, because knowing what is coming is half of levelling up.
+   */
+  casterClass?: string;
+  casterLevel?: number;
   onAdd: (srdId: string) => Promise<void>;
   /** Hand-entry for things the SRD does not publish. */
   onCreate: (type: ItemType, name: string, system: Record<string, unknown>) => Promise<void>;
@@ -66,8 +76,14 @@ export function CompendiumPicker({
   const [query, setQuery] = useState('');
   const [level, setLevel] = useState<number | ''>('');
   const [school, setSchool] = useState('');
-  const [spellClass, setSpellClass] = useState('');
+  // Defaults to the character's own class when it is one that casts.
+  const [spellClass, setSpellClass] = useState(
+    SPELL_CLASSES.find((c) => c.toLowerCase() === casterClass.trim().toLowerCase()) ?? '',
+  );
   const [category, setCategory] = useState<ItemCategory | ''>(initialCategory ?? '');
+
+  /** The highest level this character can take. -1 when the class never casts. */
+  const ceiling = casterClass ? maxSpellLevel(casterClass, casterLevel) : 9;
   const [rows, setRows] = useState<(SpellRow | ItemRow)[]>([]);
   const [more, setMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -184,7 +200,11 @@ export function CompendiumPicker({
               />
               {kind === 'spell' ? (
                 <>
-                  <Select value={level === '' ? '' : String(level)} onChange={(v) => setLevel(v === '' ? '' : Number(v))}>
+                  <Select
+                    label="Spell level"
+                    value={level === '' ? '' : String(level)}
+                    onChange={(v) => setLevel(v === '' ? '' : Number(v))}
+                  >
                     <option value="">All levels</option>
                     {levels.map((l) => (
                       <option key={l} value={l}>
@@ -192,7 +212,7 @@ export function CompendiumPicker({
                       </option>
                     ))}
                   </Select>
-                  <Select value={spellClass} onChange={setSpellClass}>
+                  <Select label="Class" value={spellClass} onChange={setSpellClass}>
                     <option value="">All classes</option>
                     {SPELL_CLASSES.map((c) => (
                       <option key={c} value={c}>
@@ -200,7 +220,7 @@ export function CompendiumPicker({
                       </option>
                     ))}
                   </Select>
-                  <Select value={school} onChange={setSchool}>
+                  <Select label="School" value={school} onChange={setSchool}>
                     <option value="">All schools</option>
                     {SPELL_SCHOOLS.map((s) => (
                       <option key={s} value={s}>
@@ -210,7 +230,7 @@ export function CompendiumPicker({
                   </Select>
                 </>
               ) : (
-                <Select value={category} onChange={(v) => setCategory(v as ItemCategory | '')}>
+                <Select label="Category" value={category} onChange={(v) => setCategory(v as ItemCategory | '')}>
                   <option value="">Everything</option>
                   {ITEM_CATEGORIES.map((c) => (
                     <option key={c} value={c}>
@@ -240,22 +260,43 @@ export function CompendiumPicker({
               ) : (
                 <>
                   <ul className="divide-y divide-ink-800">
-                    {rows.map((row) => (
-                      <li key={row.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-ink-850">
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-ink-100">{row.name}</div>
-                          <div className="truncate text-xs text-ink-500">{describe(row)}</div>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          loading={adding === row.id}
-                          onClick={() => void add(row.id)}
+                    {rows.map((row) => {
+                      // Out-of-reach spells stay listed - seeing what is coming
+                      // is half of levelling up - but cannot be taken yet.
+                      const spellLevel = kind === 'spell' ? ((row as SpellRow).level ?? 0) : 0;
+                      const tooHigh = kind === 'spell' && spellLevel > ceiling;
+                      return (
+                        <li
+                          key={row.id}
+                          className={`flex items-center gap-3 px-4 py-2.5 hover:bg-ink-850 ${
+                            tooHigh ? 'opacity-50' : ''
+                          }`}
                         >
-                          Add
-                        </Button>
-                      </li>
-                    ))}
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm text-ink-100">{row.name}</div>
+                            <div className="truncate text-xs text-ink-500">
+                              {describe(row)}
+                              {tooHigh && (
+                                <span className="ml-1.5 text-ember-400">
+                                  {ceiling < 0
+                                    ? `${casterClass} does not cast`
+                                    : `needs level ${spellLevel} slots`}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={tooHigh}
+                            loading={adding === row.id}
+                            onClick={() => void add(row.id)}
+                          >
+                            Add
+                          </Button>
+                        </li>
+                      );
+                    })}
                   </ul>
                   {more && (
                     <div className="p-3 text-center">
@@ -288,16 +329,20 @@ export function CompendiumPicker({
 
 function Select({
   value,
+  label,
   onChange,
   children,
 }: {
   value: string;
+  /** Named, because "All levels" beside "All schools" tells a screen reader nothing. */
+  label: string;
   onChange: (value: string) => void;
   children: React.ReactNode;
 }) {
   return (
     <select
       value={value}
+      aria-label={label}
       onChange={(e) => onChange(e.target.value)}
       className="rounded-lg border border-ink-600 bg-ink-850 px-3 py-1.5 text-sm text-ink-100 focus:border-arcane-400 focus:outline-none"
     >

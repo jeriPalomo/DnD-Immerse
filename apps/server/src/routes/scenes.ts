@@ -121,6 +121,13 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
       .set({ activeSceneId: null })
       .where(and(eq(campaigns.id, scene.campaignId), eq(campaigns.activeSceneId, id)));
 
+    // Otherwise every client keeps drawing a scene that is gone until some
+    // unrelated broadcast happens to correct them.
+    if (app.io) {
+      const { broadcastSceneState } = await import('../realtime/scene.js');
+      await broadcastSceneState(app.io, scene.campaignId);
+    }
+
     return { ok: true };
   });
 

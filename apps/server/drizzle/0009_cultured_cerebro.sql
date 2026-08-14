@@ -1,0 +1,1 @@
+ALTER TABLE `chat_messages` ADD `combat` integer DEFAULT false NOT NULL;
