@@ -23,6 +23,8 @@ export interface Member {
   avatarUrl: string | null;
   role: 'dm' | 'player';
   joinedAt: number;
+  /** Who they are playing here. Characters only — never the DM's NPCs. */
+  characters: { id: string; name: string; portraitUrl: string | null }[];
 }
 
 interface CampaignState {

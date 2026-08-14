@@ -349,12 +349,16 @@ export function BattleMap({
             grid,
           );
 
+          // Pins and walls are the DM's. Reachable today only because the tool
+          // buttons live in a DM-only panel, and the server rejects both anyway
+          // - but `wallTool` sits in the shared store, so "no button" is not a
+          // permission check.
           if (wallTool === 'note') {
-            void placeNote(Math.round(point.x * 2) / 2, Math.round(point.y * 2) / 2);
+            if (isDM) void placeNote(Math.round(point.x * 2) / 2, Math.round(point.y * 2) / 2);
             return;
           }
 
-          if (wallTool !== 'off') {
+          if (wallTool !== 'off' && isDM) {
             // Walls snap to grid corners so they line up with the map's own
             // architecture rather than landing at arbitrary fractions.
             const snapped = { x: Math.round(point.x), y: Math.round(point.y) };

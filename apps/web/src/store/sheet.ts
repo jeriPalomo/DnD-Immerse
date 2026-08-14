@@ -21,17 +21,24 @@ export interface Item {
   sortOrder: number;
 }
 
+/** A campaign this sheet is assigned to. `ruleset` drives the item picker. */
+export interface SheetCampaign {
+  id: string;
+  name: string;
+  ruleset?: '2014' | '2024';
+}
+
 export interface ActorSummary extends Partial<Actor> {
   id: string;
   name: string;
   access?: OwnershipLevel;
-  campaigns?: { id: string; name: string }[];
+  campaigns?: SheetCampaign[];
 }
 
 interface SheetState {
   actor: Actor | null;
   items: Item[];
-  campaigns: { id: string; name: string }[];
+  campaigns: SheetCampaign[];
   access: OwnershipLevel;
   grants: { userId: string; level: number }[];
   loading: boolean;
@@ -81,7 +88,7 @@ export const useSheet = create<SheetState>((set, get) => ({
       const res = await api.get<{
         actor: Actor;
         items: Item[];
-        campaigns: { id: string; name: string }[];
+        campaigns: SheetCampaign[];
         access: OwnershipLevel;
         grants: { userId: string; level: number }[];
       }>(`/api/actors/${id}`);

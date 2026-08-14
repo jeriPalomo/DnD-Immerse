@@ -80,7 +80,7 @@ beforeAll(async () => {
   // A miniature compendium. The category strings are copied verbatim from the
   // real datasets, singular/plural inconsistency included — that is the point.
   const { db } = await import('../db/index.js');
-  const { srdItems, srdSpells } = await import('../db/schema.js');
+  const { srdItems, srdMonsters, srdSpells } = await import('../db/schema.js');
   const { newId } = await import('../lib/id.js');
 
   const gear = (name: string, category: string, itemType = 'equipment') => ({
@@ -137,6 +137,19 @@ beforeAll(async () => {
     spell('Shield of Faith', 1, 'Abjuration', ['Cleric', 'Paladin']),
     spell('Bless', 1, 'Enchantment', ['Cleric', 'Paladin']),
   ]);
+
+  // Enough monsters to page. Named so alphabetical order is obvious in a
+  // failure message.
+  await db.insert(srdMonsters).values(
+    ['Aboleth', 'Basilisk', 'Cockatrice', 'Dryad', 'Ettin', 'Ghoul'].map((name) => ({
+      id: newId(),
+      ruleset: '2014' as const,
+      name,
+      size: 'Medium',
+      type: 'monstrosity',
+      data: {},
+    })),
+  );
 }, 60000);
 
 afterAll(async () => {
@@ -249,6 +262,30 @@ describe('paging past the first page', () => {
     // Six spells, so the second page holds two - and there is nothing after it.
     expect(last.spells).toHaveLength(2);
     expect(last.more).toBe(false);
+  });
+
+  it('pages the bestiary too', async () => {
+    // The regression: monsters were the one shelf paging was never applied to,
+    // so the browser showed the server's default 60 of 337 and had no way to
+    // know the rest existed - which reads as a bestiary that stops at C.
+    const first = await api<{ monsters: { id: string; name: string }[]; more: boolean }>(
+      'GET',
+      '/api/compendium/monsters?limit=4',
+    );
+    expect(first.monsters.map((m) => m.name)).toEqual([
+      'Aboleth',
+      'Basilisk',
+      'Cockatrice',
+      'Dryad',
+    ]);
+    expect(first.more).toBe(true);
+
+    const second = await api<{ monsters: { id: string; name: string }[]; more: boolean }>(
+      'GET',
+      '/api/compendium/monsters?limit=4&offset=4',
+    );
+    expect(second.monsters.map((m) => m.name)).toEqual(['Ettin', 'Ghoul']);
+    expect(second.more).toBe(false);
   });
 });
 

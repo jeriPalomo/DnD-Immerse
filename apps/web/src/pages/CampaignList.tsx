@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, Spinner, Textarea } from '../components/ui.js';
 import { AvatarUpload } from '../components/AvatarUpload.js';
-import { useCampaigns } from '../store/campaigns.js';
+import { useCampaigns, type Campaign } from '../store/campaigns.js';
 import { useAuth } from '../store/auth.js';
 
 export default function CampaignList() {
@@ -86,9 +86,10 @@ function CreatePanel({
   onCreate,
   onDone,
 }: {
-  onCreate: (name: string, description: string) => Promise<unknown>;
+  onCreate: (name: string, description: string) => Promise<Campaign>;
   onDone: () => void;
 }) {
+  const navigate = useNavigate();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -99,11 +100,12 @@ function CreatePanel({
     setError(null);
     setBusy(true);
     try {
-      await onCreate(name, description);
-      onDone();
+      const campaign = await onCreate(name, description);
+      // Straight into setup rather than back to the grid: rules edition and
+      // banner are decisions you make once, at the start.
+      navigate(`/campaigns/${campaign.id}`, { state: { settings: true } });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create campaign');
-    } finally {
       setBusy(false);
     }
   }
@@ -122,7 +124,7 @@ function CreatePanel({
             placeholder="Curse of Strahd"
           />
         </Field>
-        <Field label="Description" hint="Optional. A line or two to set the tone.">
+        <Field label="Description">
           <Textarea
             rows={3}
             maxLength={5000}

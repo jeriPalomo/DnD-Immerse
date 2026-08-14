@@ -1,9 +1,17 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { campaignInputSchema } from '@dnd/shared';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
-import { campaignMembers, campaigns, encounters, scenes, users } from '../db/schema.js';
+import {
+  actorCampaigns,
+  actors,
+  campaignMembers,
+  campaigns,
+  encounters,
+  scenes,
+  users,
+} from '../db/schema.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { newId, newInviteCode } from '../lib/id.js';
 import { storeImage } from '../lib/uploads.js';
@@ -59,7 +67,12 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       joinedAt: Date.now(),
     });
 
-    return { campaign: { ...campaign, role: 'dm' as const } };
+    // Re-read rather than echoing the literal above: `ruleset` and `recap` come
+    // from column defaults, and the settings panel opens on this response - it
+    // would show the fallback edition instead of the real one.
+    const rows = await db.select().from(campaigns).where(eq(campaigns.id, campaign.id)).limit(1);
+
+    return { campaign: { ...rows[0], role: 'dm' as const } };
   });
 
   app.get('/api/campaigns/:id', async (request) => {
@@ -165,6 +178,15 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
 
   /* ------------------------------------------------------------- members */
 
+  /**
+   * Who is in the campaign, and who they are playing.
+   *
+   * Characters are carried here so the roster does not have to correlate two
+   * requests by owner id. Only name and portrait travel, which every member can
+   * already see on the party panel - and only `character` actors, never NPCs:
+   * a monster's name in a roster spoils the encounter as thoroughly as its
+   * stat block would.
+   */
   app.get('/api/campaigns/:id/members', async (request) => {
     const user = assertUser(request);
     const { id } = request.params as { id: string };
@@ -182,7 +204,26 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       .innerJoin(users, eq(campaignMembers.userId, users.id))
       .where(eq(campaignMembers.campaignId, id));
 
-    return { members: rows };
+    const characters = await db
+      .select({
+        id: actors.id,
+        name: actors.name,
+        portraitUrl: actors.portraitUrl,
+        ownerUserId: actors.ownerUserId,
+      })
+      .from(actorCampaigns)
+      .innerJoin(actors, eq(actorCampaigns.actorId, actors.id))
+      .where(and(eq(actorCampaigns.campaignId, id), eq(actors.type, 'character')))
+      .orderBy(asc(actors.name));
+
+    return {
+      members: rows.map((row) => ({
+        ...row,
+        characters: characters
+          .filter((character) => character.ownerUserId === row.id)
+          .map(({ ownerUserId: _owner, ...character }) => character),
+      })),
+    };
   });
 
   /** The DM removes a player; anyone else may only remove themselves. */

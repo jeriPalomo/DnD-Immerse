@@ -20,6 +20,84 @@ the desktop; run `npm run db:migrate` after pulling on the laptop.
 
 ---
 
+## Second pass — 2026-08-14
+
+### Campaign properties, and settings behind a gear — DONE
+
+Creating a campaign now navigates straight into `CampaignSettings` (a modal over
+the campaign page) rather than dropping you back on the grid. The gear at the
+top right of a campaign reopens it. It holds name, description, rules edition,
+banner, invite-code rotation, the player list with remove, and delete — every
+campaign-level control in one DM-only place.
+
+**Name and description were previously unreachable after creation** — there was
+no rename anywhere in the app. `PATCH /api/campaigns/:id` already accepted both;
+nothing called it.
+
+The campaign page is now a read-only overview: invite code (click to copy) and
+gear at the top right, an **On the Journey…** roster, and the last-session card.
+The old ruleset / banner / invite cards are gone, and with them four lines of
+helper text. `InviteCard` went with them; its Copy moved onto the header chip.
+
+Server changes:
+- `GET /api/campaigns/:id/members` now carries `characters: { id, name,
+  portraitUrl }[]` per member, joined through `actorCampaigns` and filtered to
+  `type === 'character'`. **NPCs are excluded** — the name is the leak. This
+  replaces correlating two requests by owner id on the client.
+- `POST /api/campaigns` re-reads the inserted row instead of echoing a literal
+  that omitted `ruleset` and `recap`, so the settings panel opens on real values.
+- `GET /api/actors/:id` includes each campaign's `ruleset`, so the sheet's
+  compendium picker offers the edition actually being played — it browsed the
+  2014 equipment list in a 2024 campaign regardless.
+
+Roster rows deliberately have no Remove/Leave. The DM removes from settings; a
+player gets a "Leave this campaign" link at the foot of the page.
+
+### The bestiary showed nothing — ENVIRONMENTAL, plus two real bugs
+
+**The cause was that `npm run srd:import` had never run on this machine.** All
+three SRD tables were empty and `data/srd/` held no cached downloads, so every
+compendium surface correctly rendered zero rows. Imported: 319 spells, 337
+monsters, 1042 items.
+
+Two genuine defects were hiding behind it, and both would still bite:
+
+1. **The bestiary silently truncated at 60 of 337.** `MonsterBrowser` sent no
+   `limit` and had no paging; the monsters route took no `offset` and returned
+   no `more`, so the client could not know it was truncated. Commit `e11dadc`
+   added exactly this to spells and items and skipped monsters. Both ends fixed,
+   with a regression test.
+2. **"Nothing matches that search." was shown for an empty search.** Both
+   browsers now distinguish a failed search from an unimported compendium and
+   name `npm run srd:import`. This is what made an environment problem look like
+   a broken feature.
+
+Also dropped: a `ruleset` parameter the monsters route parsed and never used.
+
+### Permissions audit — NO CHANGES NEEDED
+
+Every campaign-level write is already `requireDM`: the campaign patch, all five
+scene routes, every journal write, `token:create`/`token:delete`, all three wall
+events, `scene:activate`, and every combat event including `damage:apply`. What
+a player may mutate is scene-scoped and deliberate — their own token's position
+and image, door toggles, drawings and pings (both gated on the DM's
+`scene.playerDrawing`), and AoE templates.
+
+One defensive tidy: `BattleMap`'s stage click called `placeNote` and
+`createWall` with no role check. Unreachable for a player today only because the
+tool buttons live in a DM-only panel and the server rejects both — but
+`wallTool` is in the shared store, so "no button" was not a permission check.
+
+"The party" is now "Party".
+
+### Not fixed, on purpose
+
+The whisper dropdown in `ChatPanel` lists **presence**, not membership, so an
+offline co-player cannot be selected. Arguably wrong, but it is a separate
+question from the compendium dropdowns and was left alone.
+
+---
+
 ## Table
 
 ### 1. Ambient audio from YouTube links — CLOSED, feature removed instead

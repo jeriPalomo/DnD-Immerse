@@ -225,7 +225,18 @@ export function CompendiumPicker({
               {loading ? (
                 <Spinner />
               ) : rows.length === 0 ? (
-                <p className="p-8 text-center text-sm text-ink-500">Nothing matches that search.</p>
+                // With no query and no filters, an empty list means the
+                // compendium was never imported - not that the search failed.
+                <p className="p-8 text-center text-sm text-ink-500">
+                  {query || category || level !== '' || spellClass || school ? (
+                    'Nothing matches that search.'
+                  ) : (
+                    <>
+                      The compendium is empty. Run{' '}
+                      <code className="text-ink-300">npm run srd:import</code> to fill it.
+                    </>
+                  )}
+                </p>
               ) : (
                 <>
                   <ul className="divide-y divide-ink-800">

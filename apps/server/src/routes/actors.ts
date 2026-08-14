@@ -132,8 +132,10 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
       .where(eq(items.ownerActorId, id))
       .orderBy(asc(items.sortOrder), asc(items.name));
 
+    // `ruleset` travels so the sheet's compendium picker offers the edition the
+    // campaign actually plays - it used to browse 2014 equipment regardless.
     const assignments = await db
-      .select({ id: campaigns.id, name: campaigns.name })
+      .select({ id: campaigns.id, name: campaigns.name, ruleset: campaigns.ruleset })
       .from(actorCampaigns)
       .innerJoin(campaigns, eq(actorCampaigns.campaignId, campaigns.id))
       .where(eq(actorCampaigns.actorId, id));

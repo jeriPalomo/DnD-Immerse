@@ -117,6 +117,12 @@ conditions decorative. Before adding a feature, check that the last one is
 actually reachable: `grep` the export and see whether anything outside its own
 module and tests uses it.
 
+**Every compendium shelf pages the same way.** `limit`, `offset` and a `more`
+flag, with the client sending an explicit `limit` and appending pages. Monsters
+were the shelf this was never applied to: the browser sent no limit, took the
+server's default of 60 out of 337, and had no `more` to tell it there was
+anything else — which reads as a bestiary that stops at C. Add a shelf, page it.
+
 **Compendium categories are curated, not taken from the data.** The SRD's own
 `category` strings are inconsistent by source — "Weapon" and "Weapons", "Ring"
 and "Rings" — so `categoryFilter` maps seven browsable shelves onto them, and
@@ -171,6 +177,19 @@ position so the client corrects rather than sitting desynced.
 **NPCs are absent from a player's roster, not redacted.** A row reading
 "Ancient Red Dragon — sheet not shared" spoils the encounter just as thoroughly
 as the stat block would. The name is the leak.
+
+**Campaign settings are the DM's, and live behind the gear.** Anything about
+the campaign itself — name, description, ruleset, banner, invite code, who is
+in it, deleting it — is edited in `CampaignSettings` and gated `requireDM` on
+the server. The campaign page is a read-only overview. Players edit only what
+is theirs: their own tokens, their own sheets. When adding a campaign-level
+control, it goes in the panel, not on the page.
+
+**There are two sources of DM truth on the server**, and they are not enforced
+to agree: `campaignMembers.role === 'dm'` (what `requireDM` reads) and
+`campaigns.dmUserId` (what `getActorAccess` reads). Both are written at
+creation and nothing reassigns either, so they cannot currently diverge — but
+anything that transfers a campaign has to write both.
 
 **Socket authorization is re-checked in every handler.** Room membership
 authenticates; it does not authorize. DM-only data travels on the separate
@@ -244,9 +263,18 @@ back.
 directory — a fresh clone crashes with `SQLITE_CANTOPEN` otherwise.
 
 **UI changes can be verified for real.** `playwright` is a dev dependency and
-drives installed Chrome via `channel: 'chrome'` — no browser download needed.
-Screenshot the page and look at it; a sheet that renders is not the same as a
-sheet whose numbers are right.
+drives an installed browser — no download needed. **This machine has Edge, not
+Chrome**, so use `channel: 'msedge'`; `channel: 'chrome'` fails with "Chromium
+distribution 'chrome' is not found". Screenshot the page and look at it; a
+sheet that renders is not the same as a sheet whose numbers are right. Drive a
+throwaway `DATA_DIR`, never `data/app.db` — and restart the server after a
+client rebuild, because `serveClient` reads `index.html` once at boot and will
+otherwise serve one pointing at deleted asset hashes.
+
+**An empty compendium is not a code bug.** `srd_monsters`, `srd_spells` and
+`srd_items` are empty until `npm run srd:import` runs, and `data/srd/` being
+empty is the tell that it never has. Every browser correctly renders nothing,
+which reads as broken search — so their empty states name the command.
 
 **`npm run backup` exists and should be run before sessions.** This machine
 holds the only copy of a campaign. The snapshot uses `VACUUM INTO` rather than

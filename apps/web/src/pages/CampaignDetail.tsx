@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Alert, Badge, Button, Card, Spinner } from '../components/ui.js';
 import { useAuth } from '../store/auth.js';
-import { AvatarUpload } from '../components/AvatarUpload.js';
+import { CampaignSettings } from '../components/campaign/CampaignSettings.js';
 import { api } from '../lib/api.js';
 import type { Campaign, Member } from '../store/campaigns.js';
 
@@ -16,15 +16,27 @@ export default function CampaignDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [lastSession, setLastSession] = useState<LastSessionState>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // A campaign that has just been created opens straight into its settings, so
+  // the DM sets it up rather than hunting for the gear.
+  const [settingsOpen, setSettingsOpen] = useState(
+    Boolean((location.state as { settings?: boolean } | null)?.settings),
+  );
+
+  // `loading` is "nothing to show yet", never "a request is in flight" - a
+  // refetch after a rename must not swap the page for a spinner and throw the
+  // scroll position away. Tracked in a ref because `load` closes over `id`
+  // only, so a state read here would be a render behind.
+  const loadedId = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
-    setLoading(true);
+    setLoading(loadedId.current !== id);
     try {
       const [campaignRes, membersRes] = await Promise.all([
         api.get<{ campaign: Campaign; lastSession: LastSessionState }>(`/api/campaigns/${id}`),
@@ -33,6 +45,7 @@ export default function CampaignDetail() {
       setCampaign(campaignRes.campaign);
       setLastSession(campaignRes.lastSession);
       setMembers(membersRes.members);
+      loadedId.current = id;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load campaign');
     } finally {
@@ -44,13 +57,10 @@ export default function CampaignDetail() {
     void load();
   }, [load]);
 
-  async function removeMember(userId: string) {
-    const leaving = userId === user?.id;
-    if (!confirm(leaving ? 'Leave this campaign?' : 'Remove this player from the campaign?')) return;
-
-    await api.delete(`/api/campaigns/${id}/members/${userId}`);
-    if (leaving) navigate('/campaigns');
-    else setMembers((current) => current.filter((m) => m.id !== userId));
+  async function leave() {
+    if (!confirm('Leave this campaign?')) return;
+    await api.delete(`/api/campaigns/${id}/members/${user?.id}`);
+    navigate('/campaigns');
   }
 
   if (loading) return <Spinner />;
@@ -82,14 +92,28 @@ export default function CampaignDetail() {
           )}
         </div>
         <div className="flex items-center gap-3">
-          <Badge tone={isDM ? 'dm' : 'player'}>{isDM ? 'Dungeon Master' : 'Player'}</Badge>
+          {/* The invite code is a credential; the server sends it to the DM
+              alone, so this is never a player's to read. */}
+          {campaign.inviteCode && <InviteCode code={campaign.inviteCode} />}
+          {isDM ? (
+            <button
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Campaign settings"
+              title="Campaign settings"
+              className="rounded-lg border border-ink-700 px-2.5 py-2 text-lg leading-none text-ink-400 transition-colors hover:border-ink-600 hover:text-ink-100"
+            >
+              ⚙
+            </button>
+          ) : (
+            <Badge tone="player">Player</Badge>
+          )}
           <Link to={`/campaigns/${campaign.id}/table`}>
             <Button>Enter the table</Button>
           </Link>
         </div>
       </header>
 
-      {campaign.bannerUrl && !isDM && (
+      {campaign.bannerUrl && (
         <img
           src={campaign.bannerUrl}
           alt=""
@@ -97,83 +121,45 @@ export default function CampaignDetail() {
         />
       )}
 
-      {isDM && (
-        <Card className="mb-6 p-5">
-          <h2 className="mb-1 font-display text-lg text-ink-100">Rules edition</h2>
-          <p className="mb-3 text-sm text-ink-400">
-            Which equipment list the compendium offers. 2024 adds weapon mastery.
-          </p>
-          <select
-            value={campaign.ruleset ?? '2014'}
-            aria-label="Rules edition"
-            onChange={async (e) => {
-              const updated = await api.patch<{ campaign: Campaign }>(
-                `/api/campaigns/${campaign.id}`,
-                { ruleset: e.target.value },
-              );
-              setCampaign(updated.campaign);
-            }}
-            className="rounded-lg border border-ink-600 bg-ink-850 px-3 py-2 text-sm text-ink-100 focus:border-arcane-400 focus:outline-none"
-          >
-            <option value="2014">2014 rules (SRD 5.1)</option>
-            <option value="2024">2024 rules (SRD 5.2)</option>
-          </select>
-          <p className="mt-2 text-xs text-ink-600">
-            Spells and monsters come from the 2014 list either way — the 2024 SRD dataset does
-            not publish them yet.
-          </p>
-        </Card>
-      )}
-
-      {isDM && (
-        <Card className="mb-6 p-5">
-          <h2 className="mb-1 font-display text-lg text-ink-100">Campaign banner</h2>
-          <p className="mb-3 text-sm text-ink-400">Sets the mood on the campaign page.</p>
-          <AvatarUpload
-            url={campaign.bannerUrl}
-            endpoint={`/api/campaigns/${campaign.id}/banner`}
-            field="bannerUrl"
-            label="Campaign banner"
-            shape="banner"
-            onUploaded={(bannerUrl) => setCampaign({ ...campaign, bannerUrl })}
-          />
-        </Card>
-      )}
-
-      {isDM && campaign.inviteCode && (
-        <InviteCard campaignId={campaign.id} initialCode={campaign.inviteCode} />
-      )}
-
       <Card className="p-5">
         <h2 className="font-display text-lg text-ink-100">
-          At the table
+          On the Journey&hellip;
           <span className="ml-2 text-sm font-normal text-ink-400">({members.length})</span>
         </h2>
         <ul className="mt-4 divide-y divide-ink-800">
           {members.map((member) => (
             <li key={member.id} className="flex items-center gap-3 py-3">
-              <div className="flex size-9 items-center justify-center rounded-full bg-ink-700 text-sm font-semibold text-ink-200">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-ink-700 text-sm font-semibold text-ink-200">
                 {member.avatarUrl ? (
                   <img src={member.avatarUrl} alt="" className="size-9 rounded-full object-cover" />
                 ) : (
                   member.displayName.slice(0, 2).toUpperCase()
                 )}
               </div>
-              <span className="flex-1 text-ink-100">{member.displayName}</span>
+
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-ink-100">{member.displayName}</div>
+                {member.characters.length > 0 && (
+                  <div className="truncate text-sm text-ink-400">
+                    {member.characters.map((character, index) => (
+                      <span key={character.id}>
+                        {index > 0 && ', '}
+                        <Link
+                          to={`/characters/${character.id}`}
+                          state={{ path: location.pathname, label: 'Back to the campaign' }}
+                          className="hover:text-ember-300 hover:underline"
+                        >
+                          {character.name}
+                        </Link>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <Badge tone={member.role === 'dm' ? 'dm' : 'player'}>
                 {member.role === 'dm' ? 'DM' : 'Player'}
               </Badge>
-
-              {/* The DM removes anyone; a player may only remove themselves. */}
-              {member.role !== 'dm' && (isDM || member.id === user?.id) && (
-                <button
-                  onClick={() => void removeMember(member.id)}
-                  className="text-xs text-ink-600 hover:text-red-400"
-                  title={member.id === user?.id ? 'Leave this campaign' : `Remove ${member.displayName}`}
-                >
-                  {member.id === user?.id ? 'Leave' : 'Remove'}
-                </button>
-              )}
             </li>
           ))}
         </ul>
@@ -186,6 +172,27 @@ export default function CampaignDetail() {
         session={lastSession}
         onRecap={(recap) => setCampaign({ ...campaign, recap })}
       />
+
+      {/* The DM removes players from settings; a player's only membership
+          control is getting out, so it lives here rather than in the roster. */}
+      {!isDM && (
+        <button
+          onClick={() => void leave()}
+          className="mt-6 text-xs text-ink-600 hover:text-red-400"
+        >
+          Leave this campaign
+        </button>
+      )}
+
+      {settingsOpen && isDM && (
+        <CampaignSettings
+          campaign={campaign}
+          members={members}
+          onChange={setCampaign}
+          onMembersChanged={() => void load()}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -277,46 +284,27 @@ function LastSession({
   );
 }
 
-function InviteCard({ campaignId, initialCode }: { campaignId: string; initialCode: string }) {
-  const [code, setCode] = useState(initialCode);
+/**
+ * The invite code, in the page header.
+ *
+ * Clicking it copies — the old card had a separate Copy button, and the code is
+ * only ever there to be handed to somebody. Rotating moved into settings, where
+ * revoking a code you have already sent reads as the decision it is.
+ */
+function InviteCode({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  async function rotate() {
-    setBusy(true);
-    try {
-      const res = await api.post<{ inviteCode: string }>(
-        `/api/campaigns/${campaignId}/invite/rotate`,
-      );
-      setCode(res.inviteCode);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function copy() {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
 
   return (
-    <Card className="mb-6 p-5">
-      <h2 className="font-display text-lg text-ink-100">Invite your players</h2>
-      <p className="mt-1 text-sm text-ink-400">
-        Share this code. Rotating it revokes any code you have already sent out.
-      </p>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <code className="rounded-lg border border-ink-600 bg-ink-950 px-4 py-2.5 font-mono text-lg tracking-[0.3em] text-ember-300">
-          {code}
-        </code>
-        <Button variant="secondary" size="sm" onClick={copy}>
-          {copied ? 'Copied' : 'Copy'}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={rotate} loading={busy}>
-          Rotate
-        </Button>
-      </div>
-    </Card>
+    <button
+      onClick={async () => {
+        await navigator.clipboard.writeText(code);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      title="Invite code — click to copy"
+      className="rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 font-mono text-sm tracking-[0.2em] text-ember-300 transition-colors hover:border-ember-500"
+    >
+      {copied ? 'Copied' : code}
+    </button>
   );
 }

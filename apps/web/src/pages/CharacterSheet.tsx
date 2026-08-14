@@ -285,6 +285,9 @@ export default function CharacterSheet() {
         <CompendiumPicker
           kind={picker.kind}
           initialCategory={picker.category}
+          // The edition the character actually plays under. A 2024 campaign
+          // browsed the 2014 equipment list until this was threaded through.
+          ruleset={sheet.campaigns[0]?.ruleset ?? '2014'}
           onAdd={async (srdId) => sheet.addFromSrd(picker.kind, srdId)}
           onCreate={async (type, name, system) => sheet.addItem(type, name, system)}
           onClose={() => setPicker(null)}

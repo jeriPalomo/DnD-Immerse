@@ -391,10 +391,6 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
 
       {tab === 'tokens' && (
         <div>
-          <p className="mb-2 text-[11px] text-ink-500">
-            Drops a token at the top-left of the map, sized from the actor's stat block.
-          </p>
-
           <Button size="sm" variant="secondary" onClick={() => setBrowsing(true)} className="mb-2">
             Add from bestiary
           </Button>
@@ -413,7 +409,6 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
               </button>
             ))}
           </div>
-          {!scene && <p className="mt-2 text-xs text-ink-600">Activate a scene first.</p>}
         </div>
       )}
       {browsing && (

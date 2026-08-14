@@ -293,16 +293,23 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
     return { items: rows, more: rows.length === query.limit };
   });
 
+  /**
+   * The bestiary.
+   *
+   * Paged like spells and items: without `offset` and `more` the browser showed
+   * the first 60 of 337 and had no way to know, let alone say, that the rest
+   * existed. There is no `ruleset` filter on purpose - only three 2024 monsters
+   * are published, so both editions are always offered.
+   */
   app.get('/api/compendium/monsters', async (request) => {
     const query = z
       .object({
         q: z.string().max(80).optional(),
-        ruleset: z.enum(['2014', '2024']).optional(),
         limit: z.coerce.number().int().min(1).max(200).default(60),
+        offset: z.coerce.number().int().min(0).max(5000).default(0),
       })
       .parse(request.query);
 
-    // Only three 2024 monsters exist, so both editions are always offered.
     const rows = await db
       .select({
         id: srdMonsters.id,
@@ -318,9 +325,10 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       .from(srdMonsters)
       .where(query.q ? like(srdMonsters.name, `%${query.q}%`) : undefined)
       .orderBy(asc(srdMonsters.name))
-      .limit(query.limit);
+      .limit(query.limit)
+      .offset(query.offset);
 
-    return { monsters: rows };
+    return { monsters: rows, more: rows.length === query.limit };
   });
 
   app.get('/api/compendium/monsters/:id', async (request) => {

@@ -270,7 +270,7 @@ export default function CampaignTable() {
 
           {/* Pinned below the tabs: the party is for glancing at, not working in. */}
           <Card className="shrink-0 p-3">
-            <h2 className="mb-2 font-display text-sm text-ink-100">The party</h2>
+            <h2 className="mb-2 font-display text-sm text-ink-100">Party</h2>
             {party.length === 0 ? (
               <p className="text-xs text-ink-500">No characters assigned yet.</p>
             ) : (

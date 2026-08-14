@@ -13,12 +13,25 @@ interface Monster {
   tokenSize: number;
 }
 
+/** One page. The server caps at 200; 60 fills the panel without a long wait. */
+const PAGE_SIZE = 60;
+
+function params(query: string): URLSearchParams {
+  const search = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  if (query) search.set('q', query);
+  return search;
+}
+
 /**
  * The SRD bestiary.
  *
  * Adding a monster stamps an NPC sheet sized from its stat block — a Gargantuan
  * dragon becomes a 4x4 unlinked token, so five goblins keep five independent
  * HP pools. Without this the DM's roster only ever held what the seed inserted.
+ *
+ * Paged, because there are 337 of them: the list used to stop silently at the
+ * server's default of 60 with no way to reach the rest, which reads as "the
+ * bestiary only has monsters up to C".
  */
 export function MonsterBrowser({
   campaignId,
@@ -32,6 +45,8 @@ export function MonsterBrowser({
   const [query, setQuery] = useState('');
   const [monsters, setMonsters] = useState<Monster[]>([]);
   const [loading, setLoading] = useState(true);
+  const [more, setMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, any> | null>(null);
@@ -63,12 +78,12 @@ export function MonsterBrowser({
 
     const timer = setTimeout(async () => {
       try {
-        const params = new URLSearchParams();
-        if (query) params.set('q', query);
-
-        const res = await api.get<{ monsters: Monster[] }>(`/api/compendium/monsters?${params}`);
+        const res = await api.get<{ monsters: Monster[]; more?: boolean }>(
+          `/api/compendium/monsters?${params(query)}`,
+        );
         if (!cancelled) {
           setMonsters(res.monsters);
+          setMore(Boolean(res.more));
           setLoading(false);
         }
       } catch {
@@ -81,6 +96,20 @@ export function MonsterBrowser({
       clearTimeout(timer);
     };
   }, [query]);
+
+  /** Appends rather than replacing, so the scroll position holds. */
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      const res = await api.get<{ monsters: Monster[]; more?: boolean }>(
+        `/api/compendium/monsters?${params(query)}&offset=${monsters.length}`,
+      );
+      setMonsters((current) => [...current, ...res.monsters]);
+      setMore(Boolean(res.more));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function add(monsterId: string) {
     setAdding(monsterId);
@@ -120,7 +149,18 @@ export function MonsterBrowser({
           {loading ? (
             <Spinner />
           ) : monsters.length === 0 ? (
-            <p className="p-8 text-center text-sm text-ink-500">Nothing matches that search.</p>
+            // An empty list with an empty search is not a failed search - it is
+            // an unimported compendium, and saying so saves an hour.
+            <p className="p-8 text-center text-sm text-ink-500">
+              {query ? (
+                'Nothing matches that search.'
+              ) : (
+                <>
+                  The bestiary is empty. Run <code className="text-ink-300">npm run srd:import</code>{' '}
+                  to fill it.
+                </>
+              )}
+            </p>
           ) : (
             <ul className="divide-y divide-ink-800">
               {monsters.map((monster) => (
@@ -166,6 +206,20 @@ export function MonsterBrowser({
                 </li>
               ))}
             </ul>
+          )}
+
+          {more && (
+            <div className="p-3">
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={loadingMore}
+                onClick={() => void loadMore()}
+                className="w-full"
+              >
+                Load more
+              </Button>
+            </div>
           )}
         </div>
       </div>
