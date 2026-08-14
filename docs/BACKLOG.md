@@ -59,6 +59,12 @@ replaces `QUICK_DICE`), and a modifier. Bounds come from `DICE_LIMITS` rather
 than a second hand-written limit. The expression is still only a string the
 server rolls.
 
+A literal `+` sits between the die type and the modifier — without it the last
+box reads as a second die count and nobody finds the bonus. It stays a `+` when
+the modifier is negative, which looks odd for a beat, but the roll button spells
+out the real expression (`Roll 2d6-2`) so nothing is ambiguous. The button is on
+its own centred line below the fields, since it is the thing being aimed at.
+
 ### 4. "Coming next" card → last session recap — DONE
 The stale Phase-3 placeholder is now a **Last session** card:
 

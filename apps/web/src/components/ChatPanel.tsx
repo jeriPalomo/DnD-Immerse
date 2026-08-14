@@ -84,19 +84,23 @@ export function ChatPanel() {
       </div>
 
       <div className="border-t border-ink-800 px-3 py-2">
-        <div className="mb-2 flex flex-wrap items-center gap-1">
-          <DiceBuilder onRoll={(expression) => roll(expression, '', secret)} />
-          <button
-            onClick={() => setSecret(!secret)}
-            title="Secret rolls are seen only by you and the DM"
-            className={`ml-auto rounded border px-2 py-1 text-xs transition-colors ${
-              secret
-                ? 'border-arcane-400 bg-arcane-500/20 text-arcane-400'
-                : 'border-ink-700 text-ink-500 hover:text-ink-300'
-            }`}
-          >
-            {secret ? 'Secret' : 'Public'}
-          </button>
+        <div className="mb-2">
+          <DiceBuilder
+            onRoll={(expression) => roll(expression, '', secret)}
+            trailing={
+              <button
+                onClick={() => setSecret(!secret)}
+                title="Secret rolls are seen only by you and the DM"
+                className={`ml-auto rounded border px-2 py-1 text-xs transition-colors ${
+                  secret
+                    ? 'border-arcane-400 bg-arcane-500/20 text-arcane-400'
+                    : 'border-ink-700 text-ink-500 hover:text-ink-300'
+                }`}
+              >
+                {secret ? 'Secret' : 'Public'}
+              </button>
+            }
+          />
         </div>
 
         {(inputError || error) && (
@@ -142,7 +146,14 @@ export function ChatPanel() {
  * typing it. The expression is still only a string the server rolls - nothing
  * here produces a number.
  */
-function DiceBuilder({ onRoll }: { onRoll: (expression: string) => void }) {
+function DiceBuilder({
+  onRoll,
+  trailing,
+}: {
+  onRoll: (expression: string) => void;
+  /** Sits at the end of the field row, so the roll button gets its own line. */
+  trailing?: React.ReactNode;
+}) {
   const [count, setCount] = useState(1);
   const [sides, setSides] = useState(20);
   const [modifier, setModifier] = useState(0);
@@ -150,44 +161,58 @@ function DiceBuilder({ onRoll }: { onRoll: (expression: string) => void }) {
   const expression =
     `${count}d${sides}` + (modifier === 0 ? '' : modifier > 0 ? `+${modifier}` : `${modifier}`);
 
+  const field =
+    'rounded border border-ink-700 bg-ink-850 px-1.5 py-1 font-mono text-xs text-ink-200 focus:border-arcane-400 focus:outline-none';
+
   return (
-    <div className="flex items-center gap-1">
-      <input
-        type="number"
-        min={1}
-        max={DICE_LIMITS.maxDiceCount}
-        value={count}
-        aria-label="How many dice"
-        onChange={(e) =>
-          setCount(Math.max(1, Math.min(DICE_LIMITS.maxDiceCount, Number(e.target.value) || 1)))
-        }
-        className="w-12 rounded border border-ink-700 bg-ink-850 px-1.5 py-1 text-center font-mono text-xs text-ink-200 focus:border-arcane-400 focus:outline-none"
-      />
-      <select
-        value={sides}
-        aria-label="Die type"
-        onChange={(e) => setSides(Number(e.target.value))}
-        className="rounded border border-ink-700 bg-ink-850 px-1.5 py-1 font-mono text-xs text-ink-200 focus:border-arcane-400 focus:outline-none"
-      >
-        {DIE_TYPES.map((die) => (
-          <option key={die} value={die}>
-            d{die}
-          </option>
-        ))}
-      </select>
-      <input
-        type="number"
-        min={-99}
-        max={99}
-        value={modifier}
-        aria-label="Modifier"
-        onChange={(e) => setModifier(Math.max(-99, Math.min(99, Number(e.target.value) || 0)))}
-        className="w-12 rounded border border-ink-700 bg-ink-850 px-1.5 py-1 text-center font-mono text-xs text-ink-200 focus:border-arcane-400 focus:outline-none"
-      />
+    <div className="w-full space-y-1.5">
+      <div className="flex flex-wrap items-center gap-1">
+        <input
+          type="number"
+          min={1}
+          max={DICE_LIMITS.maxDiceCount}
+          value={count}
+          aria-label="How many dice"
+          onChange={(e) =>
+            setCount(Math.max(1, Math.min(DICE_LIMITS.maxDiceCount, Number(e.target.value) || 1)))
+          }
+          className={`w-12 text-center ${field}`}
+        />
+        <select
+          value={sides}
+          aria-label="Die type"
+          onChange={(e) => setSides(Number(e.target.value))}
+          className={field}
+        >
+          {DIE_TYPES.map((die) => (
+            <option key={die} value={die}>
+              d{die}
+            </option>
+          ))}
+        </select>
+
+        {/* Says what the last box is for. Without it the bare number reads as
+            another die count, and nobody found the bonus. */}
+        <span aria-hidden className="px-0.5 font-mono text-xs text-ink-500">
+          +
+        </span>
+        <input
+          type="number"
+          min={-99}
+          max={99}
+          value={modifier}
+          aria-label="Modifier to add to the roll"
+          onChange={(e) => setModifier(Math.max(-99, Math.min(99, Number(e.target.value) || 0)))}
+          className={`w-12 text-center ${field}`}
+        />
+
+        {trailing}
+      </div>
+
       <button
         onClick={() => onRoll(expression)}
         title={`Roll ${expression}`}
-        className="rounded border border-ink-700 bg-ink-850 px-2 py-1 font-mono text-xs text-ember-300 transition-colors hover:border-ember-500"
+        className="mx-auto block rounded border border-ink-700 bg-ink-850 px-5 py-1.5 font-mono text-sm text-ember-300 transition-colors hover:border-ember-500 hover:bg-ember-500/10"
       >
         Roll {expression}
       </button>
