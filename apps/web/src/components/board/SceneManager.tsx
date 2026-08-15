@@ -319,6 +319,9 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
                   ['off', 'Off'],
                   ['wall', 'Wall'],
                   ['door', 'Door'],
+                  // A wall players are never sent. Reveal it from the door's
+                  // own controls and it becomes an ordinary door.
+                  ['secret', 'Secret'],
                   ['note', 'Pin'],
                   ['draw', 'Pen'],
                   ['arrow', 'Arrow'],

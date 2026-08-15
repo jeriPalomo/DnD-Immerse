@@ -20,6 +20,47 @@ the desktop; run `npm run db:migrate` after pulling on the laptop.
 
 ---
 
+## Hidden passages — 2026-08-15
+
+Stage 1 of interactive map objects (switches, keys, puzzles). This stage is the
+prerequisite and stands on its own; the trigger table comes next.
+
+**`door: 2` meant "secret door" and nothing read it.** Verified across the whole
+repo: `blocksSight`/`blocksMovement` test `door > 0`, `DoorLayer` branched on
+`doorState` alone, and the wall tool could only produce 0 or 1. So a secret door
+was drawn, **sent to players**, and clickable exactly like an ordinary one — the
+bookcase announced the passage behind it.
+
+Fixed: secret doors are filtered out of the player payload the same way walls
+are, `door:toggle` refuses one for a non-DM (silently — a player was never sent
+it, so confirming it exists is itself the leak), and the DM gets a **Secret**
+wall tool plus alt-click on a dotted purple seam to reveal it. Revealing sets
+`door: 1`, at which point the existing `DoorLayer` draws it and the party can
+open it with no new rendering.
+
+The bare integers became named constants (`PLAIN_WALL`, `DOOR`, `SECRET_DOOR`,
+`DOOR_CLOSED/OPEN/LOCKED`) — being a magic number described only in a comment is
+most of why this went unnoticed. `blocksSight: 2` was documented as "terrain"
+and is equally unread; the comment now says so rather than implying it works.
+
+Along the way this finally gave `wall:update` a caller. It had existed since
+walls did with none, so **a DM could not lock a door through the UI** — alt-click
+does that now too. Two holes in it closed: it accepted `sceneId`, while `wallIn`
+validated the scene the wall was in *before* the move, so a wall could be pushed
+into another campaign's scene; and a payload of just an id reached
+`db.update().set({})`, which Drizzle throws on.
+
+Verified end to end over real sockets: DM sees `door, SECRET`, player sees only
+`door`, the player poking the secret id does nothing, and after the reveal they
+both see it and can open it.
+
+**Still to build:** the `triggers` table, click and pressure-plate firing, item
+and trigger gating. Note for that work — `postSystemMessage` is private to
+`combat.ts` and hard-codes `combat: true`, so a trigger cannot announce itself in
+the conversation tab without extracting it.
+
+---
+
 ## Movement ranges — 2026-08-15
 
 Fire Emblem style: select a unit and see where it can go, toggle the reach of

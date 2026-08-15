@@ -190,6 +190,14 @@ where the mouse was released. Stroke handlers also use functional state updates:
 mouse moves arrive faster than React re-renders, so reading the closed-over
 array loses most of the line.
 
+**A secret door is wall geometry, not a door.** `SECRET_DOOR` walls are
+withheld from players for exactly the reason walls are — knowing there is a way
+through the library's north wall *is* the discovery. Revealing one sets it to
+`DOOR`, at which point it is an ordinary door the party can see and open. The
+constants exist because `door: 2` sat as a bare integer described only in a
+comment, and went unread long enough that secret doors were being drawn, sent
+and clicked like any other.
+
 **Walls block sight and movement independently.** `blocksSight` and
 `blocksMovement` are separate flags, so a railing can be seen over but not
 crossed and a curtain the reverse. Collision is enforced on `token:commit` for

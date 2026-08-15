@@ -247,6 +247,51 @@ describe('invariant: no wall geometry reaches a player', () => {
     expect(player.doors.length).toBe(1);
     expect(player.doors[0].id).toBe(doorId);
   });
+
+  it('withholds a secret door, which is wall geometry wearing a door', async () => {
+    // `door: 2` sat in the schema unread for long enough that a secret door was
+    // drawn, sent and clickable exactly like an ordinary one - so the bookcase
+    // announced the passage behind it.
+    const made = next<{ wall: { id: string } }>(dmSocket, 'wall:created');
+    dmSocket.emit('wall:create', {
+      sceneId, x1: 0, y1: 9, x2: 4, y2: 9,
+      blocksMovement: 1, blocksSight: 1, door: 2, doorState: 0,
+    });
+    const secretId = (await made)!.wall.id;
+
+    const dmView = await refresh(dmSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+
+    expect(dmView.doors.some((d) => d.id === secretId)).toBe(true);
+    expect(player.doors.some((d) => d.id === secretId)).toBe(false);
+    expect(JSON.stringify(player.doors)).not.toContain(secretId);
+
+    // And an id obtained some other way still will not open it. No broadcast
+    // is expected, so this waits a beat rather than on an event.
+    aliceSocket.emit('door:toggle', { wallId: secretId });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const after = await refresh(dmSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    expect(after.doors.find((d) => d.id === secretId)?.doorState).toBe(0);
+  });
+
+  it('reveals the passage when the DM turns it into an ordinary door', async () => {
+    const made = next<{ wall: { id: string } }>(dmSocket, 'wall:created');
+    dmSocket.emit('wall:create', {
+      sceneId, x1: 0, y1: 11, x2: 4, y2: 11,
+      blocksMovement: 1, blocksSight: 1, door: 2, doorState: 0,
+    });
+    const secretId = (await made)!.wall.id;
+
+    const hidden = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    expect(hidden.doors.some((d) => d.id === secretId)).toBe(false);
+
+    // The bookcase swings aside: a secret door becomes a real one.
+    const shown = await refresh(aliceSocket, () =>
+      dmSocket.emit('wall:update', { wallId: secretId, door: 1 }),
+    );
+    expect(shown.doors.some((d) => d.id === secretId)).toBe(true);
+  });
 });
 
 describe('invariant: no hidden tokens reach a player', () => {

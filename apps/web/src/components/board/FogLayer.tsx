@@ -1,6 +1,6 @@
 import { Circle, Group, Line, Rect, Shape, Text } from 'react-konva';
 import type Konva from 'konva';
-import { gridToPixel } from '@dnd/shared';
+import { DOOR_LOCKED, DOOR_OPEN, SECRET_DOOR, gridToPixel } from '@dnd/shared';
 import type { WireScene, WireVision } from '@dnd/shared';
 
 /**
@@ -86,11 +86,19 @@ export function FogLayer({
 export function DoorLayer({
   doors,
   grid,
+  isDM = false,
   onToggle,
+  onReveal,
+  onLock,
 }: {
   doors: { id: string; x1: number; y1: number; x2: number; y2: number; door: number; doorState: number }[];
   grid: { gridSize: number; offsetX: number; offsetY: number };
+  isDM?: boolean;
   onToggle: (wallId: string) => void;
+  /** DM only: a secret door becomes an ordinary one the party can see. */
+  onReveal?: (wallId: string) => void;
+  /** DM only: lock or unlock. */
+  onLock?: (wallId: string, locked: boolean) => void;
 }) {
   return (
     <Group>
@@ -98,26 +106,41 @@ export function DoorLayer({
         const a = gridToPixel({ x: door.x1, y: door.y1 }, grid);
         const b = gridToPixel({ x: door.x2, y: door.y2 }, grid);
 
-        const open = door.doorState === 1;
-        const locked = door.doorState === 2;
+        const open = door.doorState === DOOR_OPEN;
+        const locked = door.doorState === DOOR_LOCKED;
+        // Only the DM ever receives one of these; the server does not send a
+        // secret door to a player at all.
+        const secret = door.door === SECRET_DOOR;
 
         return (
           <Line
             key={door.id}
             points={[a.x, a.y, b.x, b.y]}
-            stroke={locked ? '#f87171' : open ? '#34d399' : '#e8853f'}
+            stroke={secret ? '#8b7bf0' : locked ? '#f87171' : open ? '#34d399' : '#e8853f'}
             strokeWidth={Math.max(6, grid.gridSize * 0.14)}
-            dash={open ? [10, 10] : undefined}
+            // Drawn as a dotted purple seam so the DM can tell at a glance
+            // which walls the party has not found yet.
+            dash={secret ? [4, 8] : open ? [10, 10] : undefined}
+            opacity={secret ? 0.75 : 1}
             lineCap="round"
             // A fat invisible hit area, so a door is easy to click.
             hitStrokeWidth={Math.max(18, grid.gridSize * 0.4)}
             onClick={(e) => {
               e.cancelBubble = true;
-              if (!locked) onToggle(door.id);
+
+              // Alt is the established "administer this thing" modifier on the
+              // board - it deletes walls and pins too.
+              if (isDM && e.evt.altKey) {
+                if (secret) onReveal?.(door.id);
+                else onLock?.(door.id, !locked);
+                return;
+              }
+
+              if (!locked || isDM) onToggle(door.id);
             }}
             onMouseEnter={(e) => {
               const stage = e.target.getStage();
-              if (stage) stage.container().style.cursor = locked ? 'not-allowed' : 'pointer';
+              if (stage) stage.container().style.cursor = locked && !isDM ? 'not-allowed' : 'pointer';
             }}
             onMouseLeave={(e) => {
               const stage = e.target.getStage();

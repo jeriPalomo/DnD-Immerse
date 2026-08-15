@@ -6,6 +6,11 @@ import {
   campaignDmRoom,
   campaignRoom,
   clampToMap,
+  DOOR_CLOSED,
+  DOOR_LOCKED,
+  DOOR_OPEN,
+  PLAIN_WALL,
+  SECRET_DOOR,
   drawingCreateSchema,
   movementBlocked,
   movementQuerySchema,
@@ -308,6 +313,10 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
   const wireScene = toWireScene(scene);
   const sceneWalls = await wallsOf(sceneId);
   const doors = sceneWalls.filter((w) => w.door > 0).map(toWireDoor);
+  // A secret door is wall geometry: knowing there is a way through the north
+  // wall of the library is the discovery, and sending it is the same leak as
+  // sending the walls. Revealing one turns it into an ordinary door.
+  const playerDoors = doors.filter((d) => d.door !== SECRET_DOOR);
   const notes = await db.select().from(mapNotes).where(eq(mapNotes.sceneId, sceneId));
   const drawings = await db.select().from(drawingsTable).where(eq(drawingsTable.sceneId, sceneId));
 
@@ -345,7 +354,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
       scene: wireScene,
       tokens: filterTokensFor(sighted, false, userId),
       vision: view?.vision ?? null,
-      doors,
+      doors: playerDoors,
       // A pin the DM has not revealed is absent, like a hidden token.
       notes: notes.filter((note) => !note.hidden),
       // Drawings are shared by design - annotating the map is how you point.
@@ -844,13 +853,20 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       return;
     }
 
-    const { wallId, ...fields } = wallUpdateSchema.parse(payload);
-    if (!(await wallIn(wallId, ctx.campaignId))) return;
+    // `sceneId` is dropped rather than accepted: the schema permitted it, and
+    // `wallIn` validates the scene the wall is in NOW - so a wall could be
+    // moved into another campaign's scene through a check that had already
+    // passed. Moving a wall between scenes is not a thing the app does.
+    const { wallId, sceneId: _ignored, ...fields } = wallUpdateSchema.parse(payload);
+    const wall = await wallIn(wallId, ctx.campaignId);
+    if (!wall) return;
+
+    // Drizzle throws on `set({})`, and every field is optional, so a payload of
+    // just an id used to be an error rather than a no-op.
+    if (Object.keys(fields).length === 0) return;
 
     await db.update(wallsTable).set(fields).where(eq(wallsTable.id, wallId));
-
-    const changed = await db.select().from(wallsTable).where(eq(wallsTable.id, wallId)).limit(1);
-    if (changed[0]) invalidateDragCache(changed[0].sceneId);
+    invalidateDragCache(wall.sceneId);
 
     const rows = await db.select().from(wallsTable).where(eq(wallsTable.id, wallId)).limit(1);
     if (rows[0]) io.to(campaignDmRoom(ctx.campaignId)).emit('wall:updated', { wall: toWireWall(rows[0]) });
@@ -883,14 +899,18 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     if (!ctx) return;
 
     const wall = await wallIn(wallId, ctx.campaignId);
-    if (!wall || wall.door === 0) return;
+    if (!wall || wall.door === PLAIN_WALL) return;
 
-    if (wall.doorState === 2 && !ctx.isDM) {
+    // A player is never sent a secret door, so an id for one did not come from
+    // their board. Refuse it silently rather than confirming it exists.
+    if (wall.door === SECRET_DOOR && !ctx.isDM) return;
+
+    if (wall.doorState === DOOR_LOCKED && !ctx.isDM) {
       socket.emit('error', { message: 'That door is locked' });
       return;
     }
 
-    const doorState = wall.doorState === 1 ? 0 : 1;
+    const doorState = wall.doorState === DOOR_OPEN ? DOOR_CLOSED : DOOR_OPEN;
     await db.update(wallsTable).set({ doorState }).where(eq(wallsTable.id, wallId));
     invalidateDragCache(wall.sceneId);
 

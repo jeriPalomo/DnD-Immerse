@@ -74,7 +74,7 @@ export function BattleMap({
   const {
     scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool, templates, notes,
     drawings, encounter, activeActorId, moveRange, threatRange, showThreat, queryMovement, toggleThreat,
-    select, target, moveToken, commitToken, pingMap, createWall, deleteWall, toggleDoor, clearTemplate,
+    select, target, moveToken, commitToken, pingMap, createWall, deleteWall, updateWall, toggleDoor, clearTemplate,
     placeNote, toggleNote, removeNote, addDrawing, eraseDrawing,
   } = useTable();
 
@@ -377,7 +377,7 @@ export function BattleMap({
             if (!wallStart) {
               setWallStart(snapped);
             } else {
-              createWall(wallStart.x, wallStart.y, snapped.x, snapped.y, wallTool === 'door');
+              createWall(wallStart.x, wallStart.y, snapped.x, snapped.y, wallTool === 'door' ? 'door' : wallTool === 'secret' ? 'secret' : 'wall');
               // Chain from the end point, so drawing a room is a run of clicks.
               setWallStart(snapped);
             }
@@ -415,7 +415,14 @@ export function BattleMap({
         )}
 
         <Layer>
-          <DoorLayer doors={doors} grid={grid} onToggle={toggleDoor} />
+          <DoorLayer
+            doors={doors}
+            grid={grid}
+            isDM={isDM}
+            onToggle={toggleDoor}
+            onReveal={(wallId) => updateWall(wallId, { door: 1 })}
+            onLock={(wallId, locked) => updateWall(wallId, { doorState: locked ? 2 : 0 })}
+          />
           <NoteLayer
             notes={notes}
             grid={grid}
@@ -623,8 +630,12 @@ export function BattleMap({
             {wallTool !== 'off'
               ? wallTool === 'note'
                 ? 'click to drop a pin — click a pin to reveal it, alt-click to delete'
-                : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
-              : 'scroll to zoom · drag to pan · alt-click to ping, alt-drag to draw one · shift-click a token to target · ? for keys'}
+                : wallTool === 'secret'
+                  ? 'drawing a secret passage — players are never sent it; alt-click a dotted seam to reveal it'
+                  : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
+              : isDM
+                ? 'scroll to zoom · drag to pan · alt-click a door to lock it · shift-click a token to target · ? for keys'
+                : 'scroll to zoom · drag to pan · alt-click to ping, alt-drag to draw one · shift-click a token to target · ? for keys'}
           </div>
         )}
       </div>

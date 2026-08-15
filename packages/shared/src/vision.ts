@@ -10,18 +10,32 @@ import type { Point, Polygon } from './grid.js';
  * polygon plus the tokens inside it; wall geometry never leaves the DM.
  */
 
+/**
+ * What a wall is. Named because these were bare integers described only in a
+ * comment, and `door: 2` sat unread for long enough that secret doors were
+ * being drawn and sent to players like ordinary ones.
+ */
+export const PLAIN_WALL = 0;
+export const DOOR = 1;
+export const SECRET_DOOR = 2;
+
+/** Door states. */
+export const DOOR_CLOSED = 0;
+export const DOOR_OPEN = 1;
+export const DOOR_LOCKED = 2;
+
 export interface VisionWall {
   x1: number;
   y1: number;
   x2: number;
   y2: number;
-  /** 0 none, 1 blocks, 2 terrain (blocks only from beyond one square). */
+  /** 0 none, 1 blocks. (A `2` was once documented as terrain and never read.) */
   blocksSight: number;
   /** 0 none, 1 blocks. */
   blocksMovement: number;
-  /** 0 wall, 1 door, 2 secret door. */
+  /** `PLAIN_WALL` | `DOOR` | `SECRET_DOOR`. */
   door: number;
-  /** 0 closed, 1 open, 2 locked. */
+  /** `DOOR_CLOSED` | `DOOR_OPEN` | `DOOR_LOCKED`. */
   doorState: number;
 }
 

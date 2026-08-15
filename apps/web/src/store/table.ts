@@ -39,7 +39,7 @@ interface TableState {
   /** Only ever populated for the DM; players never receive wall geometry. */
   walls: WireWall[];
   /** DM wall-drawing mode. */
-  wallTool: 'off' | 'wall' | 'door' | 'note' | 'draw' | 'arrow';
+  wallTool: 'off' | 'wall' | 'door' | 'secret' | 'note' | 'draw' | 'arrow';
   encounter: WireEncounter | null;
   templates: WireTemplate[];
   /**
@@ -86,14 +86,25 @@ interface TableState {
   deleteToken: (tokenId: string) => void;
   /** `points` carries a dragged stroke, in grid units; empty for a plain dot. */
   pingMap: (x: number, y: number, points?: number[]) => void;
-  setWallTool: (tool: 'off' | 'wall' | 'door' | 'note' | 'draw' | 'arrow') => void;
+  setWallTool: (tool: 'off' | 'wall' | 'door' | 'secret' | 'note' | 'draw' | 'arrow') => void;
   addDrawing: (kind: 'freehand' | 'arrow' | 'text', points: number[], color: string, text?: string) => void;
   eraseDrawing: (id: string | 'mine' | 'all') => void;
   placeNote: (x: number, y: number) => Promise<void>;
   toggleNote: (noteId: string, hidden: boolean) => Promise<void>;
   removeNote: (noteId: string) => Promise<void>;
-  createWall: (x1: number, y1: number, x2: number, y2: number, isDoor: boolean) => void;
+  createWall: (
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    kind: 'wall' | 'door' | 'secret',
+  ) => void;
   deleteWall: (wallId: string) => void;
+  /** DM only. Locking a door and revealing a secret one both live here. */
+  updateWall: (
+    wallId: string,
+    fields: Partial<{ door: number; doorState: number; blocksSight: number; blocksMovement: number }>,
+  ) => void;
   toggleDoor: (wallId: string) => void;
 
   startEncounter: () => void;
@@ -477,18 +488,30 @@ export const useTable = create<TableState>((set, get) => ({
     set({ wallTool: tool, selectedTokenId: null });
   },
 
-  createWall(x1, y1, x2, y2, isDoor) {
+  createWall(x1, y1, x2, y2, kind) {
     const sceneId = get().scene?.id;
     if (!sceneId) return;
     get().socket?.emit('wall:create', {
       sceneId, x1, y1, x2, y2,
       blocksMovement: 1, blocksSight: 1,
-      door: isDoor ? 1 : 0, doorState: 0,
+      door: kind === 'door' ? 1 : kind === 'secret' ? 2 : 0,
+      doorState: 0,
     });
   },
 
   deleteWall(wallId) {
     get().socket?.emit('wall:delete', { wallId });
+  },
+
+  /**
+   * The DM's own edits to a placed wall.
+   *
+   * `wall:update` has existed since walls did and had no caller at all, so a
+   * door could never be locked and a secret door could never be revealed - both
+   * were reachable only from a test.
+   */
+  updateWall(wallId, fields) {
+    get().socket?.emit('wall:update', { wallId, ...fields });
   },
 
   toggleDoor(wallId) {
