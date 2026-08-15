@@ -227,6 +227,13 @@ step. `movement:query` answers the asking socket alone, and a player's threat
 range is clipped to ground they have explored — a goblin's reach spilling round
 a corner would otherwise be a free map of the corridor.
 
+**An overlay leaks by its holes as well as its shape.** Movement occupancy is
+taken from the tokens the viewer can see, never from every token on the scene:
+a hidden ambusher used as a blocker punches a creature-shaped gap in a player's
+range and gives itself away. Accuracy loses to secrecy here — a range may cross
+a square that turns out to be occupied, and `token:commit` rejects the move
+anyway.
+
 **`disposition` is what tells friend from foe, and `ownerUserId` is not.** Blue
 for the party, green for neutral — allies and allies-for-now, never counted as
 a threat — red for hostile. They are separate signals on purpose:

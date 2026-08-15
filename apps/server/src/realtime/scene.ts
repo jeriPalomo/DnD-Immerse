@@ -934,13 +934,21 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
           user.id,
         );
 
+    // Occupancy is drawn from what this viewer can see, NOT from every token on
+    // the scene. A hidden ambusher standing in a corridor would otherwise punch
+    // a creature-shaped hole in the player's range and give itself away - the
+    // same leak as sending the token, arrived at by inference. The cost is that
+    // a range can cross a square that turns out to be occupied, which
+    // `token:commit` rejects anyway.
+    const blockers = ctx.isDM ? sceneTokens : visible;
+
     const rangeFor = async (token: Token) =>
       reachableSquares({
         origin: { x: token.x, y: token.y, w: token.w, h: token.h },
         speedFeet: await speedOf(token),
         feetPerSquare: scene.feetPerSquare,
         walls: sceneWalls,
-        occupied: sceneTokens.filter((t) => t.id !== token.id),
+        occupied: blockers.filter((t) => t.id !== token.id),
         bounds,
       });
 

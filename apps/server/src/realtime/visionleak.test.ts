@@ -332,6 +332,22 @@ describe('invariant: a threat range never draws a map', () => {
     }
   });
 
+  it('does not outline a hidden token by refusing to path through it', async () => {
+    // The Ambusher stands at (6,5), hidden, right beside Alice. If occupancy
+    // were taken from every token on the scene rather than the ones she can
+    // see, her range would have a creature-shaped hole in it - which gives the
+    // ambusher away just as surely as sending the token would.
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    const mine = player.tokens.find((t) => t.name === 'Alice PC');
+
+    const reply = next<{ squares: [number, number][] }>(aliceSocket, 'movement:range');
+    aliceSocket.emit('movement:query', { tokenId: mine!.id, threat: false });
+    const squares = (await reply)?.squares ?? [];
+
+    expect(squares.length).toBeGreaterThan(0);
+    expect(squares.some(([x, y]) => x === 6 && y === 5)).toBe(true);
+  });
+
   it('gives the DM the unclipped truth', async () => {
     const reply = next<{ squares: [number, number][] }>(dmSocket, 'movement:range');
     dmSocket.emit('movement:query', { tokenId: null, threat: true });
