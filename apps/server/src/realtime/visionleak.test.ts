@@ -294,6 +294,54 @@ describe('invariant: no out-of-sight tokens reach a player', () => {
 
     expect(player.tokens.some((t) => t.id === farTokenId)).toBe(false);
   });
+
+  it('does not announce a token placed out of sight', async () => {
+    // The create path used to skip the sight check entirely, so a DM placing an
+    // ambusher behind a wall shipped its full stat line to every player - and
+    // unlike a drag frame, nothing corrected it until the next scene push.
+    const heard: string[] = [];
+    aliceSocket.on('token:created', (payload: { token: { id: string } }) =>
+      heard.push(payload.token.id),
+    );
+
+    const created = next<{ token: { id: string } }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, x: 18, y: 2, name: 'Second Lurker', w: 1, h: 1, disposition: 'hostile',
+    });
+    const lurker = await created;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(lurker?.token.id).toBeTruthy();
+    expect(heard).not.toContain(lurker!.token.id);
+  });
+});
+
+describe('invariant: enemy hit points are the DM’s to reveal', () => {
+  it('redacts hp on a monster the player can see', async () => {
+    // In the room with Alice, so sight is not what is being tested here.
+    const placed = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, x: 6, y: 6, name: 'Ogre', hp: 7, maxHp: 59, disposition: 'hostile',
+    } as never);
+    const ogre = await placed;
+
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    const dmView = await refresh(dmSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+
+    // The tracker redacted this carefully and every other channel published it
+    // anyway - the board tooltip, the token HUD and the target panel all read
+    // hp straight off the wire, so "the boss is on 7" was one hover away.
+    const seen = player.tokens.find((t) => t.id === ogre!.token.id);
+    expect(seen).toBeTruthy();
+    expect(seen!.hp).toBeNull();
+    expect(seen!.maxHp).toBeNull();
+    expect(JSON.stringify(player.tokens)).not.toContain('59');
+
+    // The DM still sees the real numbers.
+    const dmSees = dmView.tokens.find((t) => t.id === ogre!.token.id);
+    expect(dmSees?.hp).toBe(7);
+    expect(dmSees?.maxHp).toBe(59);
+  });
 });
 
 describe('fog exploration persists', () => {

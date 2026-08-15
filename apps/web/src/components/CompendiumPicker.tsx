@@ -4,6 +4,7 @@ import {
   ITEM_CATEGORY_LABELS,
   SPELL_CLASSES,
   SPELL_SCHOOLS,
+  classInfo,
   maxSpellLevel,
   type ItemCategory,
   type ItemType,
@@ -82,8 +83,18 @@ export function CompendiumPicker({
   );
   const [category, setCategory] = useState<ItemCategory | ''>(initialCategory ?? '');
 
-  /** The highest level this character can take. -1 when the class never casts. */
-  const ceiling = casterClass ? maxSpellLevel(casterClass, casterLevel) : 9;
+  /**
+   * The highest spell level this character can take.
+   *
+   * Only a class the rules layer actually recognises as a caster is gated.
+   * `maxSpellLevel` returns -1 for a non-caster AND for anything it does not
+   * know, and since cantrips are level 0, gating on that blocked every row -
+   * including cantrips - for homebrew, for a multiclass string like
+   * "Fighter/Wizard", and for an Eldritch Knight. The class field is
+   * deliberately free text, so not knowing is not the same as not allowed.
+   */
+  const known = classInfo(casterClass);
+  const ceiling = known?.caster ? maxSpellLevel(casterClass, casterLevel) : 9;
   const [rows, setRows] = useState<(SpellRow | ItemRow)[]>([]);
   const [more, setMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -278,9 +289,7 @@ export function CompendiumPicker({
                               {describe(row)}
                               {tooHigh && (
                                 <span className="ml-1.5 text-ember-400">
-                                  {ceiling < 0
-                                    ? `${casterClass} does not cast`
-                                    : `needs level ${spellLevel} slots`}
+                                  needs level {spellLevel} slots
                                 </span>
                               )}
                             </div>

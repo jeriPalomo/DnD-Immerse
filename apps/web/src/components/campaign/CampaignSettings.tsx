@@ -31,6 +31,22 @@ export function CampaignSettings({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Fields typed since the last save, so a second edit cannot cancel the first. */
+  const pending = useRef<Partial<Campaign>>({});
+
+  // A save in flight when the panel closes should still land; a timer that has
+  // not fired yet should fire now rather than be thrown away.
+  useEffect(() => {
+    const flush = () => {
+      if (!timer.current) return;
+      clearTimeout(timer.current);
+      timer.current = null;
+      const body = pending.current;
+      pending.current = {};
+      if (Object.keys(body).length > 0) void api.patch(`/api/campaigns/${campaign.id}`, body);
+    };
+    return flush;
+  }, [campaign.id]);
 
   // Escape closes, like every other overlay on the board.
   useEffect(() => {
@@ -41,21 +57,33 @@ export function CampaignSettings({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  /** Debounced, like the recap: a name is typed, not submitted. */
+  /**
+   * Debounced, like the recap: a name is typed, not submitted.
+   *
+   * Edits ACCUMULATE into `pending` rather than replacing it. One shared timer
+   * with only the latest field meant typing a name and then tabbing to the
+   * description within the debounce window cancelled the name's save - and the
+   * response, carrying the server's older name, was then written back over the
+   * box you had just typed into. Creating a campaign drops you straight into
+   * this panel, so that is the first thing anyone does here.
+   */
   function patch(fields: Partial<Campaign>, immediate = false) {
     onChange({ ...campaign, ...fields });
+    pending.current = { ...pending.current, ...fields };
     setSaving(true);
 
     if (timer.current) clearTimeout(timer.current);
     const send = async () => {
+      const body = pending.current;
+      pending.current = {};
+      if (Object.keys(body).length === 0) return;
+
       try {
-        const res = await api.patch<{ campaign: Campaign }>(
-          `/api/campaigns/${campaign.id}`,
-          fields,
-        );
-        onChange(res.campaign);
+        await api.patch<{ campaign: Campaign }>(`/api/campaigns/${campaign.id}`, body);
         setError(null);
       } catch (err) {
+        // The optimistic value stays on screen with the error beside it rather
+        // than being silently reverted to something the user did not type.
         setError(err instanceof Error ? err.message : 'Could not save');
       } finally {
         setSaving(false);

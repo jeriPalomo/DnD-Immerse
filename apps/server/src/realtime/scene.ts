@@ -114,7 +114,19 @@ function toWireScene(scene: Scene): WireScene {
   };
 }
 
-function toWireToken(token: Token): WireToken {
+/**
+ * `hp`/`maxHp` are the DM's to reveal.
+ *
+ * The initiative tracker took care to redact them and then every other channel
+ * published them anyway - the board tooltip, the token HUD and the target panel
+ * all read `token.hp` straight off the wire. Redacting at the point the row
+ * becomes a payload is the only place it can be done once.
+ *
+ * A player keeps full numbers for anything they own, and for anything owned by
+ * another player: the party knowing each other's hit points is the point of a
+ * party panel. What is hidden is unowned tokens - monsters.
+ */
+function toWireToken(token: Token, showHp = true): WireToken {
   return {
     id: token.id,
     sceneId: token.sceneId,
@@ -135,8 +147,8 @@ function toWireToken(token: Token): WireToken {
     lightBright: token.lightBright,
     lightDim: token.lightDim,
     lightColor: token.lightColor,
-    hp: token.hp,
-    maxHp: token.maxHp,
+    hp: showHp ? token.hp : null,
+    maxHp: showHp ? token.maxHp : null,
     ac: token.ac,
     conditions: token.conditions,
     hidden: token.hidden,
@@ -152,10 +164,11 @@ function toWireToken(token: Token): WireToken {
  * away from spoiling an ambush. The `gm` layer is DM scratch space and is
  * stripped for the same reason.
  *
- * Phase 5 adds a second filter here for tokens outside the viewer's vision.
+ * Hit points are redacted for anything the party does not own. Line of sight is
+ * a separate filter applied by the callers that have a vision polygon to hand.
  */
 export function filterTokensFor(list: Token[], isDM: boolean, userId: string): WireToken[] {
-  if (isDM) return list.map(toWireToken);
+  if (isDM) return list.map((token) => toWireToken(token));
 
   return list
     .filter((token) => {
@@ -163,7 +176,7 @@ export function filterTokensFor(list: Token[], isDM: boolean, userId: string): W
       if (token.hidden && token.ownerUserId !== userId) return false;
       return true;
     })
-    .map(toWireToken);
+    .map((token) => toWireToken(token, Boolean(token.ownerUserId)));
 }
 
 /* ------------------------------------------------------------ permissions */
@@ -183,6 +196,36 @@ async function sceneOf(sceneId: string): Promise<Scene | null> {
 async function tokenOf(tokenId: string): Promise<Token | null> {
   const rows = await db.select().from(tokens).where(eq(tokens.id, tokenId)).limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * A token, but only if it belongs to the campaign this socket is acting in.
+ *
+ * Room membership says which campaigns you are in; it does not say which one a
+ * given id came from. A socket can be joined to two campaigns, and `context()`
+ * reports the first - so "is this socket a DM" was answered about the wrong
+ * table, and a DM of their own game could act on ids from somebody else's.
+ * Scoping the lookup makes that unrepresentable rather than remembered.
+ */
+async function tokenIn(tokenId: string, campaignId: string): Promise<Token | null> {
+  const rows = await db
+    .select({ token: tokens })
+    .from(tokens)
+    .innerJoin(scenes, eq(tokens.sceneId, scenes.id))
+    .where(and(eq(tokens.id, tokenId), eq(scenes.campaignId, campaignId)))
+    .limit(1);
+  return rows[0]?.token ?? null;
+}
+
+/** The same, for walls and doors. */
+async function wallIn(wallId: string, campaignId: string) {
+  const rows = await db
+    .select({ wall: wallsTable })
+    .from(wallsTable)
+    .innerJoin(scenes, eq(wallsTable.sceneId, scenes.id))
+    .where(and(eq(wallsTable.id, wallId), eq(scenes.campaignId, campaignId)))
+    .limit(1);
+  return rows[0]?.wall ?? null;
 }
 
 /**
@@ -292,7 +335,12 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
 }
 
 /** Broadcasts one token, or a deletion for viewers who may not see it. */
-async function broadcastToken(io: IOServer, campaignId: string, token: Token): Promise<void> {
+async function broadcastToken(
+  io: IOServer,
+  campaignId: string,
+  token: Token,
+  event: 'token:updated' | 'token:created' = 'token:updated',
+): Promise<void> {
   const scene = await sceneOf(token.sceneId);
   const sceneWalls = scene?.visionEnabled ? await wallsOf(token.sceneId) : [];
   const all = scene?.visionEnabled
@@ -312,7 +360,9 @@ async function broadcastToken(io: IOServer, campaignId: string, token: Token): P
       if (view && visibleTokens([token], view.polygons, userId).length === 0) visible = [];
     }
 
-    if (visible.length > 0) socket.emit('token:updated', { token: visible[0] });
+    // A viewer who may not see it is told to drop it - which for a token they
+    // never had is simply a no-op on the client.
+    if (visible.length > 0) socket.emit(event, { token: visible[0] });
     else socket.emit('token:deleted', { tokenId: token.id });
   }
 }
@@ -410,18 +460,25 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     if (!ctx) return;
 
     const input = tokenMoveSchema.parse(payload);
-    const token = await tokenOf(input.tokenId);
+    const token = await tokenIn(input.tokenId, ctx.campaignId);
     if (!token || !mayControl(token, ctx.isDM, user.id)) return;
+
+    const scene = await sceneOf(token.sceneId);
 
     // A hidden token's position streams only to the DM room; players are never
     // joined to it, so an invisible token cannot be tracked by its updates.
-    const target = token.hidden
-      ? campaignDmRoom(ctx.campaignId)
-      : campaignRoom(ctx.campaignId);
+    //
+    // With vision on, the DM room alone gets the fast path: a visible-but-
+    // unsighted monster being dragged behind a wall would otherwise stream its
+    // coordinates to every player at 30Hz. The per-socket loop below re-emits
+    // to the players who can actually see it.
+    const fastPath =
+      token.hidden || scene?.visionEnabled
+        ? campaignDmRoom(ctx.campaignId)
+        : campaignRoom(ctx.campaignId);
 
-    socket.broadcast.to(target).emit('token:moved', { ...input, byUserId: user.id });
+    socket.broadcast.to(fastPath).emit('token:moved', { ...input, byUserId: user.id });
 
-    const scene = await sceneOf(token.sceneId);
     if (!scene?.visionEnabled) return;
 
     // Recompute sight against the dragged position so fog moves with the
@@ -443,6 +500,13 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
         viewerId,
       );
 
+      // The drag frame, but only to a player who can see the thing being
+      // dragged. Skipping the sender keeps their own drag from fighting the
+      // echo, exactly as `socket.broadcast` does above.
+      if (s.id !== socket.id && sighted.some((t) => t.id === input.tokenId)) {
+        s.emit('token:moved', { ...input, byUserId: user.id });
+      }
+
       s.emit('vision:update', {
         polygons,
         tokens: filterTokensFor(sighted, false, viewerId),
@@ -455,7 +519,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     if (!ctx) return;
 
     const input = tokenCommitSchema.parse(payload);
-    const token = await tokenOf(input.tokenId);
+    const token = await tokenIn(input.tokenId, ctx.campaignId);
     if (!token || !mayControl(token, ctx.isDM, user.id)) {
       socket.emit('error', { message: 'You cannot move that token' });
       // Snap it back on the mover's screen.
@@ -580,10 +644,12 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     await db.insert(tokens).values(token);
     invalidateDragCache(input.sceneId);
 
-    for (const s of await io.in(campaignRoom(ctx.campaignId)).fetchSockets()) {
-      const visible = filterTokensFor([token as Token], s.data.rooms.get(ctx.campaignId) === 'dm', s.data.user.id);
-      if (visible.length > 0) s.emit('token:created', { token: visible[0] });
-    }
+    // Sight is checked here as well as hidden-ness. Placing an ambusher behind
+    // a wall used to ship its full stat line - name, HP, position - to every
+    // player, and unlike a drag frame nothing corrected it until the next full
+    // scene push.
+    const placed = await tokenIn(token.id, ctx.campaignId);
+    if (placed) await broadcastToken(io, ctx.campaignId, placed, 'token:created');
   });
 
   socket.on('token:update', async (payload) => {
@@ -591,12 +657,22 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     if (!ctx) return;
 
     const input = tokenUpdateSchema.parse(payload);
-    const token = await tokenOf(input.tokenId);
+    const token = await tokenIn(input.tokenId, ctx.campaignId);
     if (!token) return;
 
     // Players may edit HP and conditions on tokens they own; everything else
     // (hiding, locking, resizing, re-owning) is the DM's.
-    const dmOnly = ['hidden', 'locked', 'ownerUserId', 'actorId', 'actorLinked', 'layer', 'w', 'h'];
+    //
+    // `x`/`y` are here because `token:commit` is the only path that clamps to
+    // the map and runs the wall check - writing them through this event walked
+    // straight through walls. The sight and light fields are here because a
+    // token's own `visionRange` is what the vision sweep measures from, so a
+    // player could grant themselves the whole map, permanently: the fog
+    // exploration it produces is persisted.
+    const dmOnly = [
+      'hidden', 'locked', 'ownerUserId', 'actorId', 'actorLinked', 'layer', 'w', 'h',
+      'x', 'y', 'visionRange', 'darkvisionRange', 'lightBright', 'lightDim', 'lightColor',
+    ];
     const touchesDmField = dmOnly.some((key) => key in input);
 
     if (!ctx.isDM && (touchesDmField || token.ownerUserId !== user.id)) {
@@ -631,7 +707,9 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       return;
     }
 
-    const doomed = await tokenOf(tokenId);
+    const doomed = await tokenIn(tokenId, ctx.campaignId);
+    if (!doomed) return;
+
     await db.delete(tokens).where(eq(tokens.id, tokenId));
 
     if (doomed) {
@@ -737,6 +815,8 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     }
 
     const { wallId, ...fields } = wallUpdateSchema.parse(payload);
+    if (!(await wallIn(wallId, ctx.campaignId))) return;
+
     await db.update(wallsTable).set(fields).where(eq(wallsTable.id, wallId));
 
     const changed = await db.select().from(wallsTable).where(eq(wallsTable.id, wallId)).limit(1);
@@ -755,9 +835,11 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       return;
     }
 
-    const removed = await db.select().from(wallsTable).where(eq(wallsTable.id, wallId)).limit(1);
+    const removed = await wallIn(wallId, ctx.campaignId);
+    if (!removed) return;
+
     await db.delete(wallsTable).where(eq(wallsTable.id, wallId));
-    if (removed[0]) invalidateDragCache(removed[0].sceneId);
+    invalidateDragCache(removed.sceneId);
     io.to(campaignDmRoom(ctx.campaignId)).emit('wall:deleted', { wallId });
     await broadcastSceneState(io, ctx.campaignId);
   });
@@ -770,8 +852,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     const ctx = await context();
     if (!ctx) return;
 
-    const rows = await db.select().from(wallsTable).where(eq(wallsTable.id, wallId)).limit(1);
-    const wall = rows[0];
+    const wall = await wallIn(wallId, ctx.campaignId);
     if (!wall || wall.door === 0) return;
 
     if (wall.doorState === 2 && !ctx.isDM) {

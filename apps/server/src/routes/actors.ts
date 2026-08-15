@@ -22,7 +22,8 @@ import { getBulkActorAccess, requireActorRead, requireActorWrite } from '../lib/
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
 import { syncLinkedTokens } from '../lib/linkedTokens.js';
-import { deleteUpload, storeImage } from '../lib/uploads.js';
+import { storeImage } from '../lib/uploads.js';
+import { deleteOrphanedUploads } from '../lib/orphans.js';
 import type { ActorInput } from '@dnd/shared';
 
 /** Maps a validated ActorInput onto the column set the table expects. */
@@ -209,7 +210,11 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
     }
 
     await db.delete(actors).where(eq(actors.id, id));
-    await deleteUpload(actor.portraitUrl);
+    // Reference-checked, not deleted outright: `tokens.actorId` is `set null`,
+    // so tokens stamped from this actor OUTLIVE it while still holding the
+    // portrait they inherited. Deleting the file unconditionally left broken
+    // images on every board the actor had ever appeared on.
+    await deleteOrphanedUploads([actor.portraitUrl]);
     return { ok: true };
   });
 
@@ -225,8 +230,10 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
 
     const previous = await db.select({ url: actors.portraitUrl }).from(actors).where(eq(actors.id, id)).limit(1);
     await db.update(actors).set({ portraitUrl: stored.url }).where(eq(actors.id, id));
-    // Replacing a portrait should not leave the old one on disk forever.
-    await deleteUpload(previous[0]?.url ?? null);
+    // Replacing a portrait should not leave the old one on disk forever - but
+    // tokens inherit that URL by value, so only remove it once nothing else
+    // points at it.
+    await deleteOrphanedUploads([previous[0]?.url ?? null]);
 
     return { portraitUrl: stored.url };
   });

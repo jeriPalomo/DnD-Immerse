@@ -24,7 +24,7 @@ import type {
   WireInitiativeEntry,
 } from '@dnd/shared';
 import { db } from '../db/index.js';
-import { activeEffects, actors, encounters, initiativeEntries, tokens } from '../db/schema.js';
+import { activeEffects, actors, encounters, initiativeEntries, scenes, tokens } from '../db/schema.js';
 import { getMembership } from '../auth/guards.js';
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
@@ -157,6 +157,25 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
   }
 
   /**
+   * Tokens by id, but only the ones that belong to the campaign this socket is
+   * acting in.
+   *
+   * The ids arrive from the client, and room membership only says which
+   * campaigns this socket is in - not which one an id came from. Filtering here
+   * means an id borrowed from another table simply is not found, rather than
+   * being acted on because the sender happens to be a DM somewhere.
+   */
+  async function tokensIn(tokenIds: string[], campaignId: string): Promise<Token[]> {
+    if (tokenIds.length === 0) return [];
+    const rows = await db
+      .select({ token: tokens })
+      .from(tokens)
+      .innerJoin(scenes, eq(tokens.sceneId, scenes.id))
+      .where(and(inArray(tokens.id, tokenIds), eq(scenes.campaignId, campaignId)));
+    return rows.map((row) => row.token);
+  }
+
+  /**
    * Whether a player may damage this token.
    *
    * Monsters, yes; anybody's character, no. Owned tokens are somebody's
@@ -222,7 +241,7 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       return;
     }
 
-    const chosen = await db.select().from(tokens).where(inArray(tokens.id, input.tokenIds));
+    const chosen = await tokensIn(input.tokenIds, ctx.campaignId);
 
     for (const token of chosen) {
       // Rolled on the server, like every other die in the app.
@@ -358,8 +377,7 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
     const ctx = await context();
     if (!ctx) return;
 
-    const found = await db.select().from(tokens).where(eq(tokens.id, tokenId)).limit(1);
-    const token = found[0];
+    const token = (await tokensIn([tokenId], ctx.campaignId))[0];
     if (!token?.actorId) return;
 
     if (!ctx.isDM && token.ownerUserId !== user.id) {
@@ -427,7 +445,7 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
     if (!ctx) return;
 
     const input = damageApplySchema.parse(payload);
-    const requested = await db.select().from(tokens).where(inArray(tokens.id, input.tokenIds));
+    const requested = await tokensIn(input.tokenIds, ctx.campaignId);
 
     // A player may subtract from what they are fighting, and nothing else: the
     // DM keeps every character's hit points, and healing stays theirs too.

@@ -254,8 +254,18 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     const file = await request.file();
     if (!file) throw new HttpError(400, 'No file uploaded');
 
+    const previous = await db
+      .select({ url: campaigns.bannerUrl })
+      .from(campaigns)
+      .where(eq(campaigns.id, id))
+      .limit(1);
+
     const stored = await storeImage(await file.toBuffer(), 'maps', { maxDimension: 1600 });
     await db.update(campaigns).set({ bannerUrl: stored.url }).where(eq(campaigns.id, id));
+
+    // Replacing a banner used to leave the old one on disk with nothing
+    // pointing at it.
+    await deleteOrphanedUploads([previous[0]?.url ?? null]);
 
     return { bannerUrl: stored.url };
   });

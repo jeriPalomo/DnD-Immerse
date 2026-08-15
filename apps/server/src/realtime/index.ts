@@ -1,5 +1,7 @@
 import { Server } from 'socket.io';
+import { ZodError } from 'zod';
 import { campaignDmRoom, campaignRoom, userRoom } from '@dnd/shared';
+import type { Socket } from 'socket.io';
 import type { FastifyInstance } from 'fastify';
 import type { ClientToServerEvents, ServerToClientEvents, WirePresence } from '@dnd/shared';
 import { SESSION_COOKIE, validateSession } from '../auth/session.js';
@@ -91,6 +93,38 @@ declare module 'fastify' {
   }
 }
 
+/**
+ * Makes a throwing handler an error message rather than a dead server.
+ *
+ * Every handler starts with `schema.parse(payload)`, and socket.io does not
+ * await a listener's promise - so one malformed payload from any client became
+ * an unhandled rejection, which Node turns into a process exit by default. That
+ * is the whole table's session gone because somebody's client sent a stray
+ * field.
+ *
+ * Wrapping `socket.on` once covers every handler in every module, including
+ * ones added later, which is the point: a rule that has to be remembered at 33
+ * call sites is a rule that will be missed at the 34th.
+ */
+function guardHandlers(socket: Socket<ClientToServerEvents, ServerToClientEvents, object, SocketData>): void {
+  const register = socket.on.bind(socket);
+
+  socket.on = ((event: string, handler: (...args: unknown[]) => unknown) =>
+    register(event as never, (async (...args: unknown[]) => {
+      try {
+        await handler(...args);
+      } catch (err) {
+        const zod = err instanceof ZodError;
+        socket.emit('error', {
+          message: zod ? 'That request was not something the table understood' : 'Something went wrong',
+        });
+        // Logged in full server-side: the client is told nothing useful on
+        // purpose, but we still need to see it.
+        console.error(`socket ${event} failed for user ${socket.data.user?.id}:`, err);
+      }
+    }) as never)) as typeof socket.on;
+}
+
 export function attachRealtime(app: FastifyInstance): IOServer {
   const io: IOServer = new Server(app.server, {
     path: '/socket.io',
@@ -118,6 +152,8 @@ export function attachRealtime(app: FastifyInstance): IOServer {
 
   io.on('connection', (socket) => {
     const user = socket.data.user;
+
+    guardHandlers(socket);
 
     // Personal room, so whispers can be delivered across all of a user's tabs.
     void socket.join(userRoom(user.id));

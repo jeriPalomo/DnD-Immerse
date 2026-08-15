@@ -221,6 +221,27 @@ to agree: `campaignMembers.role === 'dm'` (what `requireDM` reads) and
 creation and nothing reassigns either, so they cannot currently diverge — but
 anything that transfers a campaign has to write both.
 
+**A socket handler must never take an id on trust.** Room membership says which
+campaigns you are in; it does not say which one an id came from, and
+`context()` reports whichever campaign was joined first. Every handler that
+takes a client-supplied id looks it up through `tokenIn` / `wallIn` /
+`tokensIn`, which join to `scenes.campaignId` — so an id borrowed from another
+table is simply not found. Without that, "is this socket a DM" was being
+answered about the wrong game.
+
+**A throwing handler must not be able to end the session.** Every handler
+starts with `schema.parse`, and socket.io does not await a listener's promise,
+so one malformed payload became an unhandled rejection and Node exited — the
+whole table dropped because somebody's client sent a stray field.
+`guardHandlers` wraps `socket.on` once per connection, which is the point: a
+rule enforced at 33 call sites is a rule that will be missed at the 34th.
+
+**Hit points are redacted where the row becomes a payload.** `toWireToken`
+takes `showHp`, false for anything the party does not own. The initiative
+tracker used to redact carefully while the board tooltip, the token HUD and the
+target panel all read `hp` straight off the wire — one hover and the boss's 7 HP
+was public. Redacting in one place is the only way it stays redacted.
+
 **Socket authorization is re-checked in every handler.** Room membership
 authenticates; it does not authorize. DM-only data travels on the separate
 `campaign:{id}:dm` room so secrecy is structural rather than a forgettable

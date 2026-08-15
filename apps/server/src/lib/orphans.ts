@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import {
   actors,
   campaigns,
+  items,
   journalPages,
   scenes,
   tokens,
@@ -29,6 +30,10 @@ const FILE_COLUMNS = [
   { table: tokens, column: tokens.imageUrl },
   { table: scenes, column: scenes.mapImageUrl },
   { table: journalPages, column: journalPages.fileUrl },
+  // Item art is settable through the items API. It was the one URL-bearing
+  // column missing from this list, which is exactly how a shared file gets
+  // deleted out from under something that still points at it.
+  { table: items, column: items.imageUrl },
 ] as const;
 
 async function stillReferenced(url: string): Promise<boolean> {

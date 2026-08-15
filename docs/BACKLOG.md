@@ -20,6 +20,72 @@ the desktop; run `npm run db:migrate` after pulling on the laptop.
 
 ---
 
+## Bug sweep — 2026-08-14
+
+A three-way audit of the server, the client and the stated invariants. Nine
+defects fixed; the interesting thing is how many were a guard that existed but
+asked the wrong question.
+
+**A malformed socket payload killed the server.** Handlers open with
+`schema.parse`, socket.io does not await a listener's promise, and Node's
+default for an unhandled rejection is to exit — so one stray field dropped
+everyone at the table. `guardHandlers` now wraps `socket.on` once per
+connection; there is an `unhandledRejection` net under it that logs loudly
+rather than exiting. Verified by sending four malformed payloads: three Zod
+failures came back as clean client errors, the server stayed up.
+
+**Authorization asked about the wrong campaign.** `context()` returns the
+*first* joined room, and handlers took ids on trust — so a DM of their own game
+who was also a player in yours could delete your tokens, toggle your doors or
+apply damage in your campaign, because the only question asked was "is this
+socket a DM somewhere". Every id now resolves through `tokenIn` / `wallIn` /
+`tokensIn`, which join to `scenes.campaignId`.
+
+**Two vision leaks, same root cause.** `filterTokensFor` had no sight
+component — the doc comment promised a second filter that actually lived in
+`broadcastSceneState`. So `token:created` shipped an ambusher's full stat line
+to every player, and `token:move` streamed coordinates at 30Hz checking only
+`hidden`. The create path now goes through `broadcastToken`, which already did
+this correctly; the drag path takes the DM-room fast path when vision is on and
+re-emits per socket to players who can actually see it.
+
+**Enemy HP was redacted in exactly one place out of four.** `toWireToken` sent
+raw `hp`/`maxHp` to players, so the tracker's careful redaction was undone by
+the board tooltip, the token HUD and the target panel. Redacted at the wire
+now. All four render sites already guarded on null, so they degrade to showing
+nothing — note this means players no longer see a monster's health bar at all,
+which is stricter than a coarse bloodied/healthy indicator would be.
+
+**`token:update` was a way around the rules.** `x`/`y` were not in the DM-only
+field list, so writing position through that event skipped the clamp and the
+wall check that `token:commit` performs. `visionRange` was writable too, and it
+is what the vision sweep measures from — a player could grant themselves the
+whole map, permanently, since the fog exploration it produces is persisted.
+
+**Shared files were deleted out from under live rows.** `tokens.actorId` is
+`set null`, so tokens outlive their actor while holding the portrait they
+inherited; deleting an actor unlinked a file its own tokens still drew. Same on
+portrait replacement, and on token art (which was prefix-checked rather than
+reference-checked). All now go through `deleteOrphanedUploads`, which also
+gained the `items.imageUrl` column it was missing. Map and banner replacement
+leaked the old file entirely and now clean up.
+
+**Two regressions from the previous pass, both mine.** The spell picker gated
+on `maxSpellLevel`, which returns -1 for a class it does not recognise — and
+cantrips are level 0, so a homebrew or multiclass name blocked *every* spell.
+Only a recognised caster is gated now. And `CampaignSettings` shared one
+debounce timer across name, description and ruleset, so typing a name and
+tabbing to the description cancelled the name's save and then wrote the
+server's older name back over the box; edits accumulate now and flush on close.
+
+**Left alone deliberately:** `expireEffectsFor` has no campaign filter and
+takes a `campaignId` it never uses — real, but `activeEffects` has zero insert
+paths, so it deletes from an always-empty table. Fix it when timed effects get
+built. Also noted and not acted on: `wall:update` has a working server handler
+and no client caller, so a DM cannot lock a door through the UI.
+
+---
+
 ## Third pass — 2026-08-14
 
 Twenty items. The through-line was that the 5e layer knew almost nothing:

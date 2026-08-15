@@ -188,6 +188,11 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
       .set({ mapImageUrl: stored.url, mapWidth: stored.width, mapHeight: stored.height })
       .where(eq(scenes.id, id));
 
+    // Maps are the 25MB uploads, and replacing one used to leave the old file
+    // on disk forever. Reference-checked because one piece of art can be the
+    // map for two scenes.
+    await deleteOrphanedUploads([scene.mapImageUrl]);
+
     const rows = await db.select().from(scenes).where(eq(scenes.id, id)).limit(1);
     // Reported, not applied: the DM sees the overlay and accepts it.
     return { scene: rows[0], grid };
@@ -219,7 +224,10 @@ export async function sceneRoutes(app: FastifyInstance): Promise<void> {
 
     // Only remove the old art if it was this token's own upload; an inherited
     // actor portrait is still in use by the sheet.
-    if (previous?.startsWith('/uploads/tokens/')) await deleteUpload(previous);
+    // Reference-checked rather than prefix-checked: a duplicated token shares
+    // its art by value, so "it lives under tokens/" is not the same question as
+    // "nothing else is using it".
+    await deleteOrphanedUploads([previous]);
 
     if (app.io) {
       const { broadcastSceneState } = await import('../realtime/scene.js');
