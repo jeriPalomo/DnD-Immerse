@@ -20,6 +20,50 @@ the desktop; run `npm run db:migrate` after pulling on the laptop.
 
 ---
 
+## Movement ranges — 2026-08-15
+
+Fire Emblem style: select a unit and see where it can go, toggle the reach of
+everything hostile, pick one enemy out of that union.
+
+**The blocker was telling friend from foe.** `disposition` was the right field
+and was effectively unreachable — no UI set it anywhere, bestiary monsters were
+forced hostile at *two* independent points, and `'friendly'` was written in one
+place in the whole repo. There was no path that produced a friendly or neutral
+NPC at all, so a friendly ogre had to be built as a player character.
+
+Fixed first, and worth having on its own: a three-way control in the token HUD,
+disposition added to the DM-only field list (it decides who the threat overlay
+paints, so a player able to re-flag their own token could opt out of being one),
+the unconditional overwrite at placement made `??`-guarded like its neighbours,
+a **New NPC** button, and NPC actors now defaulting to neutral rather than
+hostile — the hostile default belongs to the bestiary, where it is set
+explicitly. The disposition ring was also last in precedence behind
+down/targeted/selected, so it vanished exactly when you were working with a
+token; there is a pip now.
+
+**The reachability core** is `packages/shared/src/movement.ts` — a BFS gated by
+speed, walls and occupancy, with footprints respected so a Gargantuan dragon
+cannot squeeze through a doorway. 14 unit tests carry it.
+
+Two things surfaced while building it. `movementBlocked` is a **single
+centre-to-centre segment** as `token:commit` uses it, which both under-blocks
+and over-blocks; the fill steps one square at a time, which is the honest use.
+And the DMG's optional diagonal rule is **path-dependent** — one diagonal costs
+the same under both rules and the difference only lands on the next — so a
+per-step cost cannot express it. Rather than ship a `rule` parameter that
+quietly behaved as `standard`, there isn't one.
+
+**It runs on the server** because players never receive walls, answered to the
+asking socket alone. A player's threat range is clipped to explored fog, with a
+test asserting no square outside it ever arrives.
+
+Colours: blue for your unit, green for neutral, red for hostile — hostile is
+the only thing the threat union covers. Drawn under the tokens and under the
+fog, so a player's overlay is covered wherever their sight is. The union uses
+`FogLayer`'s single-path fill; one token's range uses per-square `Rect`s.
+
+---
+
 ## Bug sweep — 2026-08-14
 
 A three-way audit of the server, the client and the stated invariants. Nine

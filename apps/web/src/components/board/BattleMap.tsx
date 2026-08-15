@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import {
+  DISPOSITION_COLOR,
   DM_COLOR,
   TOKEN_MOVE_THROTTLE_MS,
   actorColor,
@@ -15,6 +16,7 @@ import type Konva from 'konva';
 import type { WireScene, WireToken } from '@dnd/shared';
 import { DoorLayer, FogLayer, NoteLayer, WallLayer } from './FogLayer.js';
 import { DrawingLayer } from './DrawingLayer.js';
+import { MovementLayer } from './MovementLayer.js';
 import { TemplateLayer } from './TemplateLayer.js';
 import { LightLayer, WeatherLayer } from './AtmosphereLayer.js';
 import { useTable } from '../../store/table.js';
@@ -60,12 +62,6 @@ function useImage(url: string | null): HTMLImageElement | null {
   return image;
 }
 
-const DISPOSITION_COLOR: Record<string, string> = {
-  friendly: '#34d399',
-  neutral: '#a9a3bd',
-  hostile: '#f87171',
-};
-
 export function BattleMap({
   isDM,
   focused = false,
@@ -77,7 +73,7 @@ export function BattleMap({
 }) {
   const {
     scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool, templates, notes,
-    drawings, encounter, activeActorId,
+    drawings, encounter, activeActorId, moveRange, threatRange, showThreat, queryMovement, toggleThreat,
     select, target, moveToken, commitToken, pingMap, createWall, deleteWall, toggleDoor, clearTemplate,
     placeNote, toggleNote, removeNote, addDrawing, eraseDrawing,
   } = useTable();
@@ -137,6 +133,12 @@ export function BattleMap({
   }, []);
 
   useEffect(() => () => observerRef.current?.disconnect(), []);
+
+  // Selecting a token asks the server where it can go. Reachability needs walls
+  // and players do not have them, so this cannot be worked out locally.
+  useEffect(() => {
+    queryMovement(selectedTokenId);
+  }, [selectedTokenId, queryMovement]);
 
   /** Centres the whole map in the viewport. Shared by the button and the F key. */
   const fitToMap = useCallback(() => {
@@ -454,6 +456,17 @@ export function BattleMap({
           />
         </Layer>
 
+        {/* Under the tokens too, and under the fog - which draws above them -
+            so a player's range is covered wherever their sight is. */}
+        <Layer listening={false}>
+          <MovementLayer
+            grid={grid}
+            moveSquares={moveRange.tokenId === selectedTokenId ? moveRange.squares : []}
+            moveDisposition={selected?.disposition ?? 'friendly'}
+            threatSquares={showThreat ? threatRange : []}
+          />
+        </Layer>
+
         <Layer>
           {tokens
             .filter((t) => t.layer !== 'gm' || isDM)
@@ -571,6 +584,17 @@ export function BattleMap({
             {focused ? 'Exit focus' : 'Focus'}
           </button>
         )}
+        <button
+          onClick={toggleThreat}
+          title="Show how far every enemy you can see could move (R)"
+          className={`rounded border px-2 py-1 text-[10px] transition-colors ${
+            showThreat
+              ? 'border-red-500 bg-red-500/20 text-red-300'
+              : 'border-ink-700 bg-ink-950/85 text-ink-400 hover:border-red-500 hover:text-red-300'
+          }`}
+        >
+          Threat
+        </button>
         <button
           onClick={fitToMap}
           title="Fit the map to the window (F)"
@@ -831,6 +855,19 @@ function TokenShape({
         stroke={down ? '#7d1d1d' : targeted ? '#e8853f' : selected ? '#8b7bf0' : ring}
         strokeWidth={targeted || selected ? 3.5 : 2}
         dash={targeted ? [6, 4] : undefined}
+      />
+
+      {/* Allegiance, in a corner where nothing else competes for the colour.
+          The ring is last in precedence behind down/targeted/selected, so it
+          disappears exactly when you are working with a token - and it only
+          ever reached the placeholder circle on tokens with no art. */}
+      <Circle
+        x={width - Math.min(width, height) * 0.14}
+        y={Math.min(width, height) * 0.14}
+        radius={Math.max(3, Math.min(width, height) * 0.09)}
+        fill={ring}
+        stroke="#0b0a10"
+        strokeWidth={1.5}
       />
 
       {/* Down: dimmed and struck through, so it is obvious at a glance which

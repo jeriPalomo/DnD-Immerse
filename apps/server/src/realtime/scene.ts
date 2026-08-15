@@ -8,7 +8,10 @@ import {
   clampToMap,
   drawingCreateSchema,
   movementBlocked,
+  movementQuerySchema,
   pingSchema,
+  reachableSquares,
+  unionOfReach,
   snapTokenPosition,
   tokenCenter,
   tokenCommitSchema,
@@ -38,6 +41,7 @@ import {
 import {
   computeLivePolygons,
   computePlayerView,
+  gridExtent,
   toWireDoor,
   toWireWall,
   visibleTokens,
@@ -215,6 +219,23 @@ async function tokenIn(tokenId: string, campaignId: string): Promise<Token | nul
     .where(and(eq(tokens.id, tokenId), eq(scenes.campaignId, campaignId)))
     .limit(1);
   return rows[0]?.token ?? null;
+}
+
+/**
+ * How fast a token moves.
+ *
+ * Speed lives on the actor, not the token, and is not on the wire at all - so
+ * this is the only place that can answer it. A token with no sheet behind it
+ * gets the default humanoid 30.
+ */
+async function speedOf(token: Token): Promise<number> {
+  if (!token.actorId) return 30;
+  const rows = await db
+    .select({ speed: actors.speed })
+    .from(actors)
+    .where(eq(actors.id, token.actorId))
+    .limit(1);
+  return rows[0]?.speed ?? 30;
 }
 
 /** The same, for walls and doors. */
@@ -595,7 +616,11 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
         w = w !== 1 ? w : (proto.w ?? 1);
         h = h !== 1 ? h : (proto.h ?? 1);
         actorLinked = proto.actorLinked ?? false;
-        disposition = proto.disposition ?? 'hostile';
+        // `??`-guarded like ac/hp/maxHp below, rather than the unconditional
+        // overwrite this used to be: an explicit disposition on the wire is a
+        // deliberate choice, and undo re-creating a deleted token was silently
+        // losing it.
+        disposition = disposition ?? proto.disposition;
         ac = ac ?? actor.armorClass;
         // An unlinked token copies HP so each goblin tracks its own.
         hp = hp ?? actor.hpCurrent;
@@ -627,7 +652,8 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       h,
       rotation: input.rotation,
       layer: input.layer,
-      disposition,
+      // Last stop for the default, now that the schema no longer applies one.
+      disposition: disposition ?? 'hostile',
       visionRange: input.visionRange,
       darkvisionRange: input.darkvisionRange,
       lightBright: input.lightBright,
@@ -669,9 +695,13 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     // token's own `visionRange` is what the vision sweep measures from, so a
     // player could grant themselves the whole map, permanently: the fog
     // exploration it produces is persisted.
+    // `disposition` is here because it decides who the threat overlay paints
+    // red: a player able to re-flag their own token could simply opt out of
+    // being a threat. Allegiance is the DM's to declare.
     const dmOnly = [
       'hidden', 'locked', 'ownerUserId', 'actorId', 'actorLinked', 'layer', 'w', 'h',
       'x', 'y', 'visionRange', 'darkvisionRange', 'lightBright', 'lightDim', 'lightColor',
+      'disposition',
     ];
     const touchesDmField = dmOnly.some((key) => key in input);
 
@@ -870,6 +900,70 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     // Everyone's sight changes the moment a door swings.
     await broadcastSceneState(io, ctx.campaignId);
 
+  });
+
+  /**
+   * Where something can move.
+   *
+   * A query, answered to the asking socket alone - the established shape for
+   * this codebase, since no handler anywhere uses an acknowledgement. It has to
+   * be computed here rather than in the browser for the same reason vision is:
+   * players are never sent wall geometry, so a client cannot know what stops a
+   * step.
+   */
+  socket.on('movement:query', async (payload) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const input = movementQuerySchema.parse(payload);
+    const scene = await activeSceneOf(ctx.campaignId);
+    if (!scene) return;
+
+    const { walls: sceneWalls, tokens: sceneTokens } = await dragState(scene.id);
+    const { gridWidth, gridHeight } = gridExtent(scene);
+    const bounds = { width: gridWidth, height: gridHeight };
+
+    // What this viewer may act on at all. A player asking about a token they
+    // cannot see gets nothing back rather than a shape to infer from.
+    const view = ctx.isDM ? null : await computePlayerView(scene, sceneWalls, sceneTokens, user.id);
+    const visible = ctx.isDM
+      ? sceneTokens
+      : visibleTokens(
+          sceneTokens.filter((t) => t.layer !== 'gm' && (!t.hidden || t.ownerUserId === user.id)),
+          view?.polygons ?? [],
+          user.id,
+        );
+
+    const rangeFor = async (token: Token) =>
+      reachableSquares({
+        origin: { x: token.x, y: token.y, w: token.w, h: token.h },
+        speedFeet: await speedOf(token),
+        feetPerSquare: scene.feetPerSquare,
+        walls: sceneWalls,
+        occupied: sceneTokens.filter((t) => t.id !== token.id),
+        bounds,
+      });
+
+    let squares: [number, number][] = [];
+
+    if (input.threat) {
+      // Hostile only. Neutral is an ally, or an ally for now, and painting it
+      // as a threat is the thing that makes the overlay untrustworthy.
+      const enemies = visible.filter((t) => t.disposition === 'hostile');
+      squares = unionOfReach(await Promise.all(enemies.map(rangeFor)));
+    } else if (input.tokenId) {
+      const token = visible.find((t) => t.id === input.tokenId);
+      if (token) squares = await rangeFor(token);
+    }
+
+    // Clipped to ground this player has already walked or seen. Without it a
+    // goblin's reach spilling round a corner is a free map of the corridor.
+    if (!ctx.isDM && squares.length > 0) {
+      const explored = new Set((view?.vision.explored ?? []).map(([x, y]) => `${x}:${y}`));
+      squares = squares.filter(([x, y]) => explored.has(`${x}:${y}`));
+    }
+
+    socket.emit('movement:range', { tokenId: input.tokenId, threat: input.threat, squares });
   });
 
   /**

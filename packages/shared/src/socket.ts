@@ -251,6 +251,19 @@ export const wallUpdateSchema = wallCreateSchema
 export type WallCreatePayload = z.infer<typeof wallCreateSchema>;
 export type WallUpdatePayload = z.infer<typeof wallUpdateSchema>;
 
+/**
+ * Ask where something can move.
+ *
+ * A query rather than a command, answered only to the socket that asked -
+ * reachability depends on walls, and players are never sent those, so this is
+ * the only way a client can know. `threat` asks for the union of every hostile
+ * the asker can see instead of one token's own range.
+ */
+export const movementQuerySchema = z.object({
+  tokenId: z.string().nullable().default(null),
+  threat: z.boolean().default(false),
+});
+
 export const pingSchema = z.object({
   sceneId: z.string(),
   x: z.number(),
@@ -395,6 +408,18 @@ export interface ServerToClientEvents {
   'ping:map': (payload: PingPayload & { byUserId: string; color: string }) => void;
 
   /**
+   * Squares a token can reach, or the union of what every visible hostile can
+   * reach. Sent only to the socket that asked, and clipped for a player to what
+   * they have explored - a threat range flowing round a corner would otherwise
+   * draw them a corridor they have not found.
+   */
+  'movement:range': (payload: {
+    tokenId: string | null;
+    threat: boolean;
+    squares: [number, number][];
+  }) => void;
+
+  /**
    * Live sight during a drag. Carries polygons and the tokens now in view, but
    * no explored cells - fog exploration is persisted once, on drop, rather than
    * written thirty times a second.
@@ -430,6 +455,7 @@ export interface ClientToServerEvents {
   'chat:cardAction': (payload: z.infer<typeof cardActionSchema>) => void;
   /** DM only. Deletes the campaign's log outright - chat and battle alike. */
   'chat:clear': (payload: Record<string, never>) => void;
+  'movement:query': (payload: z.infer<typeof movementQuerySchema>) => void;
 
   'initiative:update': (payload: InitiativeUpdatePayload) => void;
   'encounter:start': (payload: { sceneId: string | null }) => void;

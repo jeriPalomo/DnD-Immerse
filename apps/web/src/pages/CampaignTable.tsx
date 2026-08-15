@@ -115,6 +115,9 @@ export default function CampaignTable() {
       const { selectedTokenId, target } = useTable.getState();
       if (selectedTokenId) target(selectedTokenId);
     },
+    // Enemy threat ranges, on and off. `r` rather than anything more obvious
+    // because Ctrl+R has to keep reloading the page.
+    r: () => useTable.getState().toggleThreat(),
     ' ': (e) => {
       // Space would otherwise scroll the page behind the board.
       e.preventDefault();

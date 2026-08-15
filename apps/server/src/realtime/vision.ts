@@ -33,7 +33,7 @@ const DEFAULT_VISION_FEET = 60;
  */
 const DEFAULT_GRID_EXTENT = 100;
 
-function gridExtent(scene: Scene): { gridWidth: number; gridHeight: number } {
+export function gridExtent(scene: Scene): { gridWidth: number; gridHeight: number } {
   if (scene.gridSize <= 0 || scene.mapWidth <= 0 || scene.mapHeight <= 0) {
     return { gridWidth: DEFAULT_GRID_EXTENT, gridHeight: DEFAULT_GRID_EXTENT };
   }

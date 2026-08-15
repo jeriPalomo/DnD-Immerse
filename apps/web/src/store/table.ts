@@ -1,6 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import { create } from 'zustand';
 import { api } from '../lib/api.js';
+import { getPref, setPref } from '../lib/prefs.js';
 import type {
   ClientToServerEvents,
   RollMode,
@@ -126,6 +127,17 @@ interface TableState {
   ) => void;
   /** DM only, enforced on the server. Takes the battle log with it. */
   clearChat: () => void;
+
+  /**
+   * Movement overlays. Reachability depends on walls, which players never
+   * receive, so both of these are answers from the server rather than anything
+   * the client works out.
+   */
+  moveRange: { tokenId: string | null; squares: [number, number][] };
+  threatRange: [number, number][];
+  showThreat: boolean;
+  queryMovement: (tokenId: string | null) => void;
+  toggleThreat: () => void;
 }
 
 const MAX_MESSAGES = 300;
@@ -182,6 +194,9 @@ export const useTable = create<TableState>((set, get) => ({
   encounter: null,
   lastDamage: null,
   journalVersion: 0,
+  moveRange: { tokenId: null, squares: [] },
+  threatRange: [],
+  showThreat: getPref('board-threat', false),
   undoStack: [],
   toast: null,
   reveal: null,
@@ -228,6 +243,13 @@ export const useTable = create<TableState>((set, get) => ({
         drawings: drawings ?? [],
         walls: walls ?? [],
       });
+
+      // A door opening or a token moving changes what is reachable, so any
+      // range on screen is now a lie. Drop it and ask again.
+      const { moveRange, showThreat } = get();
+      set({ moveRange: { tokenId: moveRange.tokenId, squares: [] }, threatRange: [] });
+      if (moveRange.tokenId) get().queryMovement(moveRange.tokenId);
+      if (showThreat) socket.emit('movement:query', { tokenId: null, threat: true });
     });
     // Live sight during a drag: polygons and tokens only. Explored cells are
     // carried over from the last full scene:state, since fog exploration is
@@ -246,6 +268,11 @@ export const useTable = create<TableState>((set, get) => ({
     socket.on('template:state', ({ templates }) => set({ templates }));
     socket.on('journal:changed', () => set({ journalVersion: get().journalVersion + 1 }));
     socket.on('chat:cleared', () => set({ messages: [] }));
+
+    socket.on('movement:range', ({ tokenId, threat, squares }) => {
+      if (threat) set({ threatRange: squares });
+      else set({ moveRange: { tokenId, squares } });
+    });
     socket.on('handout:reveal', (reveal) => {
       set({ reveal });
       // Long enough to take in, short enough not to block the table.
@@ -533,6 +560,17 @@ export const useTable = create<TableState>((set, get) => ({
 
   clearChat() {
     get().socket?.emit('chat:clear', {});
+  },
+
+  queryMovement(tokenId) {
+    get().socket?.emit('movement:query', { tokenId, threat: false });
+  },
+
+  toggleThreat() {
+    const showThreat = !get().showThreat;
+    setPref('board-threat', showThreat);
+    set({ showThreat, threatRange: showThreat ? get().threatRange : [] });
+    if (showThreat) get().socket?.emit('movement:query', { tokenId: null, threat: true });
   },
 
   cardAction(itemId, actorId, action, mode = 'normal') {

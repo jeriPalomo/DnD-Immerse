@@ -316,6 +316,33 @@ describe('invariant: no out-of-sight tokens reach a player', () => {
   });
 });
 
+describe('invariant: a threat range never draws a map', () => {
+  it('sends a player no square they have not explored', async () => {
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    const explored = new Set(player.vision!.explored.map(([x, y]) => `${x}:${y}`));
+
+    const reply = next<{ squares: [number, number][] }>(aliceSocket, 'movement:range');
+    aliceSocket.emit('movement:query', { tokenId: null, threat: true });
+    const squares = (await reply)?.squares ?? [];
+
+    // The lurker beyond the sealed door can move around out there; if any of
+    // that reached Alice she would learn the shape of a room she has not seen.
+    for (const [x, y] of squares) {
+      expect(explored.has(`${x}:${y}`)).toBe(true);
+    }
+  });
+
+  it('gives the DM the unclipped truth', async () => {
+    const reply = next<{ squares: [number, number][] }>(dmSocket, 'movement:range');
+    dmSocket.emit('movement:query', { tokenId: null, threat: true });
+    const squares = (await reply)?.squares ?? [];
+
+    // The DM has no fog to clip against, so the hostile tokens beyond the wall
+    // contribute their full reach.
+    expect(squares.length).toBeGreaterThan(0);
+  });
+});
+
 describe('invariant: enemy hit points are the DM’s to reveal', () => {
   it('redacts hp on a monster the player can see', async () => {
     // In the room with Alice, so sight is not what is being tested here.

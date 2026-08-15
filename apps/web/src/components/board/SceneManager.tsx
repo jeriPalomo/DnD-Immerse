@@ -127,6 +127,28 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
     await load();
   }
 
+  /**
+   * An NPC of your own, as opposed to one lifted from the bestiary.
+   *
+   * The client never sent `type: 'npc'` before, so the only NPCs that could
+   * exist came from the bestiary and were hostile by construction - there was
+   * no way to put a friendly innkeeper or a hired sword on the board at all.
+   * These start neutral; rename and re-flag from the token HUD.
+   */
+  async function createNpc() {
+    setBusy(true);
+    try {
+      const { actor } = await api.post<{ actor: { id: string } }>('/api/actors', {
+        name: 'New NPC',
+        type: 'npc',
+      });
+      await api.post(`/api/actors/${actor.id}/campaigns/${campaignId}`);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function patchScene(sceneId: string, fields: Record<string, unknown>) {
     await api.patch(`/api/scenes/${sceneId}`, fields);
     await load();
@@ -412,7 +434,10 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
 
       {tab === 'tokens' && (
         <div>
-          <div className="mb-2 flex justify-end">
+          <div className="mb-2 flex justify-end gap-1.5">
+            <Button size="sm" variant="ghost" loading={busy} onClick={() => void createNpc()}>
+              New NPC
+            </Button>
             <Button size="sm" variant="secondary" onClick={() => setBrowsing(true)}>
               Add from bestiary
             </Button>

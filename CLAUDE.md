@@ -221,6 +221,18 @@ to agree: `campaignMembers.role === 'dm'` (what `requireDM` reads) and
 creation and nothing reassigns either, so they cannot currently diverge — but
 anything that transfers a campaign has to write both.
 
+**Reachability is computed on the server, for the same reason vision is.**
+Players never receive wall geometry, so a browser cannot know what stops a
+step. `movement:query` answers the asking socket alone, and a player's threat
+range is clipped to ground they have explored — a goblin's reach spilling round
+a corner would otherwise be a free map of the corridor.
+
+**`disposition` is what tells friend from foe, and `ownerUserId` is not.** Blue
+for the party, green for neutral — allies and allies-for-now, never counted as
+a threat — red for hostile. They are separate signals on purpose:
+`ownerUserId` decides HP redaction, so a friendly NPC the DM runs is green on
+the board and still has its hit points hidden. Do not conflate them.
+
 **A socket handler must never take an id on trust.** Room membership says which
 campaigns you are in; it does not say which one an id came from, and
 `context()` reports whichever campaign was joined first. Every handler that

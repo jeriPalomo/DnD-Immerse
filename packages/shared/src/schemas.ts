@@ -114,7 +114,12 @@ export const tokenInputSchema = z.object({
   actorId: z.string().nullable().default(null),
   /** Linked tokens share HP with their actor; unlinked ones own a private copy. */
   actorLinked: z.boolean().default(false),
-  disposition: z.enum(['friendly', 'neutral', 'hostile']).default('hostile'),
+  /**
+   * Optional, not defaulted: `token:create` has to be able to tell "the client
+   * said hostile" from "the client said nothing", or the actor's prototype
+   * disposition can never win and a friendly NPC is impossible to place.
+   */
+  disposition: z.enum(['friendly', 'neutral', 'hostile']).optional(),
   visionRange: z.number().min(0).default(0),
   darkvisionRange: z.number().min(0).default(0),
   lightBright: z.number().min(0).default(0),

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../../lib/api.js';
-import { CONDITIONS } from '@dnd/shared';
+import { CONDITIONS, DISPOSITIONS, DISPOSITION_HINT } from '@dnd/shared';
 import type { WireToken } from '@dnd/shared';
 import { deriveToken } from '../../lib/derive.js';
 
@@ -103,9 +103,34 @@ export function TokenHUD({
         <div className="min-w-0 flex-1">
           <h3 className="truncate font-display text-ink-100">{token.name || 'Token'}</h3>
           <p className="text-[11px] text-ink-500">
-            {token.w}×{token.h} squares · {token.disposition}
+            {token.w}×{token.h} squares
             {token.actorLinked ? ' · linked' : token.actorId ? ' · unlinked copy' : ''}
           </p>
+
+          {/* Allegiance was display-only text, and nothing anywhere could
+              change it - so every monster from the bestiary was hostile
+              forever, friendly NPC or not. */}
+          {isDM ? (
+            <div className="mt-1 flex gap-1">
+              {DISPOSITIONS.map(({ value, label, color }) => (
+                <button
+                  key={value}
+                  onClick={() => onUpdate({ disposition: value })}
+                  title={`${label} — ${DISPOSITION_HINT[value]}`}
+                  className={`rounded border px-1.5 py-0.5 text-[10px] transition-colors ${
+                    token.disposition === value
+                      ? 'border-current'
+                      : 'border-ink-700 text-ink-600 hover:text-ink-300'
+                  }`}
+                  style={token.disposition === value ? { color } : undefined}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[11px] text-ink-500">{token.disposition}</p>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">

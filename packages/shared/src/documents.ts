@@ -414,11 +414,23 @@ export const actorInputSchema = z.object({
 export type ActorInput = z.infer<typeof actorInputSchema>;
 
 /** A blank character sheet. */
+/**
+ * A blank sheet.
+ *
+ * An NPC you author yourself starts NEUTRAL rather than hostile: the hostile
+ * default belongs to the bestiary, where a monster is presumed to be trying to
+ * kill you, and it is set explicitly there. A guard captain or a hired
+ * mercenary you wrote is far more often an ally, and a wrong default here is
+ * one the DM has to notice before it paints them red on the board.
+ */
 export function emptyActor(name: string, type: ActorType = 'character'): ActorInput {
   return actorInputSchema.parse({
     name,
     type,
-    prototypeToken: { actorLinked: type === 'character', disposition: type === 'character' ? 'friendly' : 'hostile' },
+    prototypeToken: {
+      actorLinked: type === 'character',
+      disposition: type === 'character' ? 'friendly' : 'neutral',
+    },
   });
 }
 
