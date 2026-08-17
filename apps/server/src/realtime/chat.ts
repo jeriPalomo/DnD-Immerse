@@ -1,16 +1,21 @@
-import { and, desc, eq, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import {
+  attackModeAgainst,
   attackExpression,
   campaignDmRoom,
   campaignRoom,
+  combineRollModes,
   cardActionSchema,
   cardRequestSchema,
   damageExpression,
   rollRequestSchema,
   savingThrowExpression,
   sendMessageSchema,
+  spellCondition,
+  tokenDistance,
   spellSaveDC,
   userRoom,
+  type AppliedCondition,
 } from '@dnd/shared';
 import type { Socket } from 'socket.io';
 import type {
@@ -31,13 +36,24 @@ import {
   type GroupRollPayload,
 } from '@dnd/shared';
 import { db } from '../db/index.js';
-import { actorCampaigns, actors, campaigns, chatMessages, items, users } from '../db/schema.js';
+import {
+  actorCampaigns,
+  actors,
+  campaigns,
+  chatMessages,
+  items,
+  scenes,
+  tokens,
+  users,
+} from '../db/schema.js';
 import { getMembership } from '../auth/guards.js';
 import { getActorAccess } from '../lib/access.js';
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
+import { applyCondition, conditionsOf, currentRound, effectsByToken } from '../lib/effects.js';
+import { tokenIn } from './scene.js';
 import type { IOServer, SocketData } from './index.js';
-import type { Actor, Item } from '../db/schema.js';
+import type { Actor, Item, Token } from '../db/schema.js';
 
 type ChatSocket = Socket<ClientToServerEvents, ServerToClientEvents, object, SocketData>;
 
@@ -45,6 +61,27 @@ const HISTORY_LIMIT = 100;
 
 function scoresOf(actor: Actor): AbilityScores {
   return { str: actor.str, dex: actor.dex, con: actor.con, int: actor.int, wis: actor.wis, cha: actor.cha };
+}
+
+/**
+ * What an item inflicts when it lands.
+ *
+ * The item's own field wins, because it was filled in deliberately; otherwise
+ * the curated `SPELL_CONDITIONS` table answers for the SRD spells it knows. An
+ * empty list means nothing is applied, which is the old behaviour.
+ */
+function conditionsInflictedBy(item: Item): AppliedCondition[] {
+  const own = (item.system as { appliesConditions?: AppliedCondition[] }).appliesConditions;
+  if (own && own.length > 0) return own;
+
+  const known = item.type === 'spell' ? spellCondition(item.name) : null;
+  if (!known) return [];
+
+  return known.conditions.map((condition) => ({
+    condition,
+    rounds: known.rounds,
+    save: known.save,
+  }));
 }
 
 /* ----------------------------------------------------------- delivery */
@@ -143,7 +180,14 @@ async function resolveActor(actorId: string | null, userId: string): Promise<Act
 
 /* ------------------------------------------------------------- cards */
 
-function buildCard(item: Item, actor: Actor): WireCard {
+function buildCard(
+  item: Item,
+  actor: Actor,
+  aimedAt: { targetTokenId: string | null; longRange: boolean } = {
+    targetTokenId: null,
+    longRange: false,
+  },
+): WireCard {
   const s = item.system as Record<string, any>;
   const actions: WireCard['actions'] = [];
   let subtitle = '';
@@ -186,6 +230,8 @@ function buildCard(item: Item, actor: Actor): WireCard {
     actions,
     saveAbility,
     saveDC,
+    targetTokenId: aimedAt.targetTokenId,
+    longRange: aimedAt.longRange,
   };
 }
 
@@ -214,6 +260,14 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
     if (!campaignId || !(await guard(campaignId))) return;
 
     const input = sendMessageSchema.parse(payload);
+
+    if (input.whisperToUserId && !(await mayWhisper(campaignId, user.id, input.whisperToUserId))) {
+      // Deliberately vague. "They are four squares away" is itself a position
+      // leak when the other token is somewhere this player cannot see.
+      socket.emit('error', { message: 'You cannot whisper them from here' });
+      return;
+    }
+
     const actor = await resolveActor(input.actorId, user.id);
 
     await persistAndDeliver(
@@ -367,7 +421,10 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         actorId: actor.id,
         kind: 'card',
         body: item.name,
-        cardData: buildCard(item, actor),
+        cardData: buildCard(item, actor, {
+          targetTokenId: input.targetTokenId,
+          longRange: input.longRange,
+        }),
       },
       { authorName: user.displayName, actorName: actor.name },
     );
@@ -396,6 +453,30 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
     let expression: string;
     let label: string;
 
+    // Resolved through `tokenIn`, so a token id borrowed from another campaign
+    // is simply not found rather than acted on.
+    const target = input.targetTokenId ? await tokenIn(input.targetTokenId, campaignId) : null;
+    let saveAgainst: { token: Token; dc: number; ability: AbilityKey } | null = null;
+
+    /**
+     * Advantage and disadvantage from conditions, recomputed here.
+     *
+     * The target panel worked this out correctly and printed "Attacks at
+     * advantage — target is prone", and then the roll went out straight, because
+     * the mode never travelled with the card. Recomputed server-side rather than
+     * taken from the client for the same reason ping colour is: `input.mode` is
+     * the player's own circumstantial call (long range, flanking) and is honoured
+     * on top, but a condition on the board applies whether or not the client
+     * remembered it.
+     */
+    const conditionMode = target
+      ? attackModeAgainst(
+          { conditions: await conditionsOn(campaignId, actor.id) },
+          { conditions: await conditionsOnToken(target.id) },
+        )
+      : { mode: 'normal' as const, reasons: [] as string[] };
+    const mode = combineRollModes(input.mode, conditionMode.mode);
+
     switch (input.action) {
       case 'attack':
         expression =
@@ -404,10 +485,15 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
                 { ability: actor.spellcastingAbility as AbilityKey | undefined, proficient: true },
                 scores,
                 actor.level,
-                input.mode,
+                mode,
               )
-            : attackExpression(s, scores, actor.level, input.mode);
-        label = `${item.name} — attack`;
+            : attackExpression(s, scores, actor.level, mode);
+        // Named, so the table can see which condition earned it rather than
+        // wondering why two dice appeared.
+        label =
+          conditionMode.reasons.length > 0
+            ? `${item.name} — attack at ${mode} (${conditionMode.reasons.join('; ')})`
+            : `${item.name} — attack`;
         break;
 
       case 'damage':
@@ -427,7 +513,39 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         break;
 
       case 'save': {
-        const ability = (s.save?.ability ?? 'dex') as AbilityKey;
+        const inflicted = conditionsInflictedBy(item);
+        const ability = (s.save?.ability ??
+          inflicted.find((entry) => entry.save)?.save ??
+          'dex') as AbilityKey;
+
+        // A spell save belongs to the TARGET, not the caster. This rolled the
+        // caster's own save against the caster's own DC - the wrong creature and
+        // the wrong number, on every spell anyone has ever cast from a card.
+        // With no target it stays the caster's, which is what a scroll or a trap
+        // read off your own sheet actually wants.
+        const saver = target ? await actorOfToken(target) : null;
+
+        if (target) {
+          const dc = actor.spellcastingAbility
+            ? spellSaveDC(scores, actor.level, actor.spellcastingAbility as AbilityKey)
+            : 10;
+          saveAgainst = { token: target, dc, ability };
+
+          // A token with no sheet behind it has no ability scores to use, so it
+          // rolls flat rather than borrowing somebody else's.
+          expression = saver
+            ? savingThrowExpression(
+                scoresOf(saver),
+                saver.level,
+                ability,
+                Boolean(saver.saveProficiencies?.[ability]),
+                input.mode,
+              )
+            : '1d20';
+          label = `${target.name} — ${ability.toUpperCase()} save vs ${item.name} (DC ${dc})`;
+          break;
+        }
+
         // Proficiency was hardcoded false here, so a save rolled off a card
         // ignored the character's proficiency and came out short by the whole
         // proficiency bonus - silently, and only on this path.
@@ -466,6 +584,10 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
       },
       { authorName: user.displayName, actorName: actor.name },
     );
+
+    if (saveAgainst) {
+      await resolveSave(io, campaignId, user.id, item, actor, saveAgainst, result.total);
+    }
   });
 
   /**
@@ -538,6 +660,201 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
 
     socket.emit('chat:history', { messages });
   });
+}
+
+/**
+ * Whether one member may whisper another.
+ *
+ * Two separate rules, and the first one is a hole rather than a feature: the
+ * recipient was never validated at all. `whisperToUserId` went straight to
+ * `io.to(userRoom(id))`, and every socket joins its own personal room on connect
+ * regardless of campaign - so a member could whisper ANY user id on the server,
+ * including someone in a different game, and they received it.
+ *
+ * The second is the table's rule: players may whisper each other only when their
+ * tokens are adjacent on the board. The DM is exempt in both directions - the DM
+ * speaks as the table, and passing the DM a note is never gated.
+ *
+ * Adjacency is measured footprint to footprint by `tokenDistance`, which returns
+ * 1 for touching squares including diagonals, so standing against a Gargantuan
+ * ally's flank counts. Any token you control against any token they control, so
+ * a player running two characters is not punished for it.
+ */
+async function mayWhisper(
+  campaignId: string,
+  senderId: string,
+  recipientId: string,
+): Promise<boolean> {
+  // A whisper to yourself is how a secret group roll is modelled.
+  if (senderId === recipientId) return true;
+
+  const [sender, recipient] = await Promise.all([
+    getMembership(campaignId, senderId),
+    getMembership(campaignId, recipientId),
+  ]);
+
+  if (!sender || !recipient) return false;
+  if (sender.isDM || recipient.isDM) return true;
+
+  // Only the scene the table is actually looking at. A token parked on some
+  // other map is not next to anybody.
+  const rows = await db
+    .select({ token: tokens })
+    .from(tokens)
+    .innerJoin(scenes, eq(tokens.sceneId, scenes.id))
+    .innerJoin(campaigns, eq(campaigns.activeSceneId, scenes.id))
+    .where(
+      and(eq(campaigns.id, campaignId), inArray(tokens.ownerUserId, [senderId, recipientId])),
+    );
+
+  const onBoard = rows.map((row) => row.token).filter((token) => token.layer !== 'gm');
+  const mine = onBoard.filter((token) => token.ownerUserId === senderId);
+  const theirs = onBoard.filter((token) => token.ownerUserId === recipientId);
+
+  return mine.some((a) => theirs.some((b) => tokenDistance(a, b) <= 1));
+}
+
+/**
+ * Conditions on a token, straight from the effects store.
+ *
+ * The wire token has them too, but this path has no payload to hand - and the
+ * server should be reading its own tables to decide a roll rather than trusting
+ * what a client last received.
+ */
+async function conditionsOnToken(tokenId: string): Promise<string[]> {
+  const rows = await effectsByToken([tokenId]);
+  return conditionsOf(rows.get(tokenId));
+}
+
+/**
+ * Conditions on the token the caster is currently standing on the board as.
+ *
+ * A character can have a token on several scenes, so this looks only at the
+ * campaign's active one - the fight actually happening.
+ */
+async function conditionsOn(campaignId: string, actorId: string): Promise<string[]> {
+  const rows = await db
+    .select({ tokenId: tokens.id })
+    .from(tokens)
+    .innerJoin(scenes, eq(tokens.sceneId, scenes.id))
+    .innerJoin(campaigns, eq(campaigns.activeSceneId, scenes.id))
+    .where(and(eq(campaigns.id, campaignId), eq(tokens.actorId, actorId)))
+    .limit(1);
+
+  const tokenId = rows[0]?.tokenId;
+  return tokenId ? conditionsOnToken(tokenId) : [];
+}
+
+/** The sheet behind a token, if it has one. */
+async function actorOfToken(token: Token): Promise<Actor | null> {
+  if (!token.actorId) return null;
+  const rows = await db.select().from(actors).where(eq(actors.id, token.actorId)).limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * Whether a player may condition this token.
+ *
+ * The same rule damage follows: monsters yes, anybody's character no. An owned
+ * token is somebody's character by construction, and a token linked to a
+ * `character` actor is one even when the DM placed it unowned - so both are
+ * checked rather than trusting the ownership column alone.
+ */
+async function isFairGame(token: Token): Promise<boolean> {
+  if (token.ownerUserId) return false;
+  if (!token.actorId) return true;
+
+  const rows = await db
+    .select({ type: actors.type })
+    .from(actors)
+    .where(eq(actors.id, token.actorId))
+    .limit(1);
+  return rows[0]?.type !== 'character';
+}
+
+/** A line from the table, flagged for the battle log - a save landing is combat. */
+async function postLine(
+  io: IOServer,
+  campaignId: string,
+  userId: string,
+  body: string,
+): Promise<void> {
+  await persistAndDeliver(
+    io,
+    campaignId,
+    { userId, actorId: null, kind: 'system', body, combat: true },
+    { authorName: 'Table', actorName: null },
+  );
+}
+
+/**
+ * Applies what a failed save earned.
+ *
+ * The save has already been rolled and posted, so the table sees the number
+ * before anything happens to the board - the automation is the bookkeeping, not
+ * the ruling. A success says so and stops.
+ *
+ * Nothing is applied to another player's character: the caster is a player often
+ * enough, and whose fighter is paralysed is not a thing one player decides for
+ * another. Those the DM applies by hand, which is the old behaviour.
+ */
+async function resolveSave(
+  io: IOServer,
+  campaignId: string,
+  userId: string,
+  item: Item,
+  caster: Actor,
+  against: { token: Token; dc: number; ability: AbilityKey },
+  rolled: number,
+): Promise<void> {
+  const inflicted = conditionsInflictedBy(item);
+  if (inflicted.length === 0) return;
+
+  if (rolled >= against.dc) {
+    await postLine(
+      io,
+      campaignId,
+      userId,
+      `${against.token.name} makes the save (${rolled} vs DC ${against.dc}).`,
+    );
+    return;
+  }
+
+  // The DM may condition anyone; a player is held to the same line as damage.
+  const membership = await getMembership(campaignId, userId);
+  if (!membership?.isDM && !(await isFairGame(against.token))) {
+    await postLine(
+      io,
+      campaignId,
+      userId,
+      `${against.token.name} fails (${rolled} vs DC ${against.dc}) — the DM applies the effect.`,
+    );
+    return;
+  }
+
+  const round = await currentRound(campaignId);
+  const applied: string[] = [];
+
+  for (const entry of inflicted) {
+    const duration =
+      entry.rounds !== null && round !== null ? { rounds: entry.rounds, startRound: round } : null;
+    await applyCondition(against.token.id, entry.condition, duration, item.id);
+    applied.push(duration ? `${entry.condition} for ${entry.rounds} rounds` : entry.condition);
+  }
+
+  await postLine(
+    io,
+    campaignId,
+    userId,
+    `${against.token.name} fails (${rolled} vs DC ${against.dc}) — ${applied.join(', ')} from ${caster.name}'s ${item.name}.`,
+  );
+
+  const { broadcastSceneState, invalidateDragCache } = await import('./scene.js');
+  invalidateDragCache(against.token.sceneId);
+  await broadcastSceneState(io, campaignId);
+
+  const { broadcastEncounter } = await import('./combat.js');
+  await broadcastEncounter(io, campaignId);
 }
 
 /** A readable title for the group roll card. */

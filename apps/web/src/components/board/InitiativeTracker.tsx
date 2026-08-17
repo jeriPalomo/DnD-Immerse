@@ -14,12 +14,14 @@ import { GroupRoll } from './GroupRoll.js';
 export function InitiativeTracker({ isDM }: { isDM: boolean }) {
   const {
     encounter, tokens, selectedTokenId, lastDamage, templates, scene, clearTemplate, rollDeathSave,
-    startEncounter, endEncounter, addToInitiative, removeFromInitiative,
+    startEncounter, endEncounter, addToInitiative, removeFromInitiative, setInitiative,
     nextTurn, previousTurn, select,
   } = useTable();
 
   const [damage, setDamage] = useState('');
   const [damageType, setDamageType] = useState('slashing');
+  /** The entry whose initiative is being retyped, and the text so far. */
+  const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
 
   if (!encounter) {
     if (!isDM) return null;
@@ -34,6 +36,28 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
         <GroupRoll />
       </div>
     );
+  }
+
+  /**
+   * Writes a retyped initiative and lets the server resort the order.
+   *
+   * Sent as a whole entry because the payload carries `sortOrder` too - the
+   * server re-sorts anyway, using dexterity to break ties, so the number sent
+   * here is a placeholder rather than a claim about position.
+   */
+  function commitInitiative(entryId: string): void {
+    if (!editing || editing.id !== entryId) return;
+
+    const value = Number(editing.value);
+    setEditing(null);
+    if (!Number.isFinite(value)) return;
+
+    const entry = encounter?.entries.find((e) => e.id === entryId);
+    if (!entry || value === entry.initiative) return;
+
+    setInitiative(encounter!.id, {
+      entries: [{ id: entryId, initiative: value, sortOrder: entry.sortOrder }],
+    });
   }
 
   const active = encounter.entries[encounter.activeIndex] ?? null;
@@ -113,13 +137,41 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
                 }`}
               >
                 <div className="flex items-center gap-2">
-                  <span
-                    className={`w-6 shrink-0 text-center font-mono text-xs ${
-                      isActive ? 'text-ember-300' : 'text-ink-500'
-                    }`}
-                  >
-                    {entry.initiative}
-                  </span>
+                  {/* A mistyped initiative used to be uncorrectable: the server
+                      handler for this existed from the start and nothing ever
+                      called it, so 17 entered as 71 meant removing the combatant
+                      and adding them back. Commits on blur or Enter, reverts on
+                      Escape - the same shape as renaming a scene. */}
+                  {isDM && editing?.id === entry.id ? (
+                    <input
+                      autoFocus
+                      type="number"
+                      value={editing.value}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setEditing({ id: entry.id, value: e.target.value })}
+                      onBlur={() => commitInitiative(entry.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitInitiative(entry.id);
+                        if (e.key === 'Escape') setEditing(null);
+                      }}
+                      className="w-8 shrink-0 rounded border border-ember-500/60 bg-ink-900 text-center font-mono text-xs text-ink-100 focus:outline-none"
+                      aria-label={`Initiative for ${entry.name}`}
+                    />
+                  ) : (
+                    <span
+                      onClick={(e) => {
+                        if (!isDM) return;
+                        e.stopPropagation();
+                        setEditing({ id: entry.id, value: String(entry.initiative) });
+                      }}
+                      title={isDM ? 'Click to change' : undefined}
+                      className={`w-6 shrink-0 text-center font-mono text-xs ${
+                        isDM ? 'cursor-text hover:text-ink-100' : ''
+                      } ${isActive ? 'text-ember-300' : 'text-ink-500'}`}
+                    >
+                      {entry.initiative}
+                    </span>
+                  )}
                   <span className={`min-w-0 flex-1 truncate text-xs ${isActive ? 'text-ink-100' : 'text-ink-300'}`}>
                     {entry.name}
                   </span>

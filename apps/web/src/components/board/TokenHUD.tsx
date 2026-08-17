@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { api } from '../../lib/api.js';
-import { CONDITIONS, DISPOSITIONS, DISPOSITION_HINT } from '@dnd/shared';
+import { useTable } from '../../store/table.js';
+import { CONDITIONS, DISPOSITIONS, DISPOSITION_HINT, deriveToken } from '@dnd/shared';
 import type { WireToken } from '@dnd/shared';
-import { deriveToken } from '../../lib/derive.js';
 
 /**
  * Quick controls for the selected token: damage and healing, conditions, and
@@ -38,6 +38,9 @@ export function TokenHUD({
   const [delta, setDelta] = useState('');
   const [showConditions, setShowConditions] = useState(false);
   const [showSight, setShowSight] = useState(false);
+  /** Rounds the next condition is applied for. Blank means until removed. */
+  const [rounds, setRounds] = useState('');
+  const { applyEffect, updateEffect, removeEffect } = useTable();
 
   function applyDelta(sign: 1 | -1) {
     const amount = Math.abs(Number(delta) || 0);
@@ -48,13 +51,20 @@ export function TokenHUD({
     setDelta('');
   }
 
+  /**
+   * Conditions are effect rows now, so a duration can ride along with one.
+   * Clicking an active condition clears it; clicking an inactive one applies it
+   * for however many rounds the box says, or indefinitely when it is blank.
+   */
   function toggleCondition(condition: string) {
-    const active = token.conditions.includes(condition);
-    onUpdate({
-      conditions: active
-        ? token.conditions.filter((c) => c !== condition)
-        : [...token.conditions, condition],
-    });
+    const existing = token.effects.find((effect) => effect.statusId === condition);
+    if (existing) {
+      removeEffect(existing.id);
+      return;
+    }
+
+    const parsed = Number(rounds);
+    applyEffect([token.id], condition, parsed > 0 ? parsed : null);
   }
 
   const hpPercent = token.maxHp ? Math.max(0, Math.min(100, ((token.hp ?? 0) / token.maxHp) * 100)) : 0;
@@ -201,16 +211,64 @@ export function TokenHUD({
         </>
       )}
 
-      {token.conditions.length > 0 && (
+      {token.effects.length > 0 && (
         <>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {token.conditions.map((condition) => (
-              <span
-                key={condition}
-                className="rounded bg-arcane-500/20 px-1.5 py-0.5 text-[10px] text-arcane-400 capitalize"
+          {/* Each effect with its own countdown and controls, because a timer
+              nobody can shorten is a timer the DM works around rather than
+              with - the ruling at the table beats the one the app assumed. */}
+          <div className="mt-2 space-y-1">
+            {token.effects.map((effect) => (
+              <div
+                key={effect.id}
+                className={`flex items-center gap-1.5 rounded bg-arcane-500/15 px-1.5 py-1 text-[10px] ${
+                  effect.disabled ? 'opacity-40' : ''
+                }`}
               >
-                {condition}
-              </span>
+                <span className="flex-1 capitalize text-arcane-400">{effect.name}</span>
+
+                {effect.roundsRemaining === null ? (
+                  <span className="text-ink-600" title="Lasts until removed">—</span>
+                ) : (
+                  <span
+                    className="tabular-nums text-ink-300"
+                    title="Rounds left. Nothing counts down outside combat."
+                  >
+                    {effect.roundsRemaining} rd
+                  </span>
+                )}
+
+                {canEdit && (
+                  <>
+                    <button
+                      onClick={() =>
+                        updateEffect(effect.id, {
+                          rounds: Math.max(0, (effect.roundsRemaining ?? 1) - 1),
+                        })
+                      }
+                      className="px-1 text-ink-500 hover:text-ink-200"
+                      title="One round less"
+                    >
+                      −
+                    </button>
+                    <button
+                      onClick={() =>
+                        updateEffect(effect.id, { rounds: (effect.roundsRemaining ?? 0) + 1 })
+                      }
+                      className="px-1 text-ink-500 hover:text-ink-200"
+                      title="One round more"
+                    >
+                      +
+                    </button>
+                    <button
+                      onClick={() => removeEffect(effect.id)}
+                      className="px-1 text-ink-500 hover:text-red-400"
+                      title="Remove"
+                    >
+                      ×
+                    </button>
+                  </>
+                )}
+              </div>
             ))}
           </div>
 
@@ -251,7 +309,24 @@ export function TokenHUD({
           </button>
 
           {showConditions && (
-            <div className="flex flex-wrap gap-1">
+            <>
+              <label className="flex items-center gap-2 text-[10px] text-ink-400">
+                Lasts
+                <input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={rounds}
+                  onChange={(e) => setRounds(e.target.value)}
+                  placeholder="—"
+                  aria-label="Rounds the condition lasts"
+                  className="w-14 rounded border border-ink-700 bg-ink-850 px-1 py-0.5 text-center text-ink-200"
+                />
+                rounds
+                <span className="text-ink-600">{rounds ? '' : '(until removed)'}</span>
+              </label>
+
+              <div className="flex flex-wrap gap-1">
               {CONDITIONS.map((condition) => {
                 const active = token.conditions.includes(condition);
                 return (
@@ -268,7 +343,8 @@ export function TokenHUD({
                   </button>
                 );
               })}
-            </div>
+              </div>
+            </>
           )}
 
           {isDM && (

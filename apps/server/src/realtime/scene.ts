@@ -6,6 +6,7 @@ import {
   campaignDmRoom,
   campaignRoom,
   clampToMap,
+  deriveToken,
   DOOR_CLOSED,
   DOOR_LOCKED,
   DOOR_OPEN,
@@ -34,6 +35,15 @@ import type {
 import { wallCreateSchema, wallUpdateSchema } from '@dnd/shared';
 import { db } from '../db/index.js';
 import { getActorAccess } from '../lib/access.js';
+import {
+  blindedTokenIds,
+  conditionsOf,
+  effectsViewFor,
+  setConditions,
+  toActiveEffect,
+  toWireEffects,
+  type EffectsView,
+} from '../lib/effects.js';
 import {
   actors,
   campaigns,
@@ -78,14 +88,20 @@ async function activeSceneOf(campaignId: string) {
  * would put the database in the hot path of a mouse move. The cache is
  * invalidated whenever walls change or a token is committed.
  */
-const dragCache = new Map<string, { walls: Wall[]; tokens: Token[]; at: number }>();
+const dragCache = new Map<
+  string,
+  { walls: Wall[]; tokens: Token[]; effects: EffectsView; at: number }
+>();
 const DRAG_CACHE_TTL_MS = 5000;
 
 export function invalidateDragCache(sceneId: string): void {
   dragCache.delete(sceneId);
 }
 
-async function dragState(sceneId: string): Promise<{ walls: Wall[]; tokens: Token[] }> {
+async function dragState(
+  sceneId: string,
+  campaignId: string,
+): Promise<{ walls: Wall[]; tokens: Token[]; effects: EffectsView }> {
   const cached = dragCache.get(sceneId);
   if (cached && Date.now() - cached.at < DRAG_CACHE_TTL_MS) return cached;
 
@@ -93,8 +109,11 @@ async function dragState(sceneId: string): Promise<{ walls: Wall[]; tokens: Toke
     wallsOf(sceneId),
     db.select().from(tokens).where(eq(tokens.sceneId, sceneId)),
   ]);
+  // Cached alongside the walls for the same reason: a blinded token's sight is
+  // recomputed on every drag frame, and effects are what decide that.
+  const effects = await effectsViewFor(campaignId, sceneTokens.map((token) => token.id));
 
-  const entry = { walls: sceneWalls, tokens: sceneTokens, at: Date.now() };
+  const entry = { walls: sceneWalls, tokens: sceneTokens, effects, at: Date.now() };
   dragCache.set(sceneId, entry);
   return entry;
 }
@@ -135,7 +154,7 @@ function toWireScene(scene: Scene): WireScene {
  * another player: the party knowing each other's hit points is the point of a
  * party panel. What is hidden is unowned tokens - monsters.
  */
-function toWireToken(token: Token, showHp = true): WireToken {
+function toWireToken(token: Token, effects: EffectsView, showHp = true): WireToken {
   return {
     id: token.id,
     sceneId: token.sceneId,
@@ -159,7 +178,10 @@ function toWireToken(token: Token, showHp = true): WireToken {
     hp: showHp ? token.hp : null,
     maxHp: showHp ? token.maxHp : null,
     ac: token.ac,
-    conditions: token.conditions,
+    // Derived from the token's effect rows rather than a column, so the label,
+    // the mechanics and the timer are one thing that cannot disagree.
+    conditions: conditionsOf(effects.byToken.get(token.id)),
+    effects: toWireEffects(effects.byToken.get(token.id), effects.round),
     hidden: token.hidden,
     locked: token.locked,
   };
@@ -176,8 +198,13 @@ function toWireToken(token: Token, showHp = true): WireToken {
  * Hit points are redacted for anything the party does not own. Line of sight is
  * a separate filter applied by the callers that have a vision polygon to hand.
  */
-export function filterTokensFor(list: Token[], isDM: boolean, userId: string): WireToken[] {
-  if (isDM) return list.map((token) => toWireToken(token));
+export function filterTokensFor(
+  list: Token[],
+  isDM: boolean,
+  userId: string,
+  effects: EffectsView,
+): WireToken[] {
+  if (isDM) return list.map((token) => toWireToken(token, effects));
 
   return list
     .filter((token) => {
@@ -185,7 +212,7 @@ export function filterTokensFor(list: Token[], isDM: boolean, userId: string): W
       if (token.hidden && token.ownerUserId !== userId) return false;
       return true;
     })
-    .map((token) => toWireToken(token, Boolean(token.ownerUserId)));
+    .map((token) => toWireToken(token, effects, Boolean(token.ownerUserId)));
 }
 
 /* ------------------------------------------------------------ permissions */
@@ -216,7 +243,7 @@ async function tokenOf(tokenId: string): Promise<Token | null> {
  * table, and a DM of their own game could act on ids from somebody else's.
  * Scoping the lookup makes that unrepresentable rather than remembered.
  */
-async function tokenIn(tokenId: string, campaignId: string): Promise<Token | null> {
+export async function tokenIn(tokenId: string, campaignId: string): Promise<Token | null> {
   const rows = await db
     .select({ token: tokens })
     .from(tokens)
@@ -233,7 +260,16 @@ async function tokenIn(tokenId: string, campaignId: string): Promise<Token | nul
  * this is the only place that can answer it. A token with no sheet behind it
  * gets the default humanoid 30.
  */
-async function speedOf(token: Token): Promise<number> {
+async function speedOf(token: Token, conditions: string[]): Promise<number> {
+  const base = await baseSpeedOf(token);
+  // Folded through the same pure function the HUD uses. Read raw, this reported
+  // a paralyzed token's full 30 ft while the HUD beside it said 0 - and since
+  // `token:commit` does not check speed at all, this overlay is the only place
+  // speed is enforced, so the unconditioned number was the whole enforcement.
+  return deriveToken({ conditions }, base).speed;
+}
+
+async function baseSpeedOf(token: Token): Promise<number> {
   if (!token.actorId) return 30;
   const rows = await db
     .select({ speed: actors.speed })
@@ -319,6 +355,10 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
   const playerDoors = doors.filter((d) => d.door !== SECRET_DOOR);
   const notes = await db.select().from(mapNotes).where(eq(mapNotes.sceneId, sceneId));
   const drawings = await db.select().from(drawingsTable).where(eq(drawingsTable.sceneId, sceneId));
+  // Once for the whole scene rather than once per viewer: effects do not differ
+  // between audiences, only which tokens each viewer is sent.
+  const effects = await effectsViewFor(campaignId, all.map((token) => token.id));
+  const blinded = blindedTokenIds(effects.byToken);
 
   // Per-socket, because both "hidden unless you own it" and line of sight
   // differ between players.
@@ -329,7 +369,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
     if (isDM) {
       socket.emit('scene:state', {
         scene: wireScene,
-        tokens: filterTokensFor(all, true, userId),
+        tokens: filterTokensFor(all, true, userId, effects),
         vision: null,
         doors,
         notes,
@@ -339,9 +379,9 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
       continue;
     }
 
-    const view = await computePlayerView(scene, sceneWalls, all, userId);
+    const view = await computePlayerView(scene, sceneWalls, all, userId, blinded);
     // Two filters in sequence: hidden tokens first, then line of sight.
-    const permitted = filterTokensFor(all, false, userId);
+    const permitted = filterTokensFor(all, false, userId, effects);
     const sighted = view
       ? visibleTokens(
           all.filter((t) => permitted.some((p) => p.id === t.id)),
@@ -352,7 +392,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
 
     socket.emit('scene:state', {
       scene: wireScene,
-      tokens: filterTokensFor(sighted, false, userId),
+      tokens: filterTokensFor(sighted, false, userId, effects),
       vision: view?.vision ?? null,
       doors: playerDoors,
       // A pin the DM has not revealed is absent, like a hidden token.
@@ -377,16 +417,21 @@ async function broadcastToken(
     ? await db.select().from(tokens).where(eq(tokens.sceneId, token.sceneId))
     : [];
 
+  // The whole scene's effects, not just this token's: a blinded viewer sees
+  // nothing regardless of which token moved.
+  const effects = await effectsViewFor(campaignId, all.length > 0 ? all.map((t) => t.id) : [token.id]);
+  const blinded = blindedTokenIds(effects.byToken);
+
   for (const socket of await io.in(campaignRoom(campaignId)).fetchSockets()) {
     const userId = socket.data.user.id;
     const isDM = socket.data.rooms.get(campaignId) === 'dm';
 
-    let visible = filterTokensFor([token], isDM, userId);
+    let visible = filterTokensFor([token], isDM, userId, effects);
 
     // Out of sight is as good as hidden: a moving enemy behind a wall must not
     // stream its position to a player who cannot see it.
     if (visible.length > 0 && !isDM && scene?.visionEnabled) {
-      const view = await computePlayerView(scene, sceneWalls, all, userId);
+      const view = await computePlayerView(scene, sceneWalls, all, userId, blinded);
       if (view && visibleTokens([token], view.polygons, userId).length === 0) visible = [];
     }
 
@@ -476,7 +521,9 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       .set({ activeSceneId: sceneId })
       .where(eq(campaigns.id, ctx.campaignId));
 
-    io.to(campaignRoom(ctx.campaignId)).emit('scene:changed', { sceneId });
+    // No `scene:changed` here: it was emitted and nothing ever listened, and the
+    // full scene push on the next line is what actually moves every client. An
+    // emit nobody handles reads like working code, which is worse than nothing.
     await broadcastSceneState(io, ctx.campaignId);
   });
 
@@ -513,7 +560,11 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
     // Recompute sight against the dragged position so fog moves with the
     // token rather than snapping when the mouse is released.
-    const { walls: cachedWalls, tokens: cachedTokens } = await dragState(token.sceneId);
+    const {
+      walls: cachedWalls,
+      tokens: cachedTokens,
+      effects: cachedEffects,
+    } = await dragState(token.sceneId, ctx.campaignId);
     const live = cachedTokens.map((t) =>
       t.id === input.tokenId ? { ...t, x: input.x, y: input.y } : t,
     );
@@ -522,8 +573,14 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       if (s.data.rooms.get(ctx.campaignId) === 'dm') continue;
 
       const viewerId = s.data.user.id;
-      const polygons = computeLivePolygons(scene, cachedWalls, live, viewerId);
-      const permitted = filterTokensFor(live, false, viewerId);
+      const polygons = computeLivePolygons(
+        scene,
+        cachedWalls,
+        live,
+        viewerId,
+        blindedTokenIds(cachedEffects.byToken),
+      );
+      const permitted = filterTokensFor(live, false, viewerId, cachedEffects);
       const sighted = visibleTokens(
         live.filter((t) => permitted.some((p) => p.id === t.id)),
         polygons,
@@ -539,7 +596,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
       s.emit('vision:update', {
         polygons,
-        tokens: filterTokensFor(sighted, false, viewerId),
+        tokens: filterTokensFor(sighted, false, viewerId, cachedEffects),
       });
     }
   });
@@ -670,13 +727,14 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       hp: hp ?? null,
       maxHp: maxHp ?? null,
       ac: ac ?? null,
-      conditions: input.conditions,
       hidden: input.hidden,
       locked: input.locked,
       createdAt: Date.now(),
     };
 
     await db.insert(tokens).values(token);
+    // Conditions are rows, not a column, so a token stamped with any go in here.
+    if (input.conditions.length > 0) await setConditions(token.id, input.conditions);
     invalidateDragCache(input.sceneId);
 
     // Sight is checked here as well as hidden-ness. Placing an ambusher behind
@@ -719,8 +777,13 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       return;
     }
 
-    const { tokenId, ...fields } = input;
-    await db.update(tokens).set(fields).where(eq(tokens.id, tokenId));
+    const { tokenId, conditions, ...fields } = input;
+    // Conditions live in `active_effects` now. Reconciled rather than written
+    // wholesale so clicking one chip does not reset the timers on the others.
+    if (conditions !== undefined) await setConditions(tokenId, conditions);
+    if (Object.keys(fields).length > 0) {
+      await db.update(tokens).set(fields).where(eq(tokens.id, tokenId));
+    }
 
     // A linked token is a view onto its actor: HP written here writes through,
     // so the sheet and the board never disagree.
@@ -733,6 +796,25 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
           updatedAt: Date.now(),
         })
         .where(eq(actors.id, token.actorId));
+    }
+
+    // The drag cache holds this scene's tokens and their effects for 5 s, and
+    // both just changed.
+    invalidateDragCache(token.sceneId);
+
+    // Some of these fields decide what a player can SEE, not just what one
+    // token looks like: blinding a token collapses its owner's sight polygon,
+    // and the light and vision ranges are what the sweep measures from. A
+    // per-token broadcast cannot express that, so the whole scene is recomputed
+    // and every player's vision goes out with it. Without this the change did
+    // not land until some unrelated event happened to push a full scene state.
+    const changesSight =
+      conditions !== undefined ||
+      ['visionRange', 'darkvisionRange', 'lightBright', 'lightDim'].some((key) => key in input);
+
+    if (changesSight) {
+      await broadcastSceneState(io, ctx.campaignId);
+      return;
     }
 
     const updated = await tokenOf(tokenId);
@@ -939,13 +1021,25 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     const scene = await activeSceneOf(ctx.campaignId);
     if (!scene) return;
 
-    const { walls: sceneWalls, tokens: sceneTokens } = await dragState(scene.id);
+    const {
+      walls: sceneWalls,
+      tokens: sceneTokens,
+      effects,
+    } = await dragState(scene.id, ctx.campaignId);
     const { gridWidth, gridHeight } = gridExtent(scene);
     const bounds = { width: gridWidth, height: gridHeight };
 
     // What this viewer may act on at all. A player asking about a token they
     // cannot see gets nothing back rather than a shape to infer from.
-    const view = ctx.isDM ? null : await computePlayerView(scene, sceneWalls, sceneTokens, user.id);
+    const view = ctx.isDM
+      ? null
+      : await computePlayerView(
+          scene,
+          sceneWalls,
+          sceneTokens,
+          user.id,
+          blindedTokenIds(effects.byToken),
+        );
     const visible = ctx.isDM
       ? sceneTokens
       : visibleTokens(
@@ -965,7 +1059,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     const rangeFor = async (token: Token) =>
       reachableSquares({
         origin: { x: token.x, y: token.y, w: token.w, h: token.h },
-        speedFeet: await speedOf(token),
+        speedFeet: await speedOf(token, conditionsOf(effects.byToken.get(token.id))),
         feetPerSquare: scene.feetPerSquare,
         walls: sceneWalls,
         occupied: blockers.filter((t) => t.id !== token.id),

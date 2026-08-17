@@ -212,9 +212,12 @@ export default function CampaignTable() {
               scene={scene}
               actor={myActor}
               items={myItems}
-              onUse={(item) => {
+              onUse={(item, longRange) => {
                 if (!activeActorId) return;
-                table.postCard(item.id, activeActorId);
+                // The card remembers who it was aimed at, so a spell save is
+                // rolled by the target rather than by the caster - and carries
+                // the range penalty the board can see and the server cannot.
+                table.postCard(item.id, activeActorId, targeted.id, longRange);
 
                 // An area spell also drops its own outline on the target, built
                 // from the spell's own area so Fireball is a 20 ft circle

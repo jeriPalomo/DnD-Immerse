@@ -133,6 +133,7 @@ let aliceSocket: Socket;
 let doorId: string;
 let hiddenTokenId: string;
 let farTokenId: string;
+let myTokenId: string;
 
 beforeAll(async () => {
   const { buildApp } = await import('../app.js');
@@ -201,7 +202,7 @@ beforeAll(async () => {
   dmSocket.emit('token:create', {
     sceneId, x: 5, y: 5, name: 'Alice PC', ownerUserId: alice.userId, visionRange: 300,
   } as never);
-  await mine;
+  myTokenId = (await mine)!.token.id;
 
   // An enemy far outside the room, behind the wall.
   const far = next<{ token: WireToken }>(dmSocket, 'token:created');
@@ -518,5 +519,67 @@ describe('walls stop movement', () => {
     aliceSocket.emit('token:commit', { tokenId: aliceTokenId, x: 15, y: 5 });
 
     expect((await moved)?.token.x).toBe(15);
+  });
+});
+
+describe('a blinded token sees nothing', () => {
+  /**
+   * Blindness is enforced where vision is computed, not by dimming the canvas.
+   * A client-side blur would be a devtools inspection away from seeing the room
+   * anyway, and the tokens standing in it would still be in the payload.
+   */
+  beforeAll(async () => {
+    // Stand her in the open beside the Lurker, so the control case is "she can
+    // plainly see it" and the only thing under test is the condition. Placed
+    // explicitly rather than inheriting wherever an earlier block left her.
+    dmSocket.emit('token:commit', { tokenId: myTokenId, x: 18, y: 5 });
+    await new Promise((r) => setTimeout(r, 400));
+  });
+
+  it('opens no polygon and reveals nobody, but keeps its own token', async () => {
+    const seeing = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    expect(seeing.tokens.some((t) => t.id === farTokenId)).toBe(true);
+    expect(seeing.vision!.polygons.length).toBeGreaterThan(0);
+
+    const blind = await waitForScene(
+      aliceSocket,
+      () => dmSocket.emit('token:update', { tokenId: myTokenId, conditions: ['blinded'] } as never),
+      (payload) => payload.tokens.some((t) => t.conditions.includes('blinded')),
+    );
+
+    // No polygon at all: nothing new is seen and no fog opens.
+    expect(blind.vision).not.toBeNull();
+    expect(blind.vision!.polygons).toEqual([]);
+
+    // The Lurker is standing three squares away in the open, and withheld.
+    expect(blind.tokens.some((t) => t.id === farTokenId)).toBe(false);
+
+    // Her own token stays, so the screen is readable rather than empty.
+    const own = blind.tokens.find((t) => t.id === myTokenId);
+    expect(own).toBeDefined();
+    expect(own!.conditions).toContain('blinded');
+  });
+
+  it('remembers the ground it had already explored', async () => {
+    // Blindness stops new sight; it does not erase the map she has walked.
+    const blind = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    expect(blind.vision!.explored.length).toBeGreaterThan(0);
+  });
+
+  it('gives the sight back when the condition is removed', async () => {
+    const restored = await waitForScene(
+      aliceSocket,
+      () => dmSocket.emit('token:update', { tokenId: myTokenId, conditions: [] } as never),
+      (payload) => payload.vision !== null && payload.vision.polygons.length > 0,
+    );
+
+    expect(restored.tokens.some((t) => t.id === farTokenId)).toBe(true);
+    expect(restored.tokens.find((t) => t.id === myTokenId)!.conditions).toEqual([]);
+  });
+
+  it('leaves the DM view untouched', async () => {
+    const dmView = await refresh(dmSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    expect(dmView.tokens.some((t) => t.id === farTokenId)).toBe(true);
+    expect(dmView.tokens.some((t) => t.id === hiddenTokenId)).toBe(true);
   });
 });

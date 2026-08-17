@@ -298,3 +298,86 @@ export const ALIGNMENTS = [
   'Neutral Evil',
   'Chaotic Evil',
 ] as const;
+
+/* -------------------------------------------------- spells that condition */
+
+export interface SpellCondition {
+  /** The saving throw that avoids it. */
+  save: AbilityKey;
+  /** Conditions inflicted on a failed save. Names from `CONDITIONS`. */
+  conditions: string[];
+  /**
+   * How long it lasts, in rounds. Null means until removed - `prone` is stood
+   * up from rather than waited out, so a timer on it would be wrong.
+   */
+  rounds: number | null;
+  /** Whether holding it needs concentration, so the caster can be reminded. */
+  concentration: boolean;
+}
+
+/**
+ * Which SRD spells inflict which conditions.
+ *
+ * Curated by hand and unit tested against the handbook, exactly like `CLASSES`
+ * and for the same reason: a wrong pair here is invisible. It does not announce
+ * itself - it just quietly paralyses the wrong creature, or fails to, for the
+ * rest of the campaign.
+ *
+ * The SRD's own data cannot supply this. Spell effects are prose, and parsing
+ * them is wrong in both directions - "immune to being blinded" reads exactly
+ * like a spell that blinds. So this is the same call the compendium categories
+ * made: curated, not taken from the data.
+ *
+ * DELIBERATELY ABSENT, rather than guessed:
+ *   - Sleep, Color Spray, Power Word Stun - no saving throw at all. They work
+ *     off a hit point pool, which is a judgement this cannot adjudicate.
+ *   - Slow, Confusion, Bestow Curse, Contagion, Eyebite - their effect is not
+ *     one of the 5e conditions, or the caster picks from several.
+ *   - Flesh to Stone - three staged saves. A one-shot apply would misread it.
+ * Add to this table only where the handbook is unambiguous. An omission means
+ * the DM applies it by hand, which is merely the old behaviour; a wrong entry
+ * means the app is confidently wrong.
+ *
+ * Rounds follow the spell's stated duration: 1 minute is 10 rounds, 1 hour 600.
+ */
+export const SPELL_CONDITIONS: Record<string, SpellCondition> = {
+  'hold person': { save: 'wis', conditions: ['paralyzed'], rounds: 10, concentration: true },
+  'hold monster': { save: 'wis', conditions: ['paralyzed'], rounds: 10, concentration: true },
+  'blindness/deafness': { save: 'con', conditions: ['blinded'], rounds: 10, concentration: false },
+  web: { save: 'dex', conditions: ['restrained'], rounds: 600, concentration: true },
+  entangle: { save: 'str', conditions: ['restrained'], rounds: 10, concentration: true },
+  'ensnaring strike': { save: 'str', conditions: ['restrained'], rounds: 10, concentration: true },
+  'charm person': { save: 'wis', conditions: ['charmed'], rounds: 600, concentration: false },
+  fear: { save: 'wis', conditions: ['frightened'], rounds: 10, concentration: true },
+  'hypnotic pattern': {
+    save: 'wis',
+    conditions: ['charmed', 'incapacitated'],
+    rounds: 10,
+    concentration: true,
+  },
+  "tasha's hideous laughter": {
+    save: 'wis',
+    conditions: ['prone', 'incapacitated'],
+    rounds: 10,
+    concentration: true,
+  },
+  'dominate person': { save: 'wis', conditions: ['charmed'], rounds: 10, concentration: true },
+  'dominate beast': { save: 'wis', conditions: ['charmed'], rounds: 10, concentration: true },
+  'dominate monster': { save: 'wis', conditions: ['charmed'], rounds: 600, concentration: true },
+  'ray of sickness': { save: 'con', conditions: ['poisoned'], rounds: 1, concentration: false },
+  'blinding smite': { save: 'con', conditions: ['blinded'], rounds: 10, concentration: true },
+  // Prone has no duration: you stand up out of it. The spell's own 1 minute is
+  // how long the ground stays slick, which is terrain rather than a condition.
+  grease: { save: 'dex', conditions: ['prone'], rounds: null, concentration: false },
+  'sleet storm': { save: 'dex', conditions: ['prone'], rounds: null, concentration: true },
+};
+
+/**
+ * What a spell inflicts, or null if this table does not know.
+ *
+ * Matched on a normalised name so "Hold Person" from the compendium and a
+ * hand-typed "hold person " are the same spell.
+ */
+export function spellCondition(name: string): SpellCondition | null {
+  return SPELL_CONDITIONS[name.trim().toLowerCase()] ?? null;
+}

@@ -326,7 +326,11 @@ export const tokens = sqliteTable(
     hp: integer('hp'),
     maxHp: integer('max_hp'),
     ac: integer('ac'),
-    conditions: text('conditions', { mode: 'json' }).$type<string[]>().notNull(),
+    /**
+     * Conditions are NOT stored here. They are rows in `active_effects` keyed
+     * by `statusId`, so the timer, the mechanics and the label are one thing.
+     * `WireToken.conditions` is derived from those rows on the way out.
+     */
 
     /** Hidden tokens are stripped from player payloads entirely, server-side. */
     hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
@@ -507,20 +511,37 @@ export const initiativeEntries = sqliteTable(
 /**
  * Buffs, debuffs and conditions. Applied by a pure derive function rather than
  * written into the actor, so they can always be removed cleanly.
+ *
+ * This is the ONLY store for both. A token's conditions used to be a JSON array
+ * on the token as well, folded into real mechanics by the browser and ignored
+ * by the server — so a paralyzed token's HUD read Speed 0 while the server
+ * offered it a full 30 ft of movement. One store, derived on the way out.
  */
 export const activeEffects = sqliteTable(
   'active_effects',
   {
     id: id(),
     ownerActorId: text('owner_actor_id').references(() => actors.id, { onDelete: 'cascade' }),
+    /** The item that granted or inflicted this, when one did. */
     ownerItemId: text('owner_item_id').references(() => items.id, { onDelete: 'cascade' }),
     ownerTokenId: text('owner_token_id').references(() => tokens.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     icon: text('icon').notNull().default(''),
-    changes: text('changes', { mode: 'json' }).$type<ActiveEffectInput['changes']>().notNull(),
-    duration: text('duration', { mode: 'json' }).$type<ActiveEffectInput['duration']>().notNull(),
+    /**
+     * Empty for a condition row: its mechanics are looked up from
+     * `CONDITION_EFFECTS` by `statusId` instead of copied in here, so fixing
+     * what "prone" does fixes every prone token rather than only new ones.
+     * Custom buffs carry their real changes.
+     */
+    changes: text('changes', { mode: 'json' })
+      .$type<ActiveEffectInput['changes']>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** Null means it lasts until someone removes it. Rounds, not wall clock. */
+    duration: text('duration', { mode: 'json' }).$type<ActiveEffectInput['duration']>(),
     disabled: integer('disabled', { mode: 'boolean' }).notNull().default(false),
     transfer: integer('transfer', { mode: 'boolean' }).notNull().default(true),
+    /** Names a 5e condition, e.g. `prone`. Null for a custom buff. */
     statusId: text('status_id'),
   },
   (t) => [

@@ -86,8 +86,13 @@ export async function wallsOf(sceneId: string): Promise<Wall[]> {
  * With global illumination off, a token sees only as far as its own darkvision
  * or the light it carries - which is what makes turning daylight off actually
  * change the board rather than just flipping a stored flag.
+ *
+ * A blinded token contributes a radius of 0, which `combinedVisibility` drops
+ * entirely: no polygon, so no fog opens and no other token is revealed. It
+ * still appears on its own player's screen, because `visibleTokens` falls back
+ * to the tokens you control when you have no polygon at all.
  */
-function sightSources(tokens: Token[], userId: string, scene: Scene) {
+function sightSources(tokens: Token[], userId: string, scene: Scene, blinded: Set<string>) {
   return tokens
     .filter((token) => token.ownerUserId === userId && token.layer !== 'gm')
     .map((token) => ({
@@ -95,7 +100,7 @@ function sightSources(tokens: Token[], userId: string, scene: Scene) {
       // Vision is configured in feet; the geometry works in grid units.
       radius:
         sightRadiusFeet(
-          token,
+          { ...token, blinded: blinded.has(token.id) },
           scene.globalIllumination,
           DEFAULT_VISION_FEET,
           scene.feetPerSquare,
@@ -110,9 +115,15 @@ function sightSources(tokens: Token[], userId: string, scene: Scene) {
  * Used on every drag frame, where persisting fog would mean thousands of
  * writes per combat. The bitmap catches up on drop, via computePlayerView.
  */
-export function computeLivePolygons(scene: Scene, walls: Wall[], tokens: Token[], userId: string): Polygon[] {
+export function computeLivePolygons(
+  scene: Scene,
+  walls: Wall[],
+  tokens: Token[],
+  userId: string,
+  blinded: Set<string> = new Set(),
+): Polygon[] {
   if (!scene.visionEnabled) return [];
-  return combinedVisibility(sightSources(tokens, userId, scene), walls);
+  return combinedVisibility(sightSources(tokens, userId, scene, blinded), walls);
 }
 
 export interface PlayerView {
@@ -129,12 +140,13 @@ export async function computePlayerView(
   walls: Wall[],
   tokens: Token[],
   userId: string,
+  blinded: Set<string> = new Set(),
 ): Promise<PlayerView | null> {
   if (!scene.visionEnabled) return null;
 
   const { gridWidth, gridHeight } = gridExtent(scene);
 
-  const sources = sightSources(tokens, userId, scene);
+  const sources = sightSources(tokens, userId, scene, blinded);
   const polygons = combinedVisibility(sources, walls);
 
   // Load, extend and persist this player's exploration.

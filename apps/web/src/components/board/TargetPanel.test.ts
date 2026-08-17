@@ -19,7 +19,7 @@ function token(over: Partial<WireToken>): WireToken {
     x: 0, y: 0, w: 1, h: 1, rotation: 0, layer: 'token',
     ownerUserId: null, actorId: null, actorLinked: false, disposition: 'hostile',
     visionRange: 0, darkvisionRange: 0, lightBright: 0, lightDim: 0, lightColor: '#ffb46b',
-    hp: null, maxHp: null, ac: null, conditions: [], hidden: false, locked: false,
+    hp: null, maxHp: null, ac: null, conditions: [], effects: [], hidden: false, locked: false,
     ...over,
   };
 }

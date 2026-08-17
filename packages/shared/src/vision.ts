@@ -257,6 +257,11 @@ export interface SightConfig {
    * extends how far a torchbearer sees, past where it is bright.
    */
   lightDim?: number;
+  /**
+   * Set by the `blinded`, `unconscious` and `petrified` conditions. Overrides
+   * every other source: a torch does not help a creature that cannot see.
+   */
+  blinded?: boolean;
 }
 
 /**
@@ -266,6 +271,12 @@ export interface SightConfig {
  * unlit scene it is limited to what the token can supply for itself: darkvision
  * or the light it carries. A creature with neither still sees its own square,
  * so a player is never left with a completely black screen and no explanation.
+ *
+ * The one exception is blindness, which returns 0 and *is* meant to be a black
+ * screen - the explanation being the condition badge on their own token. Both
+ * callers downstream already cope: `combinedVisibility` drops zero-radius
+ * sources, and `visibleTokens` falls back to the tokens you control, so a
+ * blinded player keeps their own token and the grey memory of explored ground.
  */
 export function sightRadiusFeet(
   token: SightConfig,
@@ -275,6 +286,8 @@ export function sightRadiusFeet(
   /** 0 full daylight, 1 pitch dark. Dims sight between the two extremes. */
   darkness = 0,
 ): number {
+  if (token.blinded) return 0;
+
   const lit = token.visionRange > 0 ? token.visionRange : defaultVisionFeet;
   const unlit = Math.max(token.darkvisionRange, token.lightBright, token.lightDim ?? 0);
 

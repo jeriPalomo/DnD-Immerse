@@ -23,6 +23,22 @@ export interface PublicUser {
   avatarUrl: string | null;
 }
 
+/**
+ * One effect on a token, as the HUD lists it.
+ *
+ * `roundsRemaining` is resolved by the server from the encounter's current
+ * round rather than counted down in a stored field, which would drift the
+ * moment a turn is rewound. Null means it lasts until someone removes it.
+ */
+export interface WireEffect {
+  id: string;
+  name: string;
+  /** Names a 5e condition when this is one; null for a custom buff. */
+  statusId: string | null;
+  disabled: boolean;
+  roundsRemaining: number | null;
+}
+
 export interface WireToken {
   id: string;
   sceneId: string;
@@ -48,7 +64,10 @@ export interface WireToken {
   hp: number | null;
   maxHp: number | null;
   ac: number | null;
+  /** Derived from the token's effect rows, never stored on the token. */
   conditions: string[];
+  /** The same effects with their names and countdowns, for the HUD. */
+  effects: WireEffect[];
   /** Only ever true in a DM payload; hidden tokens are stripped for players. */
   hidden: boolean;
   locked: boolean;
@@ -89,6 +108,10 @@ export interface WireCard {
   actions: ('attack' | 'damage' | 'critical' | 'save' | 'versatile')[];
   saveAbility: string | null;
   saveDC: number | null;
+  /** The token this was aimed at when it was posted, if any. */
+  targetTokenId: string | null;
+  /** Shot beyond normal range, so the attack is at disadvantage. */
+  longRange: boolean;
 }
 
 export interface WireChatMessage {
@@ -301,6 +324,39 @@ export const initiativeAddSchema = z.object({
 export type DamageApplyPayload = z.infer<typeof damageApplySchema>;
 export type InitiativeAddPayload = z.infer<typeof initiativeAddSchema>;
 
+/**
+ * Putting a condition on a token, with an optional timer.
+ *
+ * `rounds` null means it lasts until someone removes it, which is what a
+ * hand-toggled condition has always been. A number starts a countdown measured
+ * from the encounter's current round — so nothing ticks outside combat, because
+ * rounds only advance in a fight. That is a stated limit, not an oversight.
+ */
+export const effectApplySchema = z.object({
+  tokenIds: z.array(z.string()).min(1).max(50),
+  /** One of `CONDITIONS`. The server refuses anything it cannot model. */
+  condition: z.string().max(40),
+  rounds: z.number().int().min(1).max(1000).nullable().default(null),
+  /** The item that inflicted it, for the log. */
+  itemId: z.string().nullable().default(null),
+});
+
+/** Editing a running effect: shorten it, extend it, or suspend it. */
+export const effectUpdateSchema = z.object({
+  effectId: z.string(),
+  /** Rounds remaining from now. Null makes it last until removed. */
+  rounds: z.number().int().min(0).max(1000).nullable().optional(),
+  disabled: z.boolean().optional(),
+});
+
+export const effectRemoveSchema = z.object({
+  effectId: z.string(),
+});
+
+export type EffectApplyPayload = z.infer<typeof effectApplySchema>;
+export type EffectUpdatePayload = z.infer<typeof effectUpdateSchema>;
+export type EffectRemovePayload = z.infer<typeof effectRemoveSchema>;
+
 export const drawingCreateSchema = z.object({
   sceneId: z.string(),
   kind: z.enum(['freehand', 'arrow', 'text']),
@@ -376,9 +432,6 @@ export interface ServerToClientEvents {
     /** DM only. Absent from every player payload. */
     walls?: WireWall[];
   }) => void;
-  'scene:list': (payload: { scenes: { id: string; name: string; mapImageUrl: string | null }[] }) => void;
-  'scene:changed': (payload: { sceneId: string }) => void;
-  'scene:updated': (payload: { scene: WireScene }) => void;
 
   'token:moved': (payload: TokenMovePayload & { byUserId: string }) => void;
   'token:created': (payload: { token: WireToken }) => void;
@@ -466,6 +519,15 @@ export interface ClientToServerEvents {
   'turn:previous': (payload: Record<string, never>) => void;
   'damage:apply': (payload: DamageApplyPayload) => void;
   'death:save': (payload: { tokenId: string }) => void;
+
+  /**
+   * Conditions and buffs. A player may condition a monster and never another
+   * character - the same `isFairGame` rule damage:apply follows - and removal is
+   * the DM's, except on a token the player owns.
+   */
+  'effect:apply': (payload: EffectApplyPayload) => void;
+  'effect:update': (payload: EffectUpdatePayload) => void;
+  'effect:remove': (payload: EffectRemovePayload) => void;
   'handout:show': (payload: { pageId: string }) => void;
 
   'template:create': (payload: TemplateCreatePayload) => void;

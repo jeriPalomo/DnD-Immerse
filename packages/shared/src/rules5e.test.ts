@@ -16,9 +16,12 @@ import {
   skillBonus,
   speciesBonuses,
   spellAttackBonus,
+  spellCondition,
   spellSaveDC,
+  SPELL_CONDITIONS,
   type AbilityScores,
 } from './rules5e.js';
+import { CONDITIONS } from './schemas.js';
 
 const scores: AbilityScores = { str: 16, dex: 14, con: 15, int: 8, wis: 12, cha: 20 };
 
@@ -252,5 +255,63 @@ describe('hit points on level up', () => {
     expect(hitPointsGained(1, -3)).toBe(1);
     expect(hitPointsGained(2, -5)).toBe(1);
     expect(hitPointsGained(5, 3)).toBe(8);
+  });
+});
+
+describe('SPELL_CONDITIONS', () => {
+  it('names only conditions the app can actually model', () => {
+    // A typo here would apply a condition with no mechanics behind it, which
+    // looks exactly like the feature working.
+    for (const [spell, entry] of Object.entries(SPELL_CONDITIONS)) {
+      for (const condition of entry.conditions) {
+        expect(CONDITIONS, `${spell} → ${condition}`).toContain(condition);
+      }
+    }
+  });
+
+  it('matches the handbook on the ones a table uses most', () => {
+    expect(spellCondition('Hold Person')).toEqual({
+      save: 'wis', conditions: ['paralyzed'], rounds: 10, concentration: true,
+    });
+    expect(spellCondition('Blindness/Deafness')).toEqual({
+      save: 'con', conditions: ['blinded'], rounds: 10, concentration: false,
+    });
+    expect(spellCondition('Web')).toEqual({
+      save: 'dex', conditions: ['restrained'], rounds: 600, concentration: true,
+    });
+    expect(spellCondition('Entangle')?.save).toBe('str');
+    expect(spellCondition('Fear')?.conditions).toEqual(['frightened']);
+  });
+
+  it('counts a minute as ten rounds and an hour as six hundred', () => {
+    expect(spellCondition('Hold Person')?.rounds).toBe(10);
+    expect(spellCondition('Charm Person')?.rounds).toBe(600);
+  });
+
+  it('leaves prone open-ended, because you stand up out of it', () => {
+    expect(spellCondition('Grease')?.rounds).toBeNull();
+    expect(spellCondition('Sleet Storm')?.rounds).toBeNull();
+  });
+
+  it('applies two conditions where the spell does', () => {
+    expect(spellCondition("Tasha's Hideous Laughter")?.conditions).toEqual(['prone', 'incapacitated']);
+    expect(spellCondition('Hypnotic Pattern')?.conditions).toEqual(['charmed', 'incapacitated']);
+  });
+
+  it('normalises the name it is looked up by', () => {
+    expect(spellCondition('  hold person  ')).not.toBeNull();
+    expect(spellCondition('HOLD PERSON')).not.toBeNull();
+  });
+
+  it('knows nothing about the spells it deliberately omits', () => {
+    // Each of these has no save, a non-condition effect, or a staged one, and a
+    // guess would be worse than the DM applying it by hand.
+    for (const spell of ['Sleep', 'Color Spray', 'Slow', 'Confusion', 'Flesh to Stone', 'Eyebite']) {
+      expect(spellCondition(spell), spell).toBeNull();
+    }
+  });
+
+  it('returns null for a spell it has never heard of', () => {
+    expect(spellCondition('Bigby’s Interpretive Dance')).toBeNull();
   });
 });

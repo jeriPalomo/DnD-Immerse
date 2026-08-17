@@ -78,6 +78,18 @@ the participants' personal socket rooms - never to the campaign room carrying a
 (a secret roll is stored as a whisper to the DM) so it survives a history
 reload.
 
+**A whisper recipient is validated, and players must be adjacent.**
+`whisperToUserId` was never checked at all: it went straight to
+`io.to(userRoom(id))`, and every socket joins its own personal room on connect
+regardless of campaign, so a member could whisper any user id on the server —
+including someone in a different game. `mayWhisper` now requires campaign
+membership, exempts the DM in both directions, and otherwise requires
+`tokenDistance(mine, theirs) <= 1` on the active scene. The refusal is
+deliberately vague, because "they are four squares away" is itself a position
+leak. The dropdown greys unreachable names rather than dropping them, and reads
+the tokens the client was sent — so someone out of sight reads as out of range,
+which is the safe direction to be wrong in.
+
 **Cull walls to the vision radius before the sweep.** The sweep casts three
 rays per wall corner and tests each against every wall, so cost grows with the
 *square* of the wall count — 300 walls measured at 13.8 ms per token before
@@ -94,6 +106,56 @@ computes vision in the browser and therefore ships every wall to every client.
 over base numbers and is never stored — the same rule as ability modifiers.
 Modes apply multiply before add, so a +2 bonus is not itself doubled, and
 `applied` names every effect that contributed so a total is explainable.
+
+**`active_effects` is the only store for conditions, and both sides fold it
+with the same function.** Conditions used to be a JSON array on the token that
+only the browser understood, while the richer table with durations sat with no
+insert path at all — so a paralyzed token's HUD read Speed 0 while the server
+offered it a full 30 ft of movement range, three inches away on the same
+screen. `deriveToken` now lives in `packages/shared` and is called by the HUD,
+by `speedOf`, by the vision sweep and by the attack roll. `WireToken.conditions`
+is derived from the rows at payload time. A condition row carries an empty
+`changes` and names the condition in `statusId`, whose mechanics are looked up
+from `CONDITION_EFFECTS` when it is read — copying them into the row would
+freeze them, so fixing what "prone" does would apply only to tokens that went
+prone afterwards.
+
+**Durations are rounds, and rounds only advance in a fight.** Nothing ticks
+outside combat; the DM removes by hand, and `effect:apply` says so in the log
+rather than silently dropping a timer it cannot count. A `turns`/`startTurn`
+pair was declared and read by nothing, and is gone. `roundsRemaining` is
+computed against the encounter's current round rather than counted down in a
+column, so rewinding a turn cannot leave it wrong.
+
+**Blindness is enforced where vision is computed.** `flags.blinded` (from
+`blinded`, `unconscious`, `petrified`) collapses `sightRadiusFeet` to 0, which
+`combinedVisibility` drops entirely — no polygon, so no fog opens and no token
+is revealed. `visibleTokens` still returns the tokens you control, and
+`FogLayer` punches their squares clear, so a blinded player keeps their own
+token and the remembered ground rather than an unbroken black rectangle. A
+client-side blur would be a devtools inspection away from the room anyway.
+
+**A spell save is rolled by the target, against the caster's DC.** `cardAction`
+rolled the *caster's* own save with the caster's proficiency against the
+caster's own DC — the wrong creature and the wrong number, on every spell ever
+cast from a card. `SPELL_CONDITIONS` in `rules5e.ts` is a curated, unit-tested
+map of which SRD spells inflict what; hand-entered items carry their own
+`appliesConditions`. Spells with no save, a non-condition effect or staged
+saves are deliberately absent — an omission means the DM applies it by hand,
+which is merely the old behaviour, where a wrong entry makes the app
+confidently wrong.
+
+**Advantage from conditions is recomputed on the server.** The target panel
+worked it out correctly, printed "Attacks at advantage — target is prone", and
+then the roll went out straight because the mode never travelled with the card.
+`combineRollModes` folds the server's condition-derived mode together with the
+player's own circumstantial call (long range, or the manual toggle); 5e cancels
+rather than stacks, so one disadvantage beats any number of advantages.
+
+**A change that alters sight pushes the whole scene, not one token.**
+`token:update` re-emitted only the token that changed, so blinding somebody — or
+editing their `visionRange` — never recomputed their polygon, and the change did
+not land until an unrelated event happened to push a full scene state.
 
 **AoE outlines and target lists come from the same geometry.** `templateCovers`
 decides both what is drawn and who is caught, so they cannot disagree.

@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   advanceTurn,
+  attackModeAgainst,
+  combineRollModes,
   applyDamage,
   applyHealing,
   concentrationDC,
   concentrationSave,
   conditionEffect,
   deriveActor,
+  deriveToken,
   expiredEffects,
   rewindTurn,
   sortInitiative,
@@ -271,5 +274,85 @@ describe('effect expiry', () => {
   it('keeps indefinite effects forever', () => {
     const permanent: ActiveEffect = { id: 'x', name: 'Plate', changes: [], disabled: false, duration: null };
     expect(expiredEffects([permanent], 99)).toEqual([]);
+  });
+});
+
+describe('deriveToken', () => {
+  it('stops a grappled token and reports why', () => {
+    const derived = deriveToken({ conditions: ['grappled'], ac: 15, maxHp: 20 });
+
+    expect(derived.speed).toBe(0);
+    expect(derived.reasons).toContain('Grappled');
+  });
+
+  it('halves a prone token, at whatever base speed it has', () => {
+    expect(deriveToken({ conditions: ['prone'] }).speed).toBe(15);
+    expect(deriveToken({ conditions: ['prone'] }, 40).speed).toBe(20);
+  });
+
+  it('blinds on blinded, unconscious and petrified', () => {
+    // The server reads this to collapse sight to nothing, so a wrong answer
+    // here either blinds a healthy token or lets a blind one see.
+    expect(deriveToken({ conditions: ['blinded'] }).blinded).toBe(true);
+    expect(deriveToken({ conditions: ['unconscious'] }).blinded).toBe(true);
+    expect(deriveToken({ conditions: ['petrified'] }).blinded).toBe(true);
+  });
+
+  it('does not blind for conditions that leave you looking', () => {
+    expect(deriveToken({ conditions: [] }).blinded).toBe(false);
+    expect(deriveToken({ conditions: ['prone', 'poisoned', 'frightened'] }).blinded).toBe(false);
+  });
+
+  it('leaves an unconditioned token on its base numbers', () => {
+    const derived = deriveToken({ conditions: [], ac: 18, maxHp: 30 });
+    expect(derived.speed).toBe(30);
+    expect(derived.ac).toBe(18);
+    expect(derived.reasons).toEqual([]);
+  });
+});
+
+describe('attackModeAgainst', () => {
+  const healthy = { conditions: [] as string[] };
+
+  it('gives advantage against a prone target', () => {
+    expect(attackModeAgainst(healthy, { conditions: ['prone'] }).mode).toBe('advantage');
+  });
+
+  it('gives disadvantage when the attacker is poisoned', () => {
+    expect(attackModeAgainst({ conditions: ['poisoned'] }, healthy).mode).toBe('disadvantage');
+  });
+
+  it('cancels rather than stacking', () => {
+    // A poisoned attacker striking a prone target rolls straight. This is the
+    // rule tables get wrong most often, which is why it is computed at all.
+    const result = attackModeAgainst({ conditions: ['poisoned'] }, { conditions: ['prone'] });
+    expect(result.mode).toBe('normal');
+    expect(result.reasons).toContain('they cancel out');
+  });
+
+  it('treats a paralyzed target as helpless', () => {
+    expect(attackModeAgainst(healthy, { conditions: ['paralyzed'] }).mode).toBe('advantage');
+  });
+
+  it('rolls straight between two healthy creatures', () => {
+    expect(attackModeAgainst(healthy, healthy).mode).toBe('normal');
+  });
+});
+
+describe('combineRollModes', () => {
+  it('does not stack advantage', () => {
+    expect(combineRollModes('advantage', 'advantage')).toBe('advantage');
+  });
+
+  it('lets one disadvantage cancel every advantage', () => {
+    // A prone target shot at long range is rolled straight.
+    expect(combineRollModes('advantage', 'disadvantage')).toBe('normal');
+    expect(combineRollModes('advantage', 'advantage', 'disadvantage')).toBe('normal');
+  });
+
+  it('passes a single source through', () => {
+    expect(combineRollModes('normal', 'disadvantage')).toBe('disadvantage');
+    expect(combineRollModes('normal', 'normal')).toBe('normal');
+    expect(combineRollModes()).toBe('normal');
   });
 });

@@ -74,7 +74,12 @@ interface TableState {
 
   send: (body: string, whisperToUserId?: string | null) => void;
   roll: (expression: string, label?: string, secret?: boolean) => void;
-  postCard: (itemId: string, actorId: string) => void;
+  postCard: (
+    itemId: string,
+    actorId: string,
+    targetTokenId?: string | null,
+    longRange?: boolean,
+  ) => void;
   select: (tokenId: string | null) => void;
   target: (tokenId: string | null) => void;
 
@@ -130,11 +135,25 @@ interface TableState {
     healing?: boolean,
     halved?: boolean,
   ) => void;
+  /** `rounds` null lasts until removed; a number counts down in combat. */
+  applyEffect: (tokenIds: string[], condition: string, rounds?: number | null) => void;
+  updateEffect: (effectId: string, patch: { rounds?: number | null; disabled?: boolean }) => void;
+  removeEffect: (effectId: string) => void;
   cardAction: (
     itemId: string,
     actorId: string,
     action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile',
     mode?: RollMode,
+    targetTokenId?: string | null,
+  ) => void;
+  /** Corrects a mistyped initiative, or sets the round and whose turn it is. */
+  setInitiative: (
+    encounterId: string,
+    patch: {
+      entries?: { id: string; initiative: number; sortOrder: number }[];
+      round?: number;
+      activeIndex?: number;
+    },
   ) => void;
   /** DM only, enforced on the server. Takes the battle log with it. */
   clearChat: () => void;
@@ -357,8 +376,8 @@ export const useTable = create<TableState>((set, get) => ({
     socket?.emit('chat:roll', { expression, label, actorId: activeActorId, secret });
   },
 
-  postCard(itemId, actorId) {
-    get().socket?.emit('chat:card', { itemId, actorId });
+  postCard(itemId, actorId, targetTokenId = null, longRange = false) {
+    get().socket?.emit('chat:card', { itemId, actorId, targetTokenId, longRange });
   },
 
   select(tokenId) {
@@ -581,6 +600,22 @@ export const useTable = create<TableState>((set, get) => ({
     get().socket?.emit('damage:apply', { tokenIds, amount, damageType, healing, halved });
   },
 
+  applyEffect(tokenIds, condition, rounds = null) {
+    get().socket?.emit('effect:apply', { tokenIds, condition, rounds, itemId: null });
+  },
+
+  updateEffect(effectId, patch) {
+    get().socket?.emit('effect:update', { effectId, ...patch });
+  },
+
+  removeEffect(effectId) {
+    get().socket?.emit('effect:remove', { effectId });
+  },
+
+  setInitiative(encounterId, patch) {
+    get().socket?.emit('initiative:update', { encounterId, ...patch });
+  },
+
   clearChat() {
     get().socket?.emit('chat:clear', {});
   },
@@ -596,7 +631,7 @@ export const useTable = create<TableState>((set, get) => ({
     if (showThreat) get().socket?.emit('movement:query', { tokenId: null, threat: true });
   },
 
-  cardAction(itemId, actorId, action, mode = 'normal') {
-    get().socket?.emit('chat:cardAction', { itemId, actorId, action, mode });
+  cardAction(itemId, actorId, action, mode = 'normal', targetTokenId = null) {
+    get().socket?.emit('chat:cardAction', { itemId, actorId, action, mode, targetTokenId });
   },
 }));

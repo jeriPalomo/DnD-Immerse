@@ -268,11 +268,25 @@ export const CONDITION_EFFECTS: Record<string, EffectChange[]> = {
   unconscious: [
     { key: 'speed', mode: 'override', value: 0, priority: 20 },
     { key: 'flags.incapacitated', mode: 'override', value: true, priority: 20 },
+    { key: 'flags.blinded', mode: 'override', value: true, priority: 20 },
   ],
   poisoned: [{ key: 'flags.disadvantageOnAttacks', mode: 'override', value: true, priority: 20 }],
   frightened: [{ key: 'flags.disadvantageOnAttacks', mode: 'override', value: true, priority: 20 }],
-  blinded: [{ key: 'flags.disadvantageOnAttacks', mode: 'override', value: true, priority: 20 }],
+  // Blinded means blinded. `flags.blinded` collapses the token's sight radius
+  // to nothing, so the player learns nothing new and opens no fog - rather
+  // than the condition being a label the DM has to remember to enforce.
+  blinded: [
+    { key: 'flags.disadvantageOnAttacks', mode: 'override', value: true, priority: 20 },
+    { key: 'flags.blinded', mode: 'override', value: true, priority: 20 },
+  ],
   invisible: [{ key: 'flags.advantageOnAttacks', mode: 'override', value: true, priority: 20 }],
+  // Petrified and unconscious creatures are unaware of their surroundings,
+  // which is the handbook's way of saying they cannot see either.
+  petrified: [
+    { key: 'speed', mode: 'override', value: 0, priority: 20 },
+    { key: 'flags.incapacitated', mode: 'override', value: true, priority: 20 },
+    { key: 'flags.blinded', mode: 'override', value: true, priority: 20 },
+  ],
 };
 
 export function conditionEffect(condition: string): ActiveEffect | null {
@@ -339,3 +353,143 @@ export function expiredEffects(effects: ActiveEffect[], round: number): ActiveEf
   });
 }
 
+
+/* ------------------------------------------------- conditions on a token */
+
+/**
+ * Anything carrying conditions and the two numbers they can change.
+ *
+ * Structural rather than `Pick<WireToken, ...>` so the server's database row
+ * and the client's wire token both satisfy it without this module having to
+ * know about either.
+ */
+export interface ConditionHolder {
+  conditions: string[];
+  ac?: number | null;
+  maxHp?: number | null;
+}
+
+export interface TokenDerived extends DerivedActor {
+  /** Conditions that produced a change, for the "why" line in the UI. */
+  reasons: string[];
+  hasDisadvantage: boolean;
+  hasAdvantage: boolean;
+  incapacitated: boolean;
+  /** Cannot see at all: sight radius collapses to nothing. */
+  blinded: boolean;
+}
+
+export function effectsForToken(token: ConditionHolder): ActiveEffect[] {
+  return token.conditions
+    .map((condition) => conditionEffect(condition))
+    .filter((effect): effect is ActiveEffect => effect !== null);
+}
+
+/**
+ * Derived stats for a token, given a base speed and AC.
+ *
+ * Tokens carry AC but not the full ability spread, so the missing pieces are
+ * filled with neutral values - the conditions we model only touch speed, AC
+ * and flags, so nothing downstream depends on them.
+ *
+ * This lives in the shared package rather than on either side because the
+ * server is the authority for vision, movement and every roll, while the
+ * client draws the HUD that has to agree with it. Two copies drifted once
+ * already: the HUD showed a paralyzed token Speed 0 while the server offered
+ * it the full 30 ft of movement range.
+ */
+export function deriveToken(token: ConditionHolder, baseSpeed = 30, level = 1): TokenDerived {
+  const effects = effectsForToken(token);
+
+  const derived = deriveActor(
+    {
+      str: 10,
+      dex: 10,
+      con: 10,
+      int: 10,
+      wis: 10,
+      cha: 10,
+      armorClass: token.ac ?? 10,
+      hpMax: token.maxHp ?? 0,
+      speed: baseSpeed,
+      level,
+    },
+    effects,
+  );
+
+  return {
+    ...derived,
+    reasons: derived.applied,
+    hasDisadvantage: Boolean(derived.flags['flags.disadvantageOnAttacks']),
+    hasAdvantage: Boolean(derived.flags['flags.advantageOnAttacks']),
+    incapacitated: Boolean(derived.flags['flags.incapacitated']),
+    blinded: Boolean(derived.flags['flags.blinded']),
+  };
+}
+
+/**
+ * How an attack from `attacker` against `target` should be rolled.
+ *
+ * 5e cancels advantage and disadvantage against each other rather than
+ * stacking them, so a prone attacker striking an invisible target rolls
+ * straight - which is exactly the sort of interaction a table gets wrong.
+ */
+export function attackModeAgainst(
+  attacker: ConditionHolder,
+  target: ConditionHolder,
+): { mode: 'normal' | 'advantage' | 'disadvantage'; reasons: string[] } {
+  const self = deriveToken(attacker);
+  const other = deriveToken(target);
+
+  const reasons: string[] = [];
+  let advantage = false;
+  let disadvantage = false;
+
+  if (self.hasDisadvantage) {
+    disadvantage = true;
+    reasons.push(`you are ${attacker.conditions.join(', ')}`);
+  }
+  // An invisible target is harder to hit.
+  if (other.hasAdvantage) {
+    disadvantage = true;
+    reasons.push('target is invisible');
+  }
+  // A prone target is easier to hit in melee.
+  if (target.conditions.includes('prone')) {
+    advantage = true;
+    reasons.push('target is prone');
+  }
+  if (target.conditions.includes('paralyzed') || target.conditions.includes('unconscious')) {
+    advantage = true;
+    reasons.push('target is helpless');
+  }
+
+  if (advantage && disadvantage) return { mode: 'normal', reasons: [...reasons, 'they cancel out'] };
+  if (advantage) return { mode: 'advantage', reasons };
+  if (disadvantage) return { mode: 'disadvantage', reasons };
+  return { mode: 'normal', reasons: [] };
+}
+
+/**
+ * Folds several sources of advantage and disadvantage into one roll.
+ *
+ * 5e does not stack them: any number of advantages is still one advantage, and
+ * a single disadvantage cancels the lot. So a prone target (advantage) shot at
+ * long range (disadvantage) is rolled straight.
+ *
+ * This exists because the two halves arrive from different places - conditions
+ * are recomputed on the server, while range and any circumstantial call the
+ * player makes come from the client - and combining them anywhere else would
+ * mean whichever arrived second silently won.
+ */
+export function combineRollModes(
+  ...modes: ('normal' | 'advantage' | 'disadvantage')[]
+): 'normal' | 'advantage' | 'disadvantage' {
+  const advantage = modes.includes('advantage');
+  const disadvantage = modes.includes('disadvantage');
+
+  if (advantage && disadvantage) return 'normal';
+  if (advantage) return 'advantage';
+  if (disadvantage) return 'disadvantage';
+  return 'normal';
+}

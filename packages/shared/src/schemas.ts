@@ -187,6 +187,14 @@ export const rollRequestSchema = z.object({
 export const cardRequestSchema = z.object({
   itemId: z.string(),
   actorId: z.string(),
+  /**
+   * Who it is aimed at, carried on the card so pressing its buttons later still
+   * knows. A spell save is the target's to roll, and the target has usually been
+   * deselected by the time anyone presses the button.
+   */
+  targetTokenId: z.string().nullable().default(null),
+  /** Beyond normal range: disadvantage the client can see and the server cannot. */
+  longRange: z.boolean().default(false),
 });
 
 /** Presses a button on a posted card; the server rolls and replies. */
@@ -195,6 +203,12 @@ export const cardActionSchema = z.object({
   actorId: z.string(),
   action: z.enum(['attack', 'damage', 'critical', 'save', 'versatile']),
   mode: z.enum(['normal', 'advantage', 'disadvantage']).default('normal'),
+  /**
+   * Who the spell is aimed at. A spell save is rolled by the TARGET, so without
+   * this the caster rolled their own save against their own DC - which is the
+   * wrong creature and always the wrong number.
+   */
+  targetTokenId: z.string().nullable().default(null),
 });
 
 export type CardRequest = z.infer<typeof cardRequestSchema>;

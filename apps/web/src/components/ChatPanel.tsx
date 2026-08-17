@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { DICE_LIMITS, DIE_TYPES, validateExpression, type RollMode } from '@dnd/shared';
+import {
+  DICE_LIMITS,
+  DIE_TYPES,
+  tokenDistance,
+  validateExpression,
+  type RollMode,
+} from '@dnd/shared';
 import { Button } from './ui.js';
 import { useTable } from '../store/table.js';
 import { useAuth } from '../store/auth.js';
@@ -9,6 +15,26 @@ export function ChatPanel({ isDM = false }: { isDM?: boolean }) {
   const { messages, members, connected, send, roll, cardAction, clearChat, error } = useTable();
   const { tokens, targetTokenId, applyDamage } = useTable();
   const { user } = useAuth();
+
+  /**
+   * Whether this player is close enough to whisper that one.
+   *
+   * The DM is always reachable, and the DM can whisper anyone. Otherwise the two
+   * tokens have to be adjacent, measured the same way the server measures it -
+   * this only greys the option out, the rule is enforced there.
+   *
+   * It reads the tokens THIS client was sent, which are already filtered by what
+   * the player can see. So a party member somewhere out of sight reads as out of
+   * range and greys, which is the safe direction to be wrong in: the client is
+   * never more permissive than the server.
+   */
+  function whisperReach(memberId: string, memberIsDM: boolean): boolean {
+    if (isDM || memberIsDM) return true;
+
+    const mine = tokens.filter((t) => t.ownerUserId === user?.id && t.layer !== 'gm');
+    const theirs = tokens.filter((t) => t.ownerUserId === memberId && t.layer !== 'gm');
+    return mine.some((a) => theirs.some((b) => tokenDistance(a, b) <= 1));
+  }
 
   // A damage roll can be applied to whatever is targeted, so long as it is not
   // somebody's character - the server enforces that; this only offers it.
@@ -47,6 +73,16 @@ export function ChatPanel({ isDM = false }: { isDM?: boolean }) {
       }
       roll(expression, '', secret);
     } else {
+      // Checked before sending, so a whisper to someone who has walked off does
+      // not cost the player the sentence they just typed. The server refuses it
+      // either way; this only saves a round trip and the draft.
+      if (whisperTo) {
+        const to = members.find((m) => m.user.id === whisperTo);
+        if (to && !whisperReach(to.user.id, to.role === 'dm')) {
+          setInputError(`${to.user.displayName} is too far away to whisper.`);
+          return;
+        }
+      }
       send(text, whisperTo);
     }
 
@@ -171,11 +207,18 @@ export function ChatPanel({ isDM = false }: { isDM?: boolean }) {
             <option value="">Everyone</option>
             {members
               .filter((m) => m.user.id !== user?.id)
-              .map((m) => (
-                <option key={m.user.id} value={m.user.id}>
-                  {m.user.displayName}
-                </option>
-              ))}
+              .map((m) => {
+                // Listed and disabled rather than dropped: a name that silently
+                // vanishes mid-session reads as a bug, where "too far" teaches
+                // the rule.
+                const reachable = whisperReach(m.user.id, m.role === 'dm');
+                return (
+                  <option key={m.user.id} value={m.user.id} disabled={!reachable}>
+                    {m.user.displayName}
+                    {reachable ? '' : ' — too far'}
+                  </option>
+                );
+              })}
           </select>
           <input
             value={draft}
@@ -288,6 +331,7 @@ function Message({
     actorId: string,
     action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile',
     mode?: RollMode,
+    targetTokenId?: string | null,
   ) => void;
   applyTo?: string | null;
   onApply?: (amount: number) => void;
@@ -410,9 +454,14 @@ function ItemCard({
     actorId: string,
     action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile',
     mode?: RollMode,
+    targetTokenId?: string | null,
   ) => void;
 }) {
-  const [mode, setMode] = useState<RollMode>('normal');
+  // Starts on the disadvantage a long shot already earned, rather than at
+  // 'normal' with the range penalty quietly dropped. Condition-based advantage
+  // is NOT pre-selected here: the server recomputes that from the board and
+  // folds it in, so a stale card cannot promise advantage the fight has ended.
+  const [mode, setMode] = useState<RollMode>(card.longRange ? 'disadvantage' : 'normal');
 
   return (
     <div className="mt-1 rounded-lg border border-ink-700 bg-ink-850 px-3 py-2">
@@ -446,7 +495,9 @@ function ItemCard({
           {card.actions.map((action) => (
             <button
               key={action}
-              onClick={() => onAction(card.itemId, card.actorId, action, mode)}
+              onClick={() =>
+                onAction(card.itemId, card.actorId, action, mode, card.targetTokenId)
+              }
               className="rounded border border-ink-600 bg-ink-800 px-2 py-1 text-[11px] text-ink-200 transition-colors hover:border-ember-500 hover:text-ember-300"
             >
               {ACTION_LABELS[action] ?? action}

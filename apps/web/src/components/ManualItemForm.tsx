@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import {
+  CONDITIONS,
   DAMAGE_TYPES,
   SPELL_SCHOOLS,
   WEAPON_PROPERTIES,
+  type AppliedCondition,
   type ItemCategory,
   type ItemType,
 } from '@dnd/shared';
@@ -111,6 +113,72 @@ export function ManualItemForm({
 
 type Setter = (key: string, value: unknown) => void;
 type Blob = Record<string, unknown>;
+
+/**
+ * What this inflicts when it lands.
+ *
+ * The curated `SPELL_CONDITIONS` table covers the SRD spells by name, so this is
+ * for everything it cannot know: homebrew, a magic weapon, a net. Without it a
+ * hand-made item can roll damage and nothing else, which is the same "decorative
+ * item" failure the rest of this form exists to avoid.
+ *
+ * One condition rather than a list. The schema accepts up to six; an item that
+ * inflicts two is rare enough to be worth editing by hand, and a repeater here
+ * would be more form than anyone fills in.
+ */
+function ConditionField({ system, set }: { system: Blob; set: Setter }) {
+  const applied = ((system.appliesConditions as AppliedCondition[]) ?? [])[0] ?? null;
+
+  function update(patch: Partial<AppliedCondition>) {
+    const next: AppliedCondition = {
+      condition: applied?.condition ?? '',
+      rounds: applied?.rounds ?? null,
+      save: applied?.save ?? null,
+      ...patch,
+    };
+    // Clearing the condition clears the whole entry - a duration with nothing to
+    // count down is not a state worth storing.
+    set('appliesConditions', next.condition ? [next] : []);
+  }
+
+  return (
+    <Row>
+      <Field label="Inflicts" hint="On a failed save">
+        <Select value={applied?.condition ?? ''} onChange={(v) => update({ condition: v })}>
+          <option value="">— nothing —</option>
+          {CONDITIONS.map((condition) => (
+            <option key={condition} value={condition}>
+              {condition}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="Save" hint="Blank lands automatically">
+        <Select
+          value={applied?.save ?? ''}
+          onChange={(v) => update({ save: (v || null) as AppliedCondition['save'] })}
+        >
+          <option value="">— none —</option>
+          <option value="str">Strength</option>
+          <option value="dex">Dexterity</option>
+          <option value="con">Constitution</option>
+          <option value="int">Intelligence</option>
+          <option value="wis">Wisdom</option>
+          <option value="cha">Charisma</option>
+        </Select>
+      </Field>
+      <Field label="Rounds" hint="Blank lasts until removed">
+        <Input
+          type="number"
+          min={1}
+          value={applied?.rounds === null || applied?.rounds === undefined ? '' : String(applied.rounds)}
+          onChange={(e) => update({ rounds: e.target.value ? Number(e.target.value) : null })}
+          placeholder="—"
+        />
+      </Field>
+    </Row>
+  );
+}
 
 function WeaponFields({ system, set }: { system: Blob; set: Setter }) {
   const range = (system.range as { type?: string; value?: number; long?: number | null }) ?? {};
@@ -249,6 +317,8 @@ function WeaponFields({ system, set }: { system: Blob; set: Setter }) {
         </Field>
       )}
 
+      <ConditionField system={system} set={set} />
+
       <Description system={system} set={set} />
     </>
   );
@@ -350,6 +420,8 @@ function SpellFields({ system, set }: { system: Blob; set: Setter }) {
           onChange={(v) => set('save', { ability: save.ability, halfOnSuccess: v })}
         />
       )}
+
+      <ConditionField system={system} set={set} />
 
       <Check
         label="Attack roll"

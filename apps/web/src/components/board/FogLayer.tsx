@@ -18,13 +18,32 @@ export function FogLayer({
   scene,
   vision,
   grid,
+  own = [],
 }: {
   scene: WireScene;
   vision: WireVision;
   grid: { gridSize: number; offsetX: number; offsetY: number };
+  /**
+   * Footprints of the tokens this viewer controls, in grid units.
+   *
+   * Always clear, because you know where you are standing. Normally they sit
+   * inside your own sight polygon anyway and this changes nothing - it matters
+   * when the polygon is empty, which is exactly what being blinded produces.
+   * Without it a blinded player gets an unbroken black rectangle and cannot
+   * tell where they are, or that they still have a token at all.
+   */
+  own?: { x: number; y: number; w: number; h: number }[];
 }) {
   const width = scene.mapWidth || 1400;
   const height = scene.mapHeight || 900;
+
+  /** Adds each controlled token's square to the current path. */
+  const punchOwn = (ctx: CanvasRenderingContext2D) => {
+    for (const token of own) {
+      const point = gridToPixel({ x: token.x, y: token.y }, grid);
+      ctx.rect(point.x, point.y, token.w * grid.gridSize, token.h * grid.gridSize);
+    }
+  };
 
   /**
    * Drawn as one custom shape against the raw 2D context rather than as a
@@ -45,6 +64,7 @@ export function FogLayer({
       // Half a pixel of bleed stops hairline seams between adjacent squares.
       ctx.rect(point.x - 0.5, point.y - 0.5, grid.gridSize + 1, grid.gridSize + 1);
     }
+    punchOwn(ctx);
     ctx.fillStyle = '#05040a';
     ctx.fill('evenodd');
     ctx.restore();
@@ -66,6 +86,9 @@ export function FogLayer({
       ctx.closePath();
       ctx.fill();
     }
+    ctx.beginPath();
+    punchOwn(ctx);
+    ctx.fill();
     ctx.restore();
   };
 
@@ -73,7 +96,7 @@ export function FogLayer({
     <Shape
       listening={false}
       // Keyed on the payload so Konva repaints when sight changes.
-      key={`${vision.polygons.length}:${vision.explored.length}`}
+      key={`${vision.polygons.length}:${vision.explored.length}:${own.map((t) => `${t.x},${t.y}`).join('|')}`}
       sceneFunc={paint}
     />
   );

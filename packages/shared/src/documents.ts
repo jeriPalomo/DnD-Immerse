@@ -130,6 +130,24 @@ const physicalFields = {
   price: z.string().max(30).default(''),
 };
 
+/**
+ * A condition an item inflicts when it lands.
+ *
+ * The curated `SPELL_CONDITIONS` table covers the SRD spells, but it cannot know
+ * about homebrew or a magic weapon the DM invented - so anything hand-entered
+ * carries its own. An item you cannot make bite is decorative.
+ */
+export const appliedConditionSchema = z.object({
+  /** One of `CONDITIONS`; the server refuses anything it cannot model. */
+  condition: z.string().max(40),
+  /** Rounds it lasts. Null lasts until removed, which is right for prone. */
+  rounds: z.number().int().min(1).max(1000).nullable().default(null),
+  /** The save that avoids it. Null means it lands with no save at all. */
+  save: abilityKeySchema.nullable().default(null),
+});
+
+export type AppliedCondition = z.infer<typeof appliedConditionSchema>;
+
 export const weaponSystemSchema = z.object({
   ...physicalFields,
   ability: abilityKeySchema.default('str'),
@@ -152,6 +170,8 @@ export const weaponSystemSchema = z.object({
    */
   mastery: z.string().max(30).default(''),
   activation: activationSchema.default({}),
+  /** Conditions this inflicts on a hit, e.g. a net that restrains. */
+  appliesConditions: z.array(appliedConditionSchema).max(6).default([]),
   description: z.string().max(8000).default(''),
 });
 
@@ -185,6 +205,12 @@ export const spellSystemSchema = z.object({
     .nullable()
     .default(null),
   attackRoll: z.boolean().default(false),
+  /**
+   * Conditions this inflicts on a failed save. Left empty by the importer:
+   * `SPELL_CONDITIONS` supplies them for the SRD spells it knows, and this is
+   * for the ones it does not.
+   */
+  appliesConditions: z.array(appliedConditionSchema).max(6).default([]),
   prepared: z.boolean().default(false),
   alwaysPrepared: z.boolean().default(false),
   higherLevel: z.string().max(4000).default(''),
@@ -334,11 +360,18 @@ export const effectChangeSchema = z.object({
   priority: z.number().int().default(20),
 });
 
+/**
+ * How long an effect lasts, in rounds.
+ *
+ * Rounds only, measured from `startRound`. A `turns`/`startTurn` pair was
+ * declared here and read by nothing - `expiredEffects` has always counted
+ * rounds - so it was two fields that looked like a feature. Note the honest
+ * consequence of rounds: nothing counts down outside combat, because rounds
+ * only advance in an encounter. Out of combat the DM removes by hand.
+ */
 export const effectDurationSchema = z.object({
   rounds: z.number().int().min(0).nullable().default(null),
-  turns: z.number().int().min(0).nullable().default(null),
   startRound: z.number().int().min(0).nullable().default(null),
-  startTurn: z.number().int().min(0).nullable().default(null),
 });
 
 export const activeEffectInputSchema = z.object({

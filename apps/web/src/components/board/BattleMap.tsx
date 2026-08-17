@@ -502,7 +502,12 @@ export function BattleMap({
             below the overlay so pings and rulers stay readable. */}
         {vision && (
           <Layer listening={false}>
-            <FogLayer scene={scene} vision={vision} grid={grid} />
+            <FogLayer
+              scene={scene}
+              vision={vision}
+              grid={grid}
+              own={tokens.filter((t) => t.ownerUserId === user?.id)}
+            />
           </Layer>
         )}
 

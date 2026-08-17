@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   blocksMovement,
   blocksSight,
+  combinedVisibility,
   computeVisibility,
   movementBlocked,
   sightRadiusFeet,
@@ -251,5 +252,20 @@ describe('sightRadiusFeet', () => {
   it('never lets darkness exceed the lit range', () => {
     const owl = { visionRange: 30, darkvisionRange: 120, lightBright: 0 };
     expect(sightRadiusFeet(owl, false, 60)).toBe(30);
+  });
+
+  it('sees nothing at all when blinded, torch or darkvision regardless', () => {
+    // The one case that is meant to be a black screen. A torch does not help a
+    // creature that cannot see, and neither does daylight.
+    expect(sightRadiusFeet({ ...dwarf, blinded: true }, false, 60)).toBe(0);
+    expect(sightRadiusFeet({ ...torchbearer, blinded: true }, false, 60)).toBe(0);
+    expect(sightRadiusFeet({ ...dwarf, blinded: true }, true, 60)).toBe(0);
+  });
+
+  it('contributes no polygon at all for a blinded token', () => {
+    // combinedVisibility drops zero-radius sources, which is what stops a
+    // blinded player from opening any fog.
+    const radius = sightRadiusFeet({ ...dwarf, blinded: true }, true, 60);
+    expect(combinedVisibility([{ point: { x: 5, y: 5 }, radius }], [])).toEqual([]);
   });
 });

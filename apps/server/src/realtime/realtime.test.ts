@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { io as connect, type Socket } from 'socket.io-client';
-import type { WireChatMessage, WirePresence } from '@dnd/shared';
+import type { WireChatMessage, WirePresence, WireToken } from '@dnd/shared';
 
 /**
  * End-to-end realtime tests against a real HTTP + Socket.IO server on a
@@ -414,5 +414,115 @@ describe('group rolls', () => {
     const failure = next<{ message: string }>(aliceSocket, 'error');
     aliceSocket.emit('chat:groupRoll', { kind: 'skill', key: 'perception', dc: null, secret: false });
     expect((await failure)?.message).toMatch(/only the dm/i);
+  });
+});
+
+describe('players whisper only when their tokens are adjacent', () => {
+  let sceneId: string;
+  let aliceTokenId: string;
+  let bobTokenId: string;
+
+  beforeAll(async () => {
+    const scene = await api<{ scene: { id: string } }>(
+      'POST', `/api/campaigns/${campaignId}/scenes`, { name: 'Tavern', gridSize: 70 }, dm.cookie,
+    );
+    sceneId = scene.scene.id;
+
+    dmSocket.emit('scene:activate', { sceneId });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const mine = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, name: 'Alice PC', x: 5, y: 5, ownerUserId: alice.userId,
+    } as never);
+    aliceTokenId = (await mine)!.token.id;
+
+    // Adjacent to start with: one square east.
+    const theirs = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, name: 'Bob PC', x: 6, y: 5, ownerUserId: bob.userId,
+    } as never);
+    bobTokenId = (await theirs)!.token.id;
+    await new Promise((r) => setTimeout(r, 300));
+  });
+
+  it('delivers between two adjacent players', async () => {
+    const bobSees = next<{ message: WireChatMessage }>(bobSocket, 'chat:message');
+    aliceSocket.emit('chat:send', {
+      body: 'cover me', whisperToUserId: bob.userId, actorId: null,
+    });
+
+    expect((await bobSees)?.message.body).toContain('cover me');
+  });
+
+  it('counts a diagonal as adjacent', async () => {
+    dmSocket.emit('token:commit', { tokenId: bobTokenId, x: 6, y: 6 });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const bobSees = next<{ message: WireChatMessage }>(bobSocket, 'chat:message');
+    aliceSocket.emit('chat:send', {
+      body: 'still close', whisperToUserId: bob.userId, actorId: null,
+    });
+
+    expect((await bobSees)?.message.body).toContain('still close');
+  });
+
+  it('refuses once they step apart, and delivers to nobody', async () => {
+    dmSocket.emit('token:commit', { tokenId: bobTokenId, x: 12, y: 12 });
+    await new Promise((r) => setTimeout(r, 400));
+
+    const refusal = next<{ message: string }>(aliceSocket, 'error');
+    const bobSees = next<{ message: WireChatMessage }>(bobSocket, 'chat:message', 1200);
+
+    aliceSocket.emit('chat:send', {
+      body: 'across the room', whisperToUserId: bob.userId, actorId: null,
+    });
+
+    expect((await refusal)?.message).toMatch(/cannot whisper them from here/i);
+    // Refused, not downgraded to a public message - which would be far worse
+    // than not sending it.
+    expect((await bobSees)?.message.body ?? '').not.toContain('across the room');
+  });
+
+  it('still lets either of them reach the DM from anywhere', async () => {
+    const dmSees = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    aliceSocket.emit('chat:send', {
+      body: 'a note for you', whisperToUserId: dm.userId, actorId: null,
+    });
+
+    expect((await dmSees)?.message.body).toContain('a note for you');
+  });
+
+  it('lets the DM whisper a player at any distance', async () => {
+    const bobSees = next<{ message: WireChatMessage }>(bobSocket, 'chat:message');
+    dmSocket.emit('chat:send', {
+      body: 'you notice something', whisperToUserId: bob.userId, actorId: null,
+    });
+
+    expect((await bobSees)?.message.body).toContain('you notice something');
+  });
+
+  it('refuses a whisper to somebody outside the campaign', async () => {
+    // The hole this closed: `whisperToUserId` was never validated, and every
+    // socket joins its own personal room regardless of campaign - so an id
+    // borrowed from another game received the message.
+    const refusal = next<{ message: string }>(aliceSocket, 'error');
+    aliceSocket.emit('chat:send', {
+      body: 'hello stranger', whisperToUserId: outsider.userId, actorId: null,
+    });
+
+    expect((await refusal)?.message).toMatch(/cannot whisper them from here/i);
+  });
+
+  it('refuses when the sender has no token on the board at all', async () => {
+    dmSocket.emit('token:delete', { tokenId: aliceTokenId });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const refusal = next<{ message: string }>(aliceSocket, 'error');
+    aliceSocket.emit('chat:send', {
+      body: 'where am I', whisperToUserId: bob.userId, actorId: null,
+    });
+
+    expect((await refusal)?.message).toMatch(/cannot whisper them from here/i);
   });
 });

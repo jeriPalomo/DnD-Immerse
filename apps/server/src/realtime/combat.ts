@@ -8,7 +8,10 @@ import {
   concentrationSave,
   damageApplySchema,
   resolveDeathSave,
-  expiredEffects,
+  effectApplySchema,
+  effectRemoveSchema,
+  effectUpdateSchema,
+  CONDITIONS,
   initiativeExpression,
   initiativeAddSchema,
   initiativeUpdateSchema,
@@ -26,10 +29,20 @@ import type {
 import { db } from '../db/index.js';
 import { activeEffects, actors, encounters, initiativeEntries, scenes, tokens } from '../db/schema.js';
 import { getMembership } from '../auth/guards.js';
+import {
+  applyCondition,
+  conditionsOf,
+  currentRound,
+  effectsByToken,
+  expireEffectsIn,
+  hasCondition,
+  removeCondition,
+} from '../lib/effects.js';
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
 import { invalidateDragCache } from './scene.js';
 import type { IOServer, SocketData } from './index.js';
+import type { ActiveEffect as EffectRow } from '../db/schema.js';
 import type { Token } from '../db/schema.js';
 
 type CombatSocket = Socket<ClientToServerEvents, ServerToClientEvents, object, SocketData>;
@@ -63,6 +76,10 @@ async function projectEncounter(campaignId: string, isDM: boolean): Promise<Wire
     .where(eq(initiativeEntries.encounterId, encounter.id))
     .orderBy(asc(initiativeEntries.sortOrder));
 
+  const effects = await effectsByToken(
+    rows.map(({ token }) => token?.id).filter((id): id is string => Boolean(id)),
+  );
+
   const entries: WireInitiativeEntry[] = rows.map(({ entry, token }) => {
     const ownedByPlayer = Boolean(token?.ownerUserId);
     const showHp = isDM || ownedByPlayer;
@@ -75,7 +92,7 @@ async function projectEncounter(campaignId: string, isDM: boolean): Promise<Wire
       sortOrder: entry.sortOrder,
       hp: showHp ? (token?.hp ?? null) : null,
       maxHp: showHp ? (token?.maxHp ?? null) : null,
-      conditions: token?.conditions ?? [],
+      conditions: token ? conditionsOf(effects.get(token.id)) : [],
       hpRedacted: !showHp,
     };
   });
@@ -283,17 +300,42 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
     await broadcastEncounter(io, ctx.campaignId);
   });
 
+  /**
+   * Correcting the tracker: a mistyped initiative, the round, whose turn it is.
+   *
+   * This handler existed from the start with no client caller at all, which is
+   * the same gap `wall:update` had - so a fat-fingered 17 entered as 71 could not
+   * be fixed, and the round number could not be set. Wiring it up meant first
+   * closing the hole below: `encounterId` arrived from the client and was written
+   * to on trust, so a DM of their own game could renumber somebody else's fight.
+   */
   socket.on('initiative:update', async (payload) => {
     const ctx = await requireDM();
     if (!ctx) return;
 
     const input = initiativeUpdateSchema.parse(payload);
 
+    // Scoped to this campaign, the same way every token id is. Without it, room
+    // membership was answering "is this socket a DM somewhere".
+    const owned = await db
+      .select({ id: encounters.id })
+      .from(encounters)
+      .where(and(eq(encounters.id, input.encounterId), eq(encounters.campaignId, ctx.campaignId)))
+      .limit(1);
+    if (!owned[0]) return;
+
     for (const entry of input.entries ?? []) {
+      // And each entry has to belong to that encounter, or an id from another
+      // fight rides in on a valid one.
       await db
         .update(initiativeEntries)
         .set({ initiative: entry.initiative })
-        .where(eq(initiativeEntries.id, entry.id));
+        .where(
+          and(
+            eq(initiativeEntries.id, entry.id),
+            eq(initiativeEntries.encounterId, input.encounterId),
+          ),
+        );
     }
 
     if (input.round !== undefined || input.activeIndex !== undefined) {
@@ -337,13 +379,21 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       // Timed effects fall off at the top of the round they expire in,
       // rather than lingering until someone remembers them.
       if (next.round !== encounter.round) {
-        const expired = await expireEffectsFor(ctx.campaignId, next.round);
-        if (expired.length > 0) {
+        const { names, tokenIds } = await expireEffectsIn(ctx.campaignId, next.round);
+        if (names.length > 0) {
           await postSystemMessage(
             io, ctx.campaignId, user.id,
-            `Round ${next.round}: ${expired.join(', ')} ${expired.length === 1 ? 'expires' : 'expire'}.`,
+            `Round ${next.round}: ${names.join(', ')} ${names.length === 1 ? 'expires' : 'expire'}.`,
           );
-          const { broadcastSceneState } = await import('./scene.js');
+          const { broadcastSceneState, invalidateDragCache: dropCache } = await import('./scene.js');
+          for (const tokenId of tokenIds) {
+            const row = await db
+              .select({ sceneId: tokens.sceneId })
+              .from(tokens)
+              .where(eq(tokens.id, tokenId))
+              .limit(1);
+            if (row[0]) dropCache(row[0].sceneId);
+          }
           await broadcastSceneState(io, ctx.campaignId);
         }
       }
@@ -406,18 +456,10 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       .where(eq(actors.id, actor.id));
 
     if (outcome.revivedAtHp !== null) {
-      await db
-        .update(tokens)
-        .set({
-          hp: outcome.revivedAtHp,
-          conditions: token.conditions.filter((c) => c !== 'unconscious'),
-        })
-        .where(eq(tokens.id, tokenId));
+      await db.update(tokens).set({ hp: outcome.revivedAtHp }).where(eq(tokens.id, tokenId));
+      await removeCondition(tokenId, 'unconscious');
     } else if (outcome.dead) {
-      await db
-        .update(tokens)
-        .set({ conditions: [...new Set([...token.conditions, 'unconscious'])] })
-        .where(eq(tokens.id, tokenId));
+      await applyCondition(tokenId, 'unconscious');
     }
 
     invalidateDragCache(token.sceneId);
@@ -500,7 +542,7 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       lines.push(`${token.name} ${verb} ${Math.abs(token.hp - after)}${suffix} — ${after}/${token.maxHp}`);
 
       // Concentration is checked only on real damage that got through.
-      if (!input.healing && token.hp !== after && token.conditions.includes('concentrating')) {
+      if (!input.healing && token.hp !== after && (await hasCondition(token.id, 'concentrating'))) {
         const dc = concentrationDC(token.hp - after);
         let expression = '1d20';
 
@@ -519,12 +561,7 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
         const held = save.total >= dc;
         lines.push(`  concentration DC ${dc}: rolled ${save.total} — ${held ? 'held' : 'BROKEN'}`);
 
-        if (!held) {
-          await db
-            .update(tokens)
-            .set({ conditions: token.conditions.filter((c) => c !== 'concentrating') })
-            .where(eq(tokens.id, token.id));
-        }
+        if (!held) await removeCondition(token.id, 'concentrating');
       }
     }
 
@@ -539,33 +576,159 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
     await broadcastSceneState(io, ctx.campaignId);
     await broadcastEncounter(io, ctx.campaignId);
   });
+
+  /* ------------------------------------------------------------ effects */
+
+  /**
+   * Pushes the board out after an effect changed.
+   *
+   * A full scene push rather than one token, because conditions decide what a
+   * player can see: blinding a token collapses its owner's sight polygon, and a
+   * per-token broadcast cannot carry that.
+   */
+  async function broadcastEffects(campaignId: string, sceneIds: string[]): Promise<void> {
+    for (const sceneId of new Set(sceneIds)) invalidateDragCache(sceneId);
+    const { broadcastSceneState } = await import('./scene.js');
+    await broadcastSceneState(io, campaignId);
+    await broadcastEncounter(io, campaignId);
+  }
+
+  socket.on('effect:apply', async (payload) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const input = effectApplySchema.parse(payload);
+    if (!CONDITIONS.includes(input.condition as (typeof CONDITIONS)[number])) {
+      socket.emit('error', { message: 'That is not a condition' });
+      return;
+    }
+
+    const requested = await tokensIn(input.tokenIds, ctx.campaignId);
+
+    // The same rule as damage: a player's spell may condition a monster, never
+    // somebody's character. Paralysing another player's fighter is the DM's call.
+    let targets = requested;
+    if (!ctx.isDM) {
+      const allowed = await Promise.all(requested.map((token) => isFairGame(token)));
+      targets = requested.filter((_, i) => allowed[i]);
+
+      if (targets.length === 0) {
+        socket.emit('error', { message: 'You can only apply conditions to monsters' });
+        return;
+      }
+    }
+
+    // Timers are measured from the round in progress. With no encounter running
+    // there is nothing to count, so it lasts until removed and says so.
+    const round = await currentRound(ctx.campaignId);
+    const duration =
+      input.rounds !== null && round !== null
+        ? { rounds: input.rounds, startRound: round }
+        : null;
+
+    for (const token of targets) {
+      await applyCondition(token.id, input.condition, duration, input.itemId);
+    }
+
+    const lasting =
+      duration === null
+        ? input.rounds !== null
+          ? ' (until removed — no fight is running to count rounds)'
+          : ''
+        : ` for ${input.rounds} ${input.rounds === 1 ? 'round' : 'rounds'}`;
+
+    await postSystemMessage(
+      io,
+      ctx.campaignId,
+      user.id,
+      `${targets.map((t) => t.name).join(', ')} ${targets.length === 1 ? 'is' : 'are'} ${input.condition}${lasting}.`,
+    );
+
+    await broadcastEffects(ctx.campaignId, targets.map((token) => token.sceneId));
+  });
+
+  socket.on('effect:update', async (payload) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const input = effectUpdateSchema.parse(payload);
+    const found = await effectIn(input.effectId, ctx.campaignId);
+    if (!found) return;
+
+    if (!ctx.isDM && found.token.ownerUserId !== user.id) {
+      socket.emit('error', { message: 'You cannot change that' });
+      return;
+    }
+
+    const round = await currentRound(ctx.campaignId);
+    await db
+      .update(activeEffects)
+      .set({
+        ...(input.disabled !== undefined ? { disabled: input.disabled } : {}),
+        // Rounds are given as "from now", so the stored window is rebased on the
+        // current round - otherwise editing a timer mid-fight would read as the
+        // number of rounds it had when it was cast.
+        ...(input.rounds !== undefined
+          ? {
+              duration:
+                input.rounds === null || round === null
+                  ? null
+                  : { rounds: input.rounds, startRound: round },
+            }
+          : {}),
+      })
+      .where(eq(activeEffects.id, input.effectId));
+
+    await broadcastEffects(ctx.campaignId, [found.token.sceneId]);
+  });
+
+  socket.on('effect:remove', async (payload) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const input = effectRemoveSchema.parse(payload);
+    const found = await effectIn(input.effectId, ctx.campaignId);
+    if (!found) return;
+
+    // A player may clear one from their own token - shaking off a condition is
+    // theirs to do - but not from anybody else's.
+    if (!ctx.isDM && found.token.ownerUserId !== user.id) {
+      socket.emit('error', { message: 'You cannot remove that' });
+      return;
+    }
+
+    await db.delete(activeEffects).where(eq(activeEffects.id, input.effectId));
+    await postSystemMessage(
+      io,
+      ctx.campaignId,
+      user.id,
+      `${found.effect.name} ends on ${found.token.name}.`,
+    );
+
+    await broadcastEffects(ctx.campaignId, [found.token.sceneId]);
+  });
 }
 
 /**
- * Removes effects whose duration has elapsed, returning their names so the
- * table is told what wore off rather than silently losing a buff.
+ * An effect and the token it sits on, but only within one campaign.
+ *
+ * The same reason `tokensIn` exists: an effect id arrives from the client, and
+ * room membership does not say which campaign it came from. Joined through the
+ * token to its scene so an id borrowed from another game is simply not found.
  */
-async function expireEffectsFor(campaignId: string, round: number): Promise<string[]> {
+async function effectIn(
+  effectId: string,
+  campaignId: string,
+): Promise<{ effect: EffectRow; token: Token } | null> {
   const rows = await db
     .select({ effect: activeEffects, token: tokens })
     .from(activeEffects)
-    .innerJoin(tokens, eq(activeEffects.ownerTokenId, tokens.id));
+    .innerJoin(tokens, eq(activeEffects.ownerTokenId, tokens.id))
+    .innerJoin(scenes, eq(tokens.sceneId, scenes.id))
+    .where(and(eq(activeEffects.id, effectId), eq(scenes.campaignId, campaignId)))
+    .limit(1);
 
-  const candidates = rows.map(({ effect }) => ({
-    id: effect.id,
-    name: effect.name,
-    changes: effect.changes,
-    disabled: effect.disabled,
-    duration: effect.duration as { rounds: number | null; startRound: number | null } | null,
-    statusId: effect.statusId,
-  }));
-
-  const expired = expiredEffects(candidates, round);
-  for (const effect of expired) {
-    await db.delete(activeEffects).where(eq(activeEffects.id, effect.id));
-  }
-
-  return expired.map((effect) => effect.name);
+  return rows[0] ?? null;
 }
 
 /** Resistances and immunities come from the token's actor sheet. */

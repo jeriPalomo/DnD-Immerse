@@ -13,10 +13,89 @@ Phases 1-7 are done; this is the punch list from actually using the thing.
 ## Where this stands
 
 **Done** (2026-08-13): everything below. Table 1 was resolved by deleting the
-audio system rather than extending it. Migrations `0005`–`0008` are applied on
-the desktop; run `npm run db:migrate` after pulling on the laptop.
+audio system rather than extending it.
+
+> **Run `npm run db:migrate` after pulling.** Migration `0010` moves every
+> token's conditions into `active_effects` and drops `tokens.conditions`, so a
+> server on the old schema will not start against the new code. It was written
+> and verified on the laptop, which has no `data/` at all — **it has not yet run
+> against the real campaign database.** Take a `npm run backup` first, as usual.
 
 **Still open:** the Online/Local split at the bottom, deferred by choice.
+
+---
+
+## Status effects, whispers and four defects — 2026-08-17
+
+The through-line: **conditions were half-built, and the two halves disagreed on
+screen.** `tokens.conditions` was folded into real mechanics only by
+`apps/web/src/lib/derive.ts`, in the browser. The server — the authority for
+vision, movement and every roll — read raw actor columns. So a paralyzed token's
+HUD said Speed 0 while the server highlighted its full 30 ft of movement range,
+at the same time, three inches apart. Meanwhile `active_effects`, with durations,
+an expiry hook and unit tests, had **never held a row**: no insert path existed
+anywhere.
+
+**One store.** Migration `0010` carries every token's conditions into
+`active_effects` and drops the column; `duration` becomes nullable, and the
+never-read `turns`/`startTurn` pair is gone. `deriveToken` moved into
+`packages/shared`, so the HUD, `speedOf`, the vision sweep and the attack roll
+all fold the same function. A condition row keeps an empty `changes` and names
+itself in `statusId` — its mechanics are looked up when read, so fixing what
+"prone" does fixes every prone token. The cross-campaign delete in
+`expireEffectsFor` is closed by joining through the scene, which was a tripwire
+the moment an insert path existed.
+
+**Timers, editable.** `effect:apply` / `effect:update` / `effect:remove`, gated
+by the same `isFairGame` rule as damage: a player may condition a monster, never
+another character, and may clear one from their own token. The HUD lists each
+effect with its countdown, a stepper and an ×. Rounds only advance in a fight,
+so **nothing ticks outside combat** — stated in the log line rather than
+silently dropping the timer.
+
+**Automatic application.** `SPELL_CONDITIONS` in `rules5e.ts` is a curated,
+unit-tested map of the SRD spells that inflict conditions; hand-entered items
+carry their own `appliesConditions`, with fields in the manual form. Spells with
+no save (Sleep, Color Spray), a non-condition effect (Slow, Confusion) or staged
+saves (Flesh to Stone) are deliberately absent — an omission is the old
+behaviour, a wrong entry is the app being confidently wrong.
+
+Found on the way: **`chat:cardAction` rolled the caster's own save, with the
+caster's proficiency, against the caster's own DC.** The wrong creature and the
+wrong number, on every spell ever cast from a card. The target now rolls.
+
+**Blindness.** `flags.blinded` collapses `sightRadiusFeet` to 0.
+`combinedVisibility` already dropped zero-radius sources and `visibleTokens`
+already fell back to your own tokens, so the server side was five lines. What
+was missing was the render: fog sits above tokens, so a blinded player got an
+unbroken black rectangle. `FogLayer` now punches the viewer's own squares clear.
+
+**Whispers are validated, then gated on adjacency.** The hole first:
+`whisperToUserId` was never checked, and every socket joins its own personal
+room regardless of campaign — so a member could whisper **any user id on the
+server**, including someone in another game. Now: membership required, the DM
+exempt both ways, otherwise `tokenDistance <= 1` on the active scene. The
+dropdown greys unreachable names. Refusals are vague on purpose.
+
+**Two more defects.** `initiative:update` had a complete handler and no client
+caller, so a mistyped initiative could not be corrected — wiring it up meant
+first scoping `encounterId` to the campaign, which it took on trust.
+`scene:list` and `scene:updated` were declared and never emitted, `scene:changed`
+emitted and never handled; all three deleted.
+
+Also fixed while there: `token:update` re-emitted only the changed token, so
+blinding somebody — or editing their `visionRange` — never recomputed their
+polygon.
+
+Verified in the running app with two browsers over a throwaway `DATA_DIR`: a
+timer counting 3 → 2 → expiring with `Round 3: Restrained expires.` in the
+battle log; a grappled token's red movement range collapsing to nothing while
+the HUD reads `Speed 0 ft (was 30)`; a blinded player's payload containing his
+own token alone, zero polygons and zero fog; and the whisper dropdown flipping
+`Elaria` to `Elaria — too far` as she walks away.
+
+**Not done, by decision:** the `triggers` table and pressure-plate firing from
+the hidden-passages work below. Walls get drawn and deleted by hand instead.
 
 ---
 
@@ -169,6 +248,10 @@ paths, so it deletes from an always-empty table. Fix it when timed effects get
 built. Also noted and not acted on: `wall:update` has a working server handler
 and no client caller, so a DM cannot lock a door through the UI.
 
+*Both since done:* `wall:update` was wired by the hidden-passages work, and
+`expireEffectsFor` was campaign-scoped when timed effects were built on
+2026-08-17.
+
 ---
 
 ## Third pass — 2026-08-14
@@ -283,9 +366,12 @@ tool buttons live in a DM-only panel and the server rejects both — but
 
 ### Not fixed, on purpose
 
-The whisper dropdown in `ChatPanel` lists **presence**, not membership, so an
-offline co-player cannot be selected. Arguably wrong, but it is a separate
-question from the compendium dropdowns and was left alone.
+~~The whisper dropdown in `ChatPanel` lists **presence**, not membership, so an
+offline co-player cannot be selected.~~ **Wrong on the facts, and now
+superseded.** The `presence` event carries every campaign member with an
+`online` flag, so offline players were always selectable — the event is merely
+*named* presence. The dropdown is now gated on token adjacency instead; see the
+2026-08-17 entry.
 
 ---
 
