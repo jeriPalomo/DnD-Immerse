@@ -154,8 +154,25 @@ dataset`, warning loudly on a key that matches nothing and on any spell whose
 dataset save disagrees with the table. Verified by breaking both deliberately —
 reinstating the Tasha's key produced *"no compendium spell matches tasha's
 hideous laughter — the name has drifted"*, which is the bug that shipped,
-caught at import time. The three genuine SRD gaps are declared, so a new one
-stands out rather than blending in. 395 tests. Verified in the browser end to end: a hand-entered net reads **DC 12
+caught at import time.
+
+**Then the same treatment for the rest of the table.** The audit only compared
+the saving throw, so the durations and conditions still rested on memory. It now
+checks all four hand-entered facts against the compendium — save, duration in
+rounds, concentration, and whether the spell's own text mentions the condition
+at all — and reports `spell conditions: 14/14 agree with the compendium`.
+Confirmed by breaking each check in turn: a wrong duration, a wrong
+concentration flag and a condition the text never names each produce a named
+warning.
+
+**Ensnaring Strike, Ray of Sickness and Blinding Smite are removed.** SRD 5.1
+does not carry them, so nothing in this project could check their save,
+duration or conditions, and they could never fire from the compendium anyway —
+they only ever applied to a hand-entered item of the exact same name, where the
+item's own `appliesConditions` field does the job visibly instead. Keeping three
+unverifiable entries for a path that is already covered is the trade the rest of
+this table refuses to make. Every entry must now exist in the compendium, and
+the import enforces it. 400 tests. Verified in the browser end to end: a hand-entered net reads **DC 12
 STR** on its card, and pressing Save posts *"Bandit — STR save vs Weighted Net
 (DC 12)"*, rolled by the bandit.
 

@@ -20,7 +20,7 @@ import {
   spellCondition,
   spellSaveDC,
   SPELL_CONDITIONS,
-  SPELL_CONDITIONS_NOT_IN_SRD,
+  roundsFromDuration,
   type AbilityScores,
 } from './rules5e.js';
 import { CONDITIONS } from './schemas.js';
@@ -331,35 +331,85 @@ describe('SPELL_CONDITIONS', () => {
 });
 
 
+describe('roundsFromDuration', () => {
+  it('counts a minute as ten rounds and an hour as six hundred', () => {
+    expect(roundsFromDuration('1 minute')).toBe(10);
+    expect(roundsFromDuration('Up to 1 minute')).toBe(10);
+    expect(roundsFromDuration('1 hour')).toBe(600);
+    expect(roundsFromDuration('Up to 1 hour')).toBe(600);
+    expect(roundsFromDuration('10 minutes')).toBe(100);
+    expect(roundsFromDuration('1 round')).toBe(1);
+    expect(roundsFromDuration('Instantaneous')).toBe(0);
+  });
+
+  it('gives up rather than guessing', () => {
+    // A guess here would invent a disagreement and cry wolf every import.
+    expect(roundsFromDuration('Until dispelled')).toBeNull();
+    expect(roundsFromDuration('Special')).toBeNull();
+  });
+});
+
 describe('auditSpellConditions', () => {
-  const everything = Object.entries(SPELL_CONDITIONS).map(([name, entry]) => ({
+  /** The compendium as it would be if it agreed with the table exactly. */
+  const agreeing = Object.entries(SPELL_CONDITIONS).map(([name, entry]) => ({
     name,
     save: entry.save,
+    duration: entry.rounds === null ? '1 minute' : `${entry.rounds / 10} minutes`,
+    concentration: entry.concentration,
+    description: `The target is ${entry.conditions.join(' and ')}.`,
   }));
 
-  it('matches every entry against a compendium that agrees', () => {
-    const audit = auditSpellConditions(everything);
-    expect(audit.matched).toHaveLength(Object.keys(SPELL_CONDITIONS).length);
+  it('passes a compendium that agrees on everything', () => {
+    const audit = auditSpellConditions(agreeing);
     expect(audit.absent).toEqual([]);
     expect(audit.mismatched).toEqual([]);
+    expect(audit.unmentioned).toEqual([]);
+    expect(audit.matched).toHaveLength(Object.keys(SPELL_CONDITIONS).length);
   });
 
   it('catches a spell the data says forces a different save', () => {
     // The failure the whole audit exists for: silently wrong on every casting.
-    const wrong = everything.map((s) =>
-      s.name === 'hold person' ? { ...s, save: 'con' as const } : s,
+    const audit = auditSpellConditions(
+      agreeing.map((s) => (s.name === 'hold person' ? { ...s, save: 'con' as const } : s)),
     );
-    const audit = auditSpellConditions(wrong);
-
-    expect(audit.mismatched).toEqual([{ spell: 'hold person', table: 'wis', data: 'con' }]);
+    expect(audit.mismatched).toContainEqual({
+      spell: 'hold person', field: 'save', table: 'wis', data: 'con',
+    });
     expect(audit.matched).not.toContain('hold person');
+  });
+
+  it('catches a duration that disagrees', () => {
+    const audit = auditSpellConditions(
+      agreeing.map((s) => (s.name === 'web' ? { ...s, duration: 'Up to 1 minute' } : s)),
+    );
+    expect(audit.mismatched).toContainEqual({
+      spell: 'web', field: 'rounds', table: '600', data: '10 (Up to 1 minute)',
+    });
+  });
+
+  it('catches a concentration flag that disagrees', () => {
+    const audit = auditSpellConditions(
+      agreeing.map((s) => (s.name === 'fear' ? { ...s, concentration: false } : s)),
+    );
+    expect(audit.mismatched).toContainEqual({
+      spell: 'fear', field: 'concentration', table: 'true', data: 'false',
+    });
+  });
+
+  it('flags a condition the spell text never mentions', () => {
+    // A smell test, not a parser: deciding what a spell does from its prose is
+    // wrong in both directions, but a condition the text never names is odd.
+    const audit = auditSpellConditions(
+      agreeing.map((s) => (s.name === 'web' ? { ...s, description: 'A mass of thick webbing.' } : s)),
+    );
+    expect(audit.unmentioned).toEqual([{ spell: 'web', condition: 'restrained' }]);
   });
 
   it('does not call a missing dc block a mismatch', () => {
     // The SRD ships Web and Sleet Storm with no save of their own; this table
-    // is what supplies one, which is a supported case rather than a conflict.
+    // is what supplies one, which is supported rather than a conflict.
     const audit = auditSpellConditions(
-      everything.map((s) => (s.name === 'web' ? { ...s, save: null } : s)),
+      agreeing.map((s) => (s.name === 'web' ? { ...s, save: null } : s)),
     );
     expect(audit.supplied).toContain('web');
     expect(audit.mismatched).toEqual([]);
@@ -367,7 +417,7 @@ describe('auditSpellConditions', () => {
 
   it('resolves a spell the handbook names after a wizard', () => {
     const audit = auditSpellConditions(
-      everything.map((s) =>
+      agreeing.map((s) =>
         s.name === 'hideous laughter' ? { ...s, name: "Tasha's Hideous Laughter" } : s,
       ),
     );
@@ -375,24 +425,17 @@ describe('auditSpellConditions', () => {
     expect(audit.absent).toEqual([]);
   });
 
-  it('separates an expected absence from an unexpected one', () => {
-    // Absent entries are declared, so a NEW one -- a typo, or a name the
-    // dataset renamed -- stands out instead of joining a list of known gaps.
-    const audit = auditSpellConditions(
-      everything.filter((s) => !SPELL_CONDITIONS_NOT_IN_SRD.includes(s.name)),
-    );
-    expect(audit.absent.sort()).toEqual([...SPELL_CONDITIONS_NOT_IN_SRD].sort());
-    expect(audit.unexpected).toEqual([]);
-
-    const withTypo = auditSpellConditions(everything.filter((s) => s.name !== 'web'));
-    expect(withTypo.unexpected).toEqual(['web']);
+  it('reports an entry that matches nothing at all', () => {
+    // Exactly the bug that shipped: a key naming no compendium row.
+    const audit = auditSpellConditions(agreeing.filter((s) => s.name !== 'web'));
+    expect(audit.absent).toEqual(['web']);
   });
 
-  it('lists only spells that are genuinely outside SRD 5.1', () => {
-    // A guard on the declaration itself: naming a spell here that IS in the
-    // dataset would hide a real regression behind an expected gap.
-    for (const name of SPELL_CONDITIONS_NOT_IN_SRD) {
-      expect(SPELL_CONDITIONS[name], `${name} is declared absent but not in the table`).toBeDefined();
-    }
+  it('skips the duration check where the table carries no timer', () => {
+    // Grease lasts a minute; the prone it causes is stood up from, so `rounds`
+    // is deliberately null and must not read as a disagreement.
+    expect(SPELL_CONDITIONS.grease.rounds).toBeNull();
+    const audit = auditSpellConditions(agreeing);
+    expect(audit.mismatched.filter((m) => m.spell === 'grease')).toEqual([]);
   });
 });

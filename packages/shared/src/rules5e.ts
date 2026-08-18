@@ -328,6 +328,14 @@ export interface SpellCondition {
  * like a spell that blinds. So this is the same call the compendium categories
  * made: curated, not taken from the data.
  *
+ * Every entry must exist in the SRD compendium, and `auditSpellConditions`
+ * enforces that on every import. Ensnaring Strike, Ray of Sickness and Blinding
+ * Smite were here and are gone: SRD 5.1 does not carry them, so nothing this
+ * project has could check their save, duration or conditions, and they could
+ * never fire from the compendium anyway. A hand-entered spell of that name sets
+ * `appliesConditions` on the item itself, which is visible where a name-keyed
+ * rule is not.
+ *
  * DELIBERATELY ABSENT, rather than guessed:
  *   - Sleep, Color Spray, Power Word Stun - no saving throw at all. They work
  *     off a hit point pool, which is a judgement this cannot adjudicate.
@@ -346,9 +354,6 @@ export const SPELL_CONDITIONS: Record<string, SpellCondition> = {
   'blindness/deafness': { save: 'con', conditions: ['blinded'], rounds: 10, concentration: false },
   web: { save: 'dex', conditions: ['restrained'], rounds: 600, concentration: true },
   entangle: { save: 'str', conditions: ['restrained'], rounds: 10, concentration: true },
-  // Not in SRD 5.1. Kept because it fires on a hand-entered item of the same
-  // name, and `auditSpellConditions` reports it as absent rather than broken.
-  'ensnaring strike': { save: 'str', conditions: ['restrained'], rounds: 10, concentration: true },
   'charm person': { save: 'wis', conditions: ['charmed'], rounds: 600, concentration: false },
   fear: { save: 'wis', conditions: ['frightened'], rounds: 10, concentration: true },
   'hypnotic pattern': {
@@ -369,9 +374,6 @@ export const SPELL_CONDITIONS: Record<string, SpellCondition> = {
   'dominate person': { save: 'wis', conditions: ['charmed'], rounds: 10, concentration: true },
   'dominate beast': { save: 'wis', conditions: ['charmed'], rounds: 10, concentration: true },
   'dominate monster': { save: 'wis', conditions: ['charmed'], rounds: 600, concentration: true },
-  // Also absent from SRD 5.1; same reasoning.
-  'ray of sickness': { save: 'con', conditions: ['poisoned'], rounds: 1, concentration: false },
-  'blinding smite': { save: 'con', conditions: ['blinded'], rounds: 10, concentration: true },
   // Prone has no duration: you stand up out of it. The spell's own 1 minute is
   // how long the ground stays slick, which is terrain rather than a condition.
   grease: { save: 'dex', conditions: ['prone'], rounds: null, concentration: false },
@@ -401,75 +403,117 @@ export function spellCondition(name: string): SpellCondition | null {
 }
 
 
-/** Entries this table knows SRD 5.1 does not carry, so absence is not news. */
-export const SPELL_CONDITIONS_NOT_IN_SRD: readonly string[] = [
-  'ensnaring strike',
-  'ray of sickness',
-  'blinding smite',
-] as const;
+/**
+ * A minute is ten rounds and an hour six hundred, which is how the durations in
+ * this table are written. Returns null when the text says something this cannot
+ * turn into a number ("Until dispelled", "Special"), so the audit skips it
+ * rather than inventing a disagreement.
+ */
+export function roundsFromDuration(text: string): number | null {
+  const match = /(\d+)\s*(round|minute|hour)/i.exec(text);
+  if (!match) return /instantaneous/i.test(text) ? 0 : null;
+
+  const count = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  return count * (unit === 'round' ? 1 : unit === 'minute' ? 10 : 600);
+}
+
+/** One spell as the compendium holds it, which is everything the audit can check. */
+export interface CompendiumSpell {
+  name: string;
+  save: AbilityKey | null;
+  duration: string;
+  concentration: boolean;
+  description: string;
+}
 
 export interface SpellConditionAudit {
-  /** The spell was found and agrees on the saving throw. */
+  /** Found, and everything the data can answer agrees. */
   matched: string[];
-  /** The spell was found but carries no save of its own; this table supplies it. */
+  /** Found, but carrying no save of its own; this table supplies it. */
   supplied: string[];
-  /** Not in the dataset at all. Expected for the entries listed above. */
+  /** Not in the compendium at all, so nothing here can be checked. */
   absent: string[];
-  /** Unexpectedly absent - a key that matches nothing and was not declared so. */
-  unexpected: string[];
-  /** Found, and the dataset disagrees about which save it forces. */
-  mismatched: { spell: string; table: AbilityKey; data: AbilityKey }[];
+  /** The data disagrees about which save it forces. */
+  mismatched: { spell: string; field: string; table: string; data: string }[];
+  /** A condition this table applies that the spell's own text never mentions. */
+  unmentioned: { spell: string; condition: string }[];
 }
 
 /**
  * Checks this table against a real compendium.
  *
  * The reason this exists: `SPELL_CONDITIONS` is hand-written, and its unit
- * tests looked its own keys up by themselves - which proves the lookup works
- * and nothing about whether the keys match anything real. That is how
- * "tasha's hideous laughter" sat here never matching a compendium row, since
+ * tests look its own keys up by themselves - which proves the lookup works and
+ * says nothing about whether a key matches anything real. That is how
+ * "tasha's hideous laughter" sat here matching no compendium row at all, since
  * the SRD publishes it as plain "Hideous Laughter".
  *
- * So the check has to run where real data is: the importer calls this and
- * prints the result, which is the one moment the whole spell list is in hand. A
- * `mismatched` entry means this table and the handbook disagree about which
- * save a spell forces, and that is the failure worth shouting about - it makes
- * every casting of that spell quietly wrong.
+ * So the check runs where real data is: the importer calls this and prints the
+ * result, the one moment the whole spell list is in hand. Four things are
+ * compared, because all four are hand-entered and all four are invisible when
+ * wrong: the saving throw, the duration in rounds, whether it needs
+ * concentration, and whether the spell's own text so much as mentions the
+ * condition being applied.
+ *
+ * That last one is a smell test, not a parser. Deciding what a spell does from
+ * its prose is wrong in both directions - "immune to being blinded" reads
+ * exactly like a spell that blinds - but a condition the text never names at
+ * all is worth a human look.
  */
-export function auditSpellConditions(
-  spells: { name: string; save: AbilityKey | null }[],
-): SpellConditionAudit {
+export function auditSpellConditions(spells: CompendiumSpell[]): SpellConditionAudit {
   const audit: SpellConditionAudit = {
     matched: [],
     supplied: [],
     absent: [],
-    unexpected: [],
     mismatched: [],
+    unmentioned: [],
   };
 
   // Resolved the same way `spellCondition` resolves a cast, so the possessive
   // rule is exercised by the audit rather than only by the lookup.
-  const found = new Map<string, AbilityKey | null>();
+  const found = new Map<string, CompendiumSpell>();
   for (const spell of spells) {
     const key = spell.name.trim().toLowerCase();
     const resolved = key in SPELL_CONDITIONS ? key : key.replace(/^[a-z]+'s\s+/, '');
-    if (resolved in SPELL_CONDITIONS) found.set(resolved, spell.save);
+    if (resolved in SPELL_CONDITIONS) found.set(resolved, spell);
   }
 
   for (const [key, entry] of Object.entries(SPELL_CONDITIONS)) {
-    if (!found.has(key)) {
+    const data = found.get(key);
+    if (!data) {
       audit.absent.push(key);
-      if (!SPELL_CONDITIONS_NOT_IN_SRD.includes(key)) audit.unexpected.push(key);
       continue;
     }
 
-    const dataSave = found.get(key) ?? null;
+    let agrees = true;
+    const disagree = (field: string, table: string, value: string) => {
+      audit.mismatched.push({ spell: key, field, table, data: value });
+      agrees = false;
+    };
+
     // No save in the data is fine: the SRD ships Web and Sleet Storm with no dc
     // block at all, and this table is what supplies one.
-    if (dataSave === null) audit.supplied.push(key);
-    else if (dataSave !== entry.save) {
-      audit.mismatched.push({ spell: key, table: entry.save, data: dataSave });
-    } else audit.matched.push(key);
+    if (data.save === null) audit.supplied.push(key);
+    else if (data.save !== entry.save) disagree('save', entry.save, data.save);
+
+    if (data.concentration !== entry.concentration) {
+      disagree('concentration', String(entry.concentration), String(data.concentration));
+    }
+
+    // Skipped where the table deliberately carries no timer - prone is stood up
+    // from rather than waited out, however long the spell itself lasts.
+    const stated = roundsFromDuration(data.duration);
+    if (entry.rounds !== null && stated !== null && stated !== entry.rounds) {
+      disagree('rounds', String(entry.rounds), `${stated} (${data.duration})`);
+    }
+
+    const text = data.description.toLowerCase();
+    for (const condition of entry.conditions) {
+      if (!text.includes(condition)) audit.unmentioned.push({ spell: key, condition });
+    }
+
+    if (agrees && data.save !== null) audit.matched.push(key);
   }
 
   return audit;

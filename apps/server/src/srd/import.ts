@@ -380,35 +380,47 @@ export async function importSrd(): Promise<void> {
  * A mismatch is the loud one. It means the table and the dataset disagree about
  * which save a spell forces, which makes every casting of it quietly wrong.
  */
-function reportSpellConditions(spells: { name: string; system: unknown }[]): void {
+function reportSpellConditions(
+  spells: { name: string; duration: string; concentration: boolean; description: string; system: unknown }[],
+): void {
   const audit = auditSpellConditions(
     spells.map((row) => ({
       name: row.name,
-      save: ((row.system as { save?: { ability?: AbilityKey } | null }).save?.ability ?? null),
+      save: (row.system as { save?: { ability?: AbilityKey } | null }).save?.ability ?? null,
+      duration: row.duration,
+      concentration: row.concentration,
+      description: row.description,
     })),
   );
 
-  const total = audit.matched.length + audit.supplied.length + audit.absent.length +
-    audit.mismatched.length;
+  const total =
+    audit.matched.length + audit.supplied.length + audit.absent.length +
+    new Set(audit.mismatched.map((m) => m.spell)).size;
 
   console.log(
-    `  spell conditions: ${audit.matched.length + audit.supplied.length}/${total} found` +
-      (audit.supplied.length > 0 ? ` (${audit.supplied.length} with no dc block of their own)` : '') +
-      (audit.absent.length > 0 ? `, ${audit.absent.length} not in this dataset` : ''),
+    `  spell conditions: ${audit.matched.length + audit.supplied.length}/${total} agree with the ` +
+      `compendium` +
+      (audit.supplied.length > 0 ? ` (${audit.supplied.length} with no dc block of their own)` : ''),
   );
 
-  // Declared gaps are expected; an undeclared one is a name that has drifted.
-  if (audit.unexpected.length > 0) {
+  // Every entry is expected to exist: one that does not can never fire from the
+  // compendium, and nothing here can check it.
+  if (audit.absent.length > 0) {
     console.warn(
-      `  WARNING: no compendium spell matches ${audit.unexpected.join(', ')} - ` +
+      `  WARNING: no compendium spell matches ${audit.absent.join(', ')} - ` +
         'the name has drifted, and those conditions can never be applied',
     );
   }
 
   for (const bad of audit.mismatched) {
     console.warn(
-      `  WARNING: ${bad.spell} forces a ${bad.data.toUpperCase()} save in the dataset, ` +
-        `but the table says ${bad.table.toUpperCase()}`,
+      `  WARNING: ${bad.spell} ${bad.field}: the table says ${bad.table}, the compendium says ${bad.data}`,
+    );
+  }
+
+  for (const odd of audit.unmentioned) {
+    console.warn(
+      `  WARNING: ${odd.spell} is set to apply "${odd.condition}", which its own text never mentions`,
     );
   }
 }

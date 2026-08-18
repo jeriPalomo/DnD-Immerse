@@ -142,11 +142,17 @@ matches anything real. That is how `tasha's hideous laughter` sat there matching
 no compendium row for a whole commit: the SRD publishes it as plain "Hideous
 Laughter", stripping the wizard's name as it does from every spell that carries
 one. `auditSpellConditions` runs inside `npm run srd:import`, the one moment the
-whole spell list is in hand, and shouts on two things: a key that matches
-nothing (the name has drifted) and a spell whose dataset save disagrees with the
-table (every casting of it is quietly wrong). Gaps SRD 5.1 genuinely does not
-carry are declared in `SPELL_CONDITIONS_NOT_IN_SRD` so a new one stands out
-instead of joining a list of known ones.
+whole spell list is in hand, and compares all four hand-entered facts against
+the compendium: the saving throw, the duration in rounds, whether it needs
+concentration, and whether the spell's own text so much as mentions the
+condition being applied. That last one is a smell test, not a parser — deciding
+what a spell does from its prose is wrong in both directions, but a condition
+the text never names is worth a look. **Every entry must exist in the
+compendium**: one that does not can never fire from it and cannot be checked by
+anything this project has, which is why Ensnaring Strike, Ray of Sickness and
+Blinding Smite were removed rather than kept as declared gaps. A hand-entered
+spell of that name sets `appliesConditions` on the item, which is visible where
+a name-keyed rule is not.
 
 **A spell save is rolled by the target, against the caster's DC, and the DC is
 computed once.** `cardAction` rolled the *caster's* own save with the caster's
