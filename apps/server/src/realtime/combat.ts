@@ -660,6 +660,11 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       return;
     }
 
+    // Both fields are optional, so a payload of just an id would reach
+    // db.update().set({}), which Drizzle throws on. wall:update had exactly this
+    // bug and it is easy to write again: every conditional-only `set` needs it.
+    if (input.rounds === undefined && input.disabled === undefined) return;
+
     const round = await currentRound(ctx.campaignId);
     await db
       .update(activeEffects)

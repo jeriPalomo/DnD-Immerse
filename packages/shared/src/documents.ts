@@ -142,7 +142,14 @@ export const appliedConditionSchema = z.object({
   condition: z.string().max(40),
   /** Rounds it lasts. Null lasts until removed, which is right for prone. */
   rounds: z.number().int().min(1).max(1000).nullable().default(null),
-  /** The save that avoids it. Null means it lands with no save at all. */
+  /**
+   * The save that avoids it, and what the card's Save button rolls.
+   *
+   * Required for automatic application: with none, the item offers no button
+   * and the DM applies the condition by hand. It is not "lands automatically" -
+   * that would need an action of its own, and a field that quietly does nothing
+   * is worse than one that is honest about needing a save.
+   */
   save: abilityKeySchema.nullable().default(null),
 });
 

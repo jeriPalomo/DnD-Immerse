@@ -135,10 +135,16 @@ is revealed. `visibleTokens` still returns the tokens you control, and
 token and the remembered ground rather than an unbroken black rectangle. A
 client-side blur would be a devtools inspection away from the room anyway.
 
-**A spell save is rolled by the target, against the caster's DC.** `cardAction`
-rolled the *caster's* own save with the caster's proficiency against the
-caster's own DC — the wrong creature and the wrong number, on every spell ever
-cast from a card. `SPELL_CONDITIONS` in `rules5e.ts` is a curated, unit-tested
+**A spell save is rolled by the target, against the caster's DC, and the DC is
+computed once.** `cardAction` rolled the *caster's* own save with the caster's
+proficiency against the caster's own DC — the wrong creature and the wrong
+number, on every spell ever cast from a card. `saveProfileFor` now answers both
+"which save" and "what DC" for the card and for the roll, because two
+computations of one number end with a card reading DC 15 while the server
+compares against 10. It offers the button for **any** item that forces a save,
+from its own `save` blob *or* from the condition it inflicts: a weapon has no
+blob at all, and the SRD ships Web and Sleet Storm with no `dc` block, so both
+were unreachable while the check was `item.type === 'spell' && s.save`. `SPELL_CONDITIONS` in `rules5e.ts` is a curated, unit-tested
 map of which SRD spells inflict what; hand-entered items carry their own
 `appliesConditions`. Spells with no save, a non-condition effect or staged
 saves are deliberately absent — an omission means the DM applies it by hand,
@@ -172,6 +178,13 @@ Damage writes to token and actor; rests and sheet edits write only to the
 actor, so those call `syncLinkedTokens` — otherwise a player who long-rested
 still shows 12/47 on the board. Unlinked tokens are deliberately untouched:
 five goblins from one stat block keep five independent HP pools.
+
+**A conditional-only `set` needs an empty guard.** `db.update().set({})` throws
+"No values to set", so a patch handler whose every field is optional dies on a
+payload of just an id. `wall:update` had this, then `effect:update` and
+`PATCH /api/items/:id` had it again — three times is a pattern, not an
+accident. If every spread in a `set` is conditional, return early when nothing
+was sent.
 
 **No dead code.** Two audits found helpers that were written, tested, and never
 called — `movementBlocked` let players walk through walls, `deriveActor` made

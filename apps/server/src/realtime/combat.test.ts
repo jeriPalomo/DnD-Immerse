@@ -578,3 +578,137 @@ describe('the DM can correct the tracker', () => {
     expect(state.entries.find((e) => e.id === entryId)?.initiative).not.toBe(99);
   });
 });
+
+describe('the card offers a save wherever one is forced', () => {
+  let netId: string;
+  let webId: string;
+  let ogreId: string;
+
+  beforeAll(async () => {
+    const created = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', { sceneId, name: 'Troll', x: 12, y: 2, hp: 84, maxHp: 84 } as never);
+    ogreId = (await created)!.token.id;
+
+    const net = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      {
+        type: 'weapon',
+        name: 'Net',
+        system: {
+          damageDice: '1d4', ability: 'dex',
+          appliesConditions: [{ condition: 'restrained', rounds: null, save: 'str' }],
+        },
+      },
+      alice.cookie,
+    );
+    netId = net.item.id;
+
+    // Web as the SRD actually ships it: no `save` blob at all. The curated
+    // table is the only thing that knows it forces a DEX save.
+    const web = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      { type: 'spell', name: 'Web', system: { level: 2, save: null } },
+      alice.cookie,
+    );
+    webId = web.item.id;
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  /** The card as it is posted to the log. */
+  async function cardFor(itemId: string) {
+    const posted = new Promise<{ actions: string[]; saveAbility: string | null; saveDC: number | null }>(
+      (resolve) => {
+        const timer = setTimeout(() => resolve({ actions: [], saveAbility: null, saveDC: null }), 3000);
+        const handler = (p: { message: { cardData: never } }) => {
+          if (!p.message.cardData) return;
+          clearTimeout(timer);
+          dmSocket.off('chat:message', handler);
+          resolve(p.message.cardData);
+        };
+        dmSocket.on('chat:message', handler);
+      },
+    );
+    aliceSocket.emit('chat:card', { itemId, actorId, targetTokenId: ogreId, longRange: false } as never);
+    return posted;
+  }
+
+  it('gives a weapon that inflicts something a Save button', async () => {
+    // Without this the appliesConditions field on a weapon was decorative:
+    // the form could set it and no card could ever fire it.
+    const card = await cardFor(netId);
+    expect(card.actions).toContain('save');
+    expect(card.saveAbility).toBe('str');
+    expect(card.saveDC).toBeGreaterThan(8);
+  });
+
+  it('gives a spell the SRD ships with no dc block one too', async () => {
+    const card = await cardFor(webId);
+    expect(card.actions).toContain('save');
+    expect(card.saveAbility).toBe('dex');
+  });
+
+  it('rolls against the DC the card printed', async () => {
+    // Two computations of the same number is how a card reading DC 15 ends up
+    // compared against 10.
+    const card = await cardFor(netId);
+    const rolled = new Promise<string>((resolve) => {
+      const timer = setTimeout(() => resolve(''), 3000);
+      const handler = (p: { message: { rollData: { label: string } | null } }) => {
+        if (!p.message.rollData?.label?.includes('save vs')) return;
+        clearTimeout(timer);
+        dmSocket.off('chat:message', handler);
+        resolve(p.message.rollData.label);
+      };
+      dmSocket.on('chat:message', handler);
+    });
+    aliceSocket.emit('chat:cardAction', {
+      itemId: netId, actorId, action: 'save', targetTokenId: ogreId,
+    } as never);
+    expect(await rolled).toContain(`DC ${card.saveDC}`);
+  });
+
+  it('leaves an item that forces nothing without one', async () => {
+    const plain = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      { type: 'weapon', name: 'Club', system: { damageDice: '1d4' } },
+      alice.cookie,
+    );
+    const card = await cardFor(plain.item.id);
+    expect(card.actions).not.toContain('save');
+  });
+});
+
+describe('a partial payload does not throw', () => {
+  it('ignores an effect:update that changes nothing', async () => {
+    // db.update().set({}) throws "No values to set". wall:update had exactly
+    // this bug once already.
+    const created = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', { sceneId, name: 'Kobold', x: 14, y: 2, hp: 5, maxHp: 5 } as never);
+    const kobold = (await created)!.token.id;
+
+    dmSocket.emit('effect:apply', { tokenIds: [kobold], condition: 'prone', rounds: null } as never);
+    await new Promise((r) => setTimeout(r, 400));
+
+    const before = await boardTokenById(kobold);
+    const effectId = before!.effects[0].id;
+
+    const failure = next<{ message: string }>(dmSocket, 'error', 1200);
+    dmSocket.emit('effect:update', { effectId } as never);
+    await new Promise((r) => setTimeout(r, 400));
+
+    expect(await failure).toBeNull();
+    expect((await boardTokenById(kobold))?.conditions).toContain('prone');
+  });
+
+  it('ignores an empty item patch instead of returning a 500', async () => {
+    const made = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      { type: 'weapon', name: 'Dagger', system: { damageDice: '1d4' } },
+      alice.cookie,
+    );
+    const patched = await api<{ item: { name: string } }>(
+      'PATCH', `/api/items/${made.item.id}`, {}, alice.cookie,
+    );
+    expect(patched.item.name).toBe('Dagger');
+  });
+});

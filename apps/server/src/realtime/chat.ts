@@ -64,6 +64,38 @@ function scoresOf(actor: Actor): AbilityScores {
 }
 
 /**
+ * The save an item forces, and the DC to beat.
+ *
+ * One function because `buildCard` prints the DC and `chat:cardAction` rolls
+ * against it. Computed twice, they would eventually disagree, and a card
+ * reading DC 15 while the server compared against 10 is the sort of wrong
+ * nobody notices for a session.
+ *
+ * The ability comes from the item's own `save` blob or, failing that, from the
+ * condition it inflicts - the SRD ships Web with no `dc` block at all, and a
+ * hand-entered weapon has no blob to carry one.
+ *
+ * The DC is 8 + proficiency + the driving modifier, which is how 5e sets every
+ * save an item forces: a spell uses the caster's spellcasting ability, a weapon
+ * the ability it is swung with.
+ */
+function saveProfileFor(item: Item, actor: Actor): { ability: AbilityKey; dc: number | null } | null {
+  const s = item.system as Record<string, any>;
+
+  const ability =
+    (s.save?.ability as AbilityKey | undefined) ??
+    (conditionsInflictedBy(item).find((entry) => entry.save)?.save as AbilityKey | undefined);
+  if (!ability) return null;
+
+  const driving =
+    item.type === 'spell'
+      ? (actor.spellcastingAbility as AbilityKey | null)
+      : ((s.ability as AbilityKey | undefined) ?? 'str');
+
+  return { ability, dc: driving ? spellSaveDC(scoresOf(actor), actor.level, driving) : null };
+}
+
+/**
  * What an item inflicts when it lands.
  *
  * The item's own field wins, because it was filled in deliberately; otherwise
@@ -209,15 +241,25 @@ function buildCard(
 
     if (s.attackRoll) actions.push('attack');
     if (s.damageDice) actions.push('damage');
-    if (s.save?.ability) {
-      actions.push('save');
-      saveAbility = s.save.ability;
-      saveDC = actor.spellcastingAbility
-        ? spellSaveDC(scoresOf(actor), actor.level, actor.spellcastingAbility as AbilityKey)
-        : null;
-    }
   } else {
     subtitle = item.type;
+  }
+
+  /**
+   * The save button, for anything that forces one.
+   *
+   * Offered for every item type rather than only spells, and from the condition
+   * an item inflicts as well as from its own `save` blob. Both halves were
+   * unreachable without this: a hand-entered net with `appliesConditions` had no
+   * button to press at all, and the SRD ships Web and Sleet Storm with no `dc`
+   * block, so the curated entries for them could never fire either. An item you
+   * cannot make bite is decorative.
+   */
+  const forced = saveProfileFor(item, actor);
+  if (forced) {
+    actions.push('save');
+    saveAbility = forced.ability;
+    saveDC = forced.dc;
   }
 
   return {
@@ -513,10 +555,8 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         break;
 
       case 'save': {
-        const inflicted = conditionsInflictedBy(item);
-        const ability = (s.save?.ability ??
-          inflicted.find((entry) => entry.save)?.save ??
-          'dex') as AbilityKey;
+        const forced = saveProfileFor(item, actor);
+        const ability = forced?.ability ?? 'dex';
 
         // A spell save belongs to the TARGET, not the caster. This rolled the
         // caster's own save against the caster's own DC - the wrong creature and
@@ -526,9 +566,8 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         const saver = target ? await actorOfToken(target) : null;
 
         if (target) {
-          const dc = actor.spellcastingAbility
-            ? spellSaveDC(scores, actor.level, actor.spellcastingAbility as AbilityKey)
-            : 10;
+          // The same number the card printed, from the same function.
+          const dc = forced?.dc ?? 10;
           saveAgainst = { token: target, dc, ability };
 
           // A token with no sheet behind it has no ability scores to use, so it

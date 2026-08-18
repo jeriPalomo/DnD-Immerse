@@ -40,7 +40,6 @@ import {
   conditionsOf,
   effectsViewFor,
   setConditions,
-  toActiveEffect,
   toWireEffects,
   type EffectsView,
 } from '../lib/effects.js';

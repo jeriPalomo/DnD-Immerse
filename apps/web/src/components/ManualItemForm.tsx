@@ -153,12 +153,14 @@ function ConditionField({ system, set }: { system: Blob; set: Setter }) {
           ))}
         </Select>
       </Field>
-      <Field label="Save" hint="Blank lands automatically">
+      <Field label="Save" hint="Needed for the card to roll it">
         <Select
           value={applied?.save ?? ''}
           onChange={(v) => update({ save: (v || null) as AppliedCondition['save'] })}
         >
-          <option value="">— none —</option>
+          {/* No save means no button to press, so the DM would have to apply it
+              by hand -- which is what leaving the condition blank already does. */}
+          <option value="">— none, applied by hand —</option>
           <option value="str">Strength</option>
           <option value="dex">Dexterity</option>
           <option value="con">Constitution</option>

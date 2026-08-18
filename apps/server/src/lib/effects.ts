@@ -1,6 +1,5 @@
 import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import {
-  CONDITION_EFFECTS,
   conditionEffect,
   deriveToken,
   expiredEffects,
@@ -26,11 +25,6 @@ import type { ActiveEffect as EffectRow } from '../db/schema.js';
  * is read. Copying the changes into the row would freeze them, so a fix to what
  * "prone" means would apply only to tokens that went prone afterwards.
  */
-
-/** Whether a `statusId` names one of the 5e conditions we model mechanically. */
-export function isCondition(statusId: string | null): boolean {
-  return statusId !== null && statusId in CONDITION_EFFECTS;
-}
 
 /**
  * A database row as the pure derive layer wants it.

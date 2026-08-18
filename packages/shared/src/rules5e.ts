@@ -355,7 +355,10 @@ export const SPELL_CONDITIONS: Record<string, SpellCondition> = {
     rounds: 10,
     concentration: true,
   },
-  "tasha's hideous laughter": {
+  // The SRD calls this "Hideous Laughter". Keyed on the SRD's name, because
+  // that is what the compendium row is called; the handbook's "Tasha's" form
+  // still resolves, via the prefix rule in `spellCondition`.
+  'hideous laughter': {
     save: 'wis',
     conditions: ['prone', 'incapacitated'],
     rounds: 10,
@@ -377,7 +380,19 @@ export const SPELL_CONDITIONS: Record<string, SpellCondition> = {
  *
  * Matched on a normalised name so "Hold Person" from the compendium and a
  * hand-typed "hold person " are the same spell.
+ *
+ * The SRD strips the wizard's name from every spell that carries one - the
+ * handbook's "Tasha's Hideous Laughter" is published as plain "Hideous
+ * Laughter", and likewise for Otiluke, Evard and the rest. So a possessive
+ * prefix is tried and dropped rather than each spell being keyed twice. This
+ * is not cosmetic: keyed on the handbook name alone, the entry silently never
+ * matched the compendium row, which is exactly the invisible-wrong-entry
+ * failure this table is meant to avoid.
  */
 export function spellCondition(name: string): SpellCondition | null {
-  return SPELL_CONDITIONS[name.trim().toLowerCase()] ?? null;
+  const key = name.trim().toLowerCase();
+  const direct = SPELL_CONDITIONS[key];
+  if (direct) return direct;
+
+  return SPELL_CONDITIONS[key.replace(/^[a-z]+'s\s+/, '')] ?? null;
 }

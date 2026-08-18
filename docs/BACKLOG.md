@@ -99,6 +99,57 @@ the hidden-passages work below. Walls get drawn and deleted by hand instead.
 
 ---
 
+## Audit of the effects work — 2026-08-17
+
+Seven defects, found by auditing the commit above rather than by playing. The
+freshly written code was the least-reviewed in the repo, which is where they
+were.
+
+**The curated table had a name that never matched.** `SPELL_CONDITIONS` keyed
+`tasha's hideous laughter`, and the SRD publishes it as plain **Hideous
+Laughter** — it strips the wizard's name from every spell that carries one. So
+that entry could not fire, and the unit tests did not catch it because they
+looked the key up by itself rather than against the compendium. `spellCondition`
+now drops a possessive prefix when the bare name is unknown, which handles
+Otiluke and Evard too. Checked every entry against the imported data: 13 of 17
+match by name with **zero** ability mismatches, which is decent corroboration.
+The four that are absent (Ensnaring Strike, Ray of Sickness, Blinding Smite,
+Tasha's Hideous Laughter's siblings) are simply not in SRD 5.1 — they still work
+on a hand-entered item of the same name.
+
+**Two ways a condition could never fire.** `buildCard` only offered a Save
+button for `item.type === 'spell' && s.save?.ability`. So a hand-entered weapon
+with `appliesConditions` — which the form I had just built lets you create — had
+no button to press, and Web and Sleet Storm, which the SRD ships with no `dc`
+block, could not fire their curated entries either. An item you cannot make bite
+is decorative. `saveProfileFor` answers for any item type, from the `save` blob
+or the inflicted condition, and is the single source of the DC for both the card
+and the roll.
+
+**`.set({})` again, twice.** `effect:update` takes two optional fields, so a
+payload of just an id reached `db.update().set({})`, which Drizzle throws on —
+the exact bug `wall:update` had. `PATCH /api/items/:id` has it too, as a 500 on
+an empty body. Now an invariant, because three occurrences is a pattern.
+
+**A stepper that did the opposite of its label.** Pressing − on an effect
+lasting until removed sent `rounds: 0`, quietly scheduling it to expire at the
+top of the next round. Disabled where there is nothing to shorten.
+
+**A field that did nothing.** `appliesConditions[].save: null` was documented as
+"lands with no save at all" and nothing implemented it. The doc now says what
+actually happens: no save means no button, and the DM applies it by hand.
+
+**Dead code of my own.** `isCondition` was written, exported and called by
+nothing; `scene.ts` imported `toActiveEffect` and never used it. Both gone.
+
+Each fix has a regression test, and each test was checked against the broken
+code first — a passing test proves nothing until you have watched it fail. 389
+tests. Verified in the browser end to end: a hand-entered net reads **DC 12
+STR** on its card, and pressing Save posts *"Bandit — STR save vs Weighted Net
+(DC 12)"*, rolled by the bandit.
+
+---
+
 ## Hidden passages — 2026-08-15
 
 Stage 1 of interactive map objects (switches, keys, puzzles). This stage is the

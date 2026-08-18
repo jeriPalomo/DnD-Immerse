@@ -240,13 +240,21 @@ export function TokenHUD({
                 {canEdit && (
                   <>
                     <button
+                      // Nothing to shorten on an effect that lasts until it is
+                      // removed: this used to send 0, which quietly scheduled it
+                      // to expire at the top of the next round instead.
+                      disabled={effect.roundsRemaining === null}
                       onClick={() =>
                         updateEffect(effect.id, {
-                          rounds: Math.max(0, (effect.roundsRemaining ?? 1) - 1),
+                          rounds: Math.max(1, (effect.roundsRemaining ?? 1) - 1),
                         })
                       }
-                      className="px-1 text-ink-500 hover:text-ink-200"
-                      title="One round less"
+                      className="px-1 text-ink-500 hover:text-ink-200 disabled:opacity-30 disabled:hover:text-ink-500"
+                      title={
+                        effect.roundsRemaining === null
+                          ? 'Lasts until removed — nothing to shorten'
+                          : 'One round less'
+                      }
                     >
                       −
                     </button>

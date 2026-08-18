@@ -294,8 +294,20 @@ describe('SPELL_CONDITIONS', () => {
   });
 
   it('applies two conditions where the spell does', () => {
-    expect(spellCondition("Tasha's Hideous Laughter")?.conditions).toEqual(['prone', 'incapacitated']);
+    expect(spellCondition('Hideous Laughter')?.conditions).toEqual(['prone', 'incapacitated']);
     expect(spellCondition('Hypnotic Pattern')?.conditions).toEqual(['charmed', 'incapacitated']);
+  });
+
+  it('matches the SRD name when the handbook adds a wizard to it', () => {
+    // The SRD publishes "Hideous Laughter"; the handbook calls it Tasha's.
+    // Keyed on the handbook name alone, this entry matched nothing at all.
+    expect(spellCondition('Hideous Laughter')).not.toBeNull();
+    expect(spellCondition("Tasha's Hideous Laughter")).toEqual(spellCondition('Hideous Laughter'));
+    expect(spellCondition("Otiluke's Hideous Laughter")).toEqual(spellCondition('Hideous Laughter'));
+  });
+
+  it('does not let the prefix rule invent a match', () => {
+    expect(spellCondition("Bigby's Handy Haversack")).toBeNull();
   });
 
   it('normalises the name it is looked up by', () => {

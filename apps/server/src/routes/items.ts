@@ -124,6 +124,10 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       })
       .parse(request.body);
 
+    // Every field is optional, so an empty body would reach .set({}), which
+    // Drizzle throws on - a 500 for a request that should simply do nothing.
+    if (Object.keys(patch).length === 0) return { item: existing };
+
     await db
       .update(items)
       .set({
