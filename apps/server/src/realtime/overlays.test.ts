@@ -334,3 +334,121 @@ describe('uploads are cleaned up', () => {
     expect(fs.existsSync(onDisk)).toBe(false);
   });
 });
+
+describe('the journal reads only its own pages', () => {
+  it('does not read the pages of a campaign it was not asked about', async () => {
+    // The page query had no where clause at all: it read every journal page in
+    // the database and leaned on a filter in JavaScript to keep campaigns
+    // apart. Nothing leaked, because the filter is right -- but the query was
+    // one edit away from being the leak, and it grew with the whole database.
+    const other = await api<{ campaign: { id: string } }>(
+      'POST', '/api/campaigns', { name: 'A Different Table' }, dm.cookie,
+    );
+    const theirs = await api<{ entry: { id: string; pages: { id: string }[] } }>(
+      'POST', `/api/campaigns/${other.campaign.id}/journal`, { title: 'Their Secret' }, dm.cookie,
+    );
+    await api(
+      'PATCH', `/api/journal/pages/${theirs.entry.pages[0].id}`,
+      { title: 'Their Page', body: 'not for this table' }, dm.cookie,
+    );
+
+    const mine = await api<{ entries: { id: string; pages: { id: string }[] }[] }>(
+      'GET', `/api/campaigns/${campaignId}/journal`, undefined, dm.cookie,
+    );
+
+    const pageIds = mine.entries.flatMap((entry) => entry.pages.map((page) => page.id));
+    expect(pageIds).not.toContain(theirs.entry.pages[0].id);
+    for (const entry of mine.entries) {
+      for (const page of entry.pages) {
+        expect(entry.pages.map((p) => p.id)).toContain(page.id);
+      }
+    }
+  });
+});
+
+describe('an id from another campaign is not acted on', () => {
+  let otherCampaignId: string;
+  let otherSceneId: string;
+  let otherTemplateId: string;
+  let otherDrawingId: string;
+  let otherSocket: Socket;
+
+  beforeAll(async () => {
+    // A second table the DM also runs. Room membership says they are a DM
+    // somewhere; it does not say this id came from here.
+    const made = await api<{ campaign: { id: string } }>(
+      'POST', '/api/campaigns', { name: 'Somebody Elses Game' }, dm.cookie,
+    );
+    otherCampaignId = made.campaign.id;
+
+    const scene = await api<{ scene: { id: string } }>(
+      'POST', `/api/campaigns/${otherCampaignId}/scenes`, { name: 'Elsewhere' }, dm.cookie,
+    );
+    otherSceneId = scene.scene.id;
+
+    otherSocket = await open(dm);
+    otherSocket.emit('campaign:join', { campaignId: otherCampaignId });
+    await new Promise((r) => setTimeout(r, 700));
+    otherSocket.emit('scene:activate', { sceneId: otherSceneId });
+    await new Promise((r) => setTimeout(r, 400));
+
+    const templated = next<{ templates: { id: string }[] }>(otherSocket, 'template:state');
+    otherSocket.emit('template:create', {
+      sceneId: otherSceneId, shape: 'circle', x: 3, y: 3, direction: 0, distance: 20, width: 0,
+      color: '#e8853f',
+    } as never);
+    otherTemplateId = (await templated)!.templates[0].id;
+
+    otherSocket.emit('drawing:create', {
+      sceneId: otherSceneId, kind: 'freehand', points: [1, 1, 2, 2], color: '#e8853f',
+      text: '', width: 3,
+    } as never);
+    await new Promise((r) => setTimeout(r, 400));
+
+    const state = await new Promise<{ drawings: { id: string }[] } | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 3000);
+      otherSocket.once('scene:state', (p: { drawings: { id: string }[] }) => {
+        clearTimeout(timer);
+        resolve(p);
+      });
+      otherSocket.emit('scene:activate', { sceneId: otherSceneId });
+    });
+    otherDrawingId = state!.drawings[0].id;
+  });
+
+  afterAll(() => {
+    otherSocket?.close();
+  });
+
+  it('refuses to delete a template belonging to another campaign', async () => {
+    dmSocket.emit('template:delete', { templateId: otherTemplateId });
+    await new Promise((r) => setTimeout(r, 600));
+
+    const still = await new Promise<{ templates: { id: string }[] } | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 3000);
+      otherSocket.once('template:state', (p: { templates: { id: string }[] }) => {
+        clearTimeout(timer);
+        resolve(p);
+      });
+      otherSocket.emit('campaign:join', { campaignId: otherCampaignId });
+    });
+
+    expect(still?.templates.some((t) => t.id === otherTemplateId)).toBe(true);
+  });
+
+  it('refuses to delete a drawing belonging to another campaign', async () => {
+    dmSocket.emit('drawing:delete', { drawingId: otherDrawingId });
+    await new Promise((r) => setTimeout(r, 600));
+
+    const still = await new Promise<{ drawings: { id: string }[] } | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 3000);
+      otherSocket.once('scene:state', (p: { drawings: { id: string }[] }) => {
+        clearTimeout(timer);
+        resolve(p);
+      });
+      otherSocket.emit('scene:activate', { sceneId: otherSceneId });
+    });
+
+    expect(still?.drawings.some((d) => d.id === otherDrawingId)).toBe(true);
+  });
+});

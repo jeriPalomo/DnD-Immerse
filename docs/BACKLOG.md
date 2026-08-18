@@ -212,6 +212,41 @@ fail. 404 tests.
 
 ---
 
+## First look at the older code — 2026-08-17
+
+The three audits so far all stayed on code that had just been written. This one
+went over the parts that have only ever been play-tested: the journal, uploads
+and orphan cleanup, campaign settings, the sheet routes, and the overlay
+handlers. Three defects, all of one family.
+
+**Two deletes took an id on trust.** `template:delete` and the single-id branch
+of `drawing:delete` looked their row up by id alone, with no join to the
+campaign — so a DM of their own game could clear a template or rub out a drawing
+in somebody else's, and the rebroadcast then went to the wrong table, leaving
+the real one showing an outline that no longer exists. Both *creates* check the
+scene they are placed on; only the deletes were missed, which is the shape this
+keeps taking. `templateIn` joins through the scene like `tokenIn` and `wallIn`.
+
+**The journal read every page in the database.** `GET .../journal` fetched
+`journalPages` with no `where` clause at all and separated the campaigns with a
+filter in JavaScript. Nothing leaked — the filter is correct, and unshared
+entries were already dropped before the pages were attached — but a query that
+returns other people's rows and trusts the next ten lines to discard them is one
+edit away from being the leak, and it grew with the whole database rather than
+the request.
+
+**Checked and found clean:** every journal and scene route resolves its id to a
+campaign before `requireDM`; the token art upload checks ownership; member
+removal allows self-removal and refuses the DM; actor sharing requires a shared
+campaign; `handout:show` compares the page's campaign; and `deleteOrphanedUploads`
+covers all seven URL-bearing columns in the schema — verified column by column
+rather than assumed. A sweep for selects with no `where` clause found exactly
+one, the journal.
+
+Each fix verified by reverting it and watching its test fail. 407 tests.
+
+---
+
 ## Hidden passages — 2026-08-15
 
 Stage 1 of interactive map objects (switches, keys, puzzles). This stage is the

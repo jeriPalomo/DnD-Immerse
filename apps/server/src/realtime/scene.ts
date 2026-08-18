@@ -894,8 +894,15 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
         .delete(drawingsTable)
         .where(and(eq(drawingsTable.sceneId, scene.id), eq(drawingsTable.ownerUserId, user.id)));
     } else {
-      const rows = await db.select().from(drawingsTable).where(eq(drawingsTable.id, drawingId)).limit(1);
-      const drawing = rows[0];
+      // Scoped to this campaign, like every other client-supplied id. Taken on
+      // trust, a DM of their own game could rub out somebody else's annotation.
+      const rows = await db
+        .select({ drawing: drawingsTable })
+        .from(drawingsTable)
+        .innerJoin(scenes, eq(drawingsTable.sceneId, scenes.id))
+        .where(and(eq(drawingsTable.id, drawingId), eq(scenes.campaignId, ctx.campaignId)))
+        .limit(1);
+      const drawing = rows[0]?.drawing;
       if (!drawing) return;
 
       if (!ctx.isDM && drawing.ownerUserId !== user.id) {

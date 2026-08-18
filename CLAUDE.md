@@ -342,12 +342,23 @@ a threat — red for hostile. They are separate signals on purpose:
 `ownerUserId` decides HP redaction, so a friendly NPC the DM runs is green on
 the board and still has its hit points hidden. Do not conflate them.
 
+**A read is scoped by its query, not by a filter afterwards.** The journal's
+page fetch had no `where` clause at all: it read every page in the database and
+leaned on a JavaScript filter to keep campaigns apart. Nothing leaked, because
+the filter was right — but a query that returns other people's rows and trusts
+the next ten lines to drop them is one edit away from being the leak, and it
+grows with the whole database rather than the request.
+
 **A socket handler must never take an id on trust.** Room membership says which
 campaigns you are in; it does not say which one an id came from, and
 `context()` reports whichever campaign was joined first. Every handler that
 takes a client-supplied id looks it up through `tokenIn` / `wallIn` /
-`tokensIn`, which join to `scenes.campaignId` — so an id borrowed from another
-table is simply not found. Without that, "is this socket a DM" was being
+`tokensIn` / `templateIn`, which join to `scenes.campaignId` — so an id borrowed
+from another table is simply not found. The delete handlers are where this gets
+missed: `template:create` and `drawing:create` both checked the scene they were
+placed on while their deletes checked nothing, which let a DM of their own game
+rub out somebody else's annotation and then broadcast the change to the wrong
+table. Without that, "is this socket a DM" was being
 answered about the wrong game.
 
 **A throwing handler must not be able to end the session.** Every handler

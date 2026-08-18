@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { campaignRoom } from '@dnd/shared';
 import type { FastifyInstance } from 'fastify';
@@ -31,11 +31,20 @@ export async function journalRoutes(app: FastifyInstance): Promise<void> {
 
     if (entries.length === 0) return { entries: [] };
 
-    const pages = await db.select().from(journalPages).orderBy(asc(journalPages.sortOrder));
-
     // Unshared entries are absent from a player's payload, not merely undrawn -
     // the DM's notes on the villain never reach the browser.
     const visible = membership.isDM ? entries : entries.filter((entry) => entry.shared);
+    if (visible.length === 0) return { entries: [] };
+
+    // Only the pages of the entries this reader may have. Unscoped, this read
+    // every journal page in the database - every campaign's - and leaned on a
+    // filter in JavaScript to keep them apart. Nothing leaked, because the
+    // filter is correct, but the query is one edit away from being the leak.
+    const pages = await db
+      .select()
+      .from(journalPages)
+      .where(inArray(journalPages.entryId, visible.map((entry) => entry.id)))
+      .orderBy(asc(journalPages.sortOrder));
 
     return {
       entries: visible.map((entry) => ({

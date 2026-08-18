@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { campaignRoom, templateCreateSchema } from '@dnd/shared';
 import type { Socket } from 'socket.io';
 import type { ClientToServerEvents, ServerToClientEvents, WireTemplate } from '@dnd/shared';
@@ -55,6 +55,26 @@ export async function broadcastTemplates(io: IOServer, campaignId: string): Prom
 }
 
 /* -------------------------------------------------------------- handlers */
+
+/**
+ * A template, but only if it belongs to the campaign this socket is acting in.
+ *
+ * `template:create` checked the scene it was placed on; the delete did not check
+ * anything, so a DM of their own game could clear a template from somebody
+ * else's - and the rebroadcast then went to the wrong table, leaving the real
+ * one showing an outline that no longer exists. The same rule tokens and walls
+ * follow: room membership says which campaigns you are in, never which one an
+ * id came from.
+ */
+async function templateIn(templateId: string, campaignId: string) {
+  const rows = await db
+    .select({ template: templates })
+    .from(templates)
+    .innerJoin(scenes, eq(templates.sceneId, scenes.id))
+    .where(and(eq(templates.id, templateId), eq(scenes.campaignId, campaignId)))
+    .limit(1);
+  return rows[0]?.template ?? null;
+}
 
 export function registerOverlayHandlers(io: IOServer, socket: OverlaySocket): void {
   const user = socket.data.user;
@@ -127,8 +147,7 @@ export function registerOverlayHandlers(io: IOServer, socket: OverlaySocket): vo
     const ctx = await context();
     if (!ctx) return;
 
-    const rows = await db.select().from(templates).where(eq(templates.id, templateId)).limit(1);
-    const template = rows[0];
+    const template = await templateIn(templateId, ctx.campaignId);
     if (!template) return;
 
     // You may clear your own template; the DM may clear anyone's.
