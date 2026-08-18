@@ -193,8 +193,6 @@ export const cardRequestSchema = z.object({
    * deselected by the time anyone presses the button.
    */
   targetTokenId: z.string().nullable().default(null),
-  /** Beyond normal range: disadvantage the client can see and the server cannot. */
-  longRange: z.boolean().default(false),
 });
 
 /** Presses a button on a posted card; the server rolls and replies. */

@@ -457,11 +457,11 @@ function ItemCard({
     targetTokenId?: string | null,
   ) => void;
 }) {
-  // Starts on the disadvantage a long shot already earned, rather than at
-  // 'normal' with the range penalty quietly dropped. Condition-based advantage
-  // is NOT pre-selected here: the server recomputes that from the board and
-  // folds it in, so a stale card cannot promise advantage the fight has ended.
-  const [mode, setMode] = useState<RollMode>(card.longRange ? 'disadvantage' : 'normal');
+  // The player's own call, and nothing else. Both circumstantial sources -
+  // the target's conditions and the distance - are recomputed by the server when
+  // the button is pressed, so a card posted three rounds ago cannot carry a
+  // range penalty that no longer applies.
+  const [mode, setMode] = useState<RollMode>('normal');
 
   return (
     <div className="mt-1 rounded-lg border border-ink-700 bg-ink-850 px-3 py-2">

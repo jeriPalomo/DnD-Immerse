@@ -526,3 +526,44 @@ describe('players whisper only when their tokens are adjacent', () => {
     expect((await refusal)?.message).toMatch(/cannot whisper them from here/i);
   });
 });
+
+describe('a socket acts in the campaign it last joined', () => {
+  it('does not fall back to whichever room it entered first', async () => {
+    // Handlers used to take "the first room in the map", which is arbitrary. The
+    // official client closes its socket when the campaign changes, so this was
+    // unreachable through the UI -- but room membership authenticates and does
+    // not authorize, and a client joining two rooms is the case that rule is for.
+    const second = await api<{ campaign: { id: string } }>(
+      'POST', '/api/campaigns', { name: 'Second Table' }, dm.cookie,
+    );
+
+    dmSocket.emit('campaign:join', { campaignId: second.campaign.id });
+    await new Promise((r) => setTimeout(r, 600));
+
+    const landed = await new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 3000);
+      dmSocket.once('chat:message', (p: { message: { campaignId: string } }) => {
+        clearTimeout(timer);
+        resolve(p.message.campaignId);
+      });
+      dmSocket.emit('chat:send', { body: 'which table is this', whisperToUserId: null, actorId: null });
+    });
+
+    expect(landed).toBe(second.campaign.id);
+
+    // And back again, so the socket follows the player rather than a join order.
+    dmSocket.emit('campaign:join', { campaignId });
+    await new Promise((r) => setTimeout(r, 600));
+
+    const backAgain = await new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 3000);
+      dmSocket.once('chat:message', (p: { message: { campaignId: string } }) => {
+        clearTimeout(timer);
+        resolve(p.message.campaignId);
+      });
+      dmSocket.emit('chat:send', { body: 'and back', whisperToUserId: null, actorId: null });
+    });
+
+    expect(backAgain).toBe(campaignId);
+  });
+});

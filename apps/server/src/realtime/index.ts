@@ -17,6 +17,17 @@ export interface SocketData {
   user: User;
   /** Campaigns this socket has joined, with the role it holds in each. */
   rooms: Map<string, MemberRole>;
+  /**
+   * The campaign this socket is acting in - the last one it joined.
+   *
+   * Handlers used to take "the first room in the map", which is arbitrary: a
+   * socket joined to two campaigns acted in whichever it happened to enter
+   * first, not the one the player is looking at. The official client closes its
+   * socket when the campaign changes, so this was unreachable through the UI -
+   * but room membership authenticates and does not authorize, and a crafted
+   * client joining two rooms is exactly the case that rule exists for.
+   */
+  activeCampaignId: string | null;
 }
 
 export type IOServer = Server<ClientToServerEvents, ServerToClientEvents, object, SocketData>;
@@ -142,6 +153,7 @@ export function attachRealtime(app: FastifyInstance): IOServer {
 
       socket.data.user = user;
       socket.data.rooms = new Map();
+      socket.data.activeCampaignId = null;
       next();
     } catch (err) {
       next(err as Error);
@@ -172,6 +184,7 @@ export function attachRealtime(app: FastifyInstance): IOServer {
       if (membership.isDM) await socket.join(campaignDmRoom(campaignId));
 
       socket.data.rooms.set(campaignId, membership.role);
+      socket.data.activeCampaignId = campaignId;
       addPresence(campaignId, user.id);
 
       await broadcastPresence(io, campaignId);
@@ -186,6 +199,11 @@ export function attachRealtime(app: FastifyInstance): IOServer {
       await socket.leave(campaignRoom(campaignId));
       await socket.leave(campaignDmRoom(campaignId));
       socket.data.rooms.delete(campaignId);
+      // Falls back to whatever is still joined rather than leaving the socket
+      // acting in a campaign it has just left.
+      if (socket.data.activeCampaignId === campaignId) {
+        socket.data.activeCampaignId = [...socket.data.rooms.keys()].pop() ?? null;
+      }
       removePresence(campaignId, user.id);
 
       await broadcastPresence(io, campaignId);

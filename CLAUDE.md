@@ -363,6 +363,22 @@ tracker used to redact carefully while the board tooltip, the token HUD and the
 target panel all read `hp` straight off the wire — one hover and the boss's 7 HP
 was public. Redacting in one place is the only way it stays redacted.
 
+**A socket acts in the campaign it last joined.** Handlers used to read "the
+first room in the map", which is arbitrary: a socket joined to two campaigns
+acted in whichever it entered first rather than the one the player is looking
+at. `socket.data.activeCampaignId` is set on join and falls back on leave, and
+all four `context()` copies read it. The official client closes its socket when
+the campaign changes, so this was unreachable through the UI — but room
+membership authenticates and does not authorize, which is the whole reason ids
+are scoped.
+
+**Circumstantial modifiers are measured when the button is pressed.** Long range
+was computed by the client and sent with the card, so the disadvantage froze at
+posting time — step into melee before pressing Attack and the roll still carried
+it. `longRangeShot` measures from where the two tokens actually are, and joins
+the condition-derived mode through `combineRollModes`. The card carries no range
+hint at all now; the mode select is the player's own call and nothing else.
+
 **Socket authorization is re-checked in every handler.** Room membership
 authenticates; it does not authorize. DM-only data travels on the separate
 `campaign:{id}:dm` room so secrecy is structural rather than a forgettable

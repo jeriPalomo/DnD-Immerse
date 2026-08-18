@@ -74,12 +74,7 @@ interface TableState {
 
   send: (body: string, whisperToUserId?: string | null) => void;
   roll: (expression: string, label?: string, secret?: boolean) => void;
-  postCard: (
-    itemId: string,
-    actorId: string,
-    targetTokenId?: string | null,
-    longRange?: boolean,
-  ) => void;
+  postCard: (itemId: string, actorId: string, targetTokenId?: string | null) => void;
   select: (tokenId: string | null) => void;
   target: (tokenId: string | null) => void;
 
@@ -376,8 +371,8 @@ export const useTable = create<TableState>((set, get) => ({
     socket?.emit('chat:roll', { expression, label, actorId: activeActorId, secret });
   },
 
-  postCard(itemId, actorId, targetTokenId = null, longRange = false) {
-    get().socket?.emit('chat:card', { itemId, actorId, targetTokenId, longRange });
+  postCard(itemId, actorId, targetTokenId = null) {
+    get().socket?.emit('chat:card', { itemId, actorId, targetTokenId });
   },
 
   select(tokenId) {

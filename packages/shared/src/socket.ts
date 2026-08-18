@@ -110,8 +110,6 @@ export interface WireCard {
   saveDC: number | null;
   /** The token this was aimed at when it was posted, if any. */
   targetTokenId: string | null;
-  /** Shot beyond normal range, so the attack is at disadvantage. */
-  longRange: boolean;
 }
 
 export interface WireChatMessage {

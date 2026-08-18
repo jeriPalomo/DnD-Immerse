@@ -712,3 +712,91 @@ describe('a partial payload does not throw', () => {
     expect(patched.item.name).toBe('Dagger');
   });
 });
+
+describe('range is measured when the button is pressed', () => {
+  let bowId: string;
+  let farId: string;
+
+  beforeAll(async () => {
+    const created = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', { sceneId, name: 'Archer target', x: 20, y: 2, hp: 9, maxHp: 9 } as never);
+    farId = (await created)!.token.id;
+
+    const bow = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      {
+        type: 'weapon', name: 'Longbow',
+        system: { damageDice: '1d8', ability: 'dex', range: { type: 'ranged', value: 30, long: 300 } },
+      },
+      alice.cookie,
+    );
+    bowId = bow.item.id;
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  /** The label of the next attack roll, which names the mode and why. */
+  async function attackLabel(targetTokenId: string): Promise<string> {
+    const rolled = new Promise<string>((resolve) => {
+      const timer = setTimeout(() => resolve(''), 3000);
+      const handler = (p: { message: { rollData: { label: string } | null } }) => {
+        if (!p.message.rollData?.label?.includes('attack')) return;
+        clearTimeout(timer);
+        dmSocket.off('chat:message', handler);
+        resolve(p.message.rollData.label);
+      };
+      dmSocket.on('chat:message', handler);
+    });
+    aliceSocket.emit('chat:cardAction', {
+      itemId: bowId, actorId, action: 'attack', targetTokenId,
+    } as never);
+    return rolled;
+  }
+
+  it('takes disadvantage on a shot beyond normal range', async () => {
+    // Alice is at (2,2), the target at (20,2): 90 ft, past a longbow's 30.
+    expect(await attackLabel(farId)).toMatch(/attack at disadvantage.*beyond normal range/);
+  });
+
+  it('drops it once the target closes, without reposting the card', async () => {
+    // The client used to send this with the card, freezing it at posting time:
+    // step into melee before pressing Attack and the roll still carried it.
+    dmSocket.emit('token:commit', { tokenId: farId, x: 4, y: 2 });
+    await new Promise((r) => setTimeout(r, 500));
+
+    const label = await attackLabel(farId);
+    expect(label).not.toMatch(/beyond normal range/);
+    expect(label).not.toMatch(/disadvantage/);
+  });
+});
+
+describe('a card cannot claim a target from another campaign', () => {
+  let anyItemId: string;
+
+  beforeAll(async () => {
+    const made = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      { type: 'weapon', name: 'Sling', system: { damageDice: '1d4' } },
+      alice.cookie,
+    );
+    anyItemId = made.item.id;
+  });
+
+  it('drops an id the campaign does not own', async () => {
+    const posted = new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => resolve('timeout'), 3000);
+      const handler = (p: { message: { cardData: { targetTokenId: string | null } | null } }) => {
+        if (!p.message.cardData) return;
+        clearTimeout(timer);
+        dmSocket.off('chat:message', handler);
+        resolve(p.message.cardData.targetTokenId);
+      };
+      dmSocket.on('chat:message', handler);
+    });
+
+    aliceSocket.emit('chat:card', {
+      itemId: anyItemId, actorId, targetTokenId: 'borrowed-from-another-table',
+    } as never);
+
+    expect(await posted).toBeNull();
+  });
+});

@@ -152,7 +152,9 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
   const user = socket.data.user;
 
   async function context(): Promise<{ campaignId: string; isDM: boolean } | null> {
-    const [campaignId] = socket.data.rooms.keys();
+    // The campaign this socket declared it is acting in, not whichever room it
+    // happens to have joined first.
+    const campaignId = socket.data.activeCampaignId;
     if (!campaignId) return null;
 
     const membership = await getMembership(campaignId, user.id);
@@ -565,7 +567,13 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       }
     }
 
-    if (targets[0]) invalidateDragCache(targets[0].sceneId);
+    // Every scene touched, not just the first target's. Nothing visibly breaks
+    // without this today - the cache is read for positions, speed and sight,
+    // and damage moves none of those - but a hit can span two scenes, and the
+    // day damage does something that touches speed this is already a trap.
+    for (const sceneId of new Set(targets.map((token) => token.sceneId))) {
+      invalidateDragCache(sceneId);
+    }
 
     // To the room, not the caller: emitted back to the sender alone, nobody
     // else at the table ever saw the damage banner.

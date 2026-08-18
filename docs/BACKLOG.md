@@ -178,6 +178,40 @@ STR** on its card, and pressing Save posts *"Bandit — STR save vs Weighted Net
 
 ---
 
+## The four left standing — 2026-08-17
+
+Named in the previous pass as seen-but-not-fixed, and cleared.
+
+**A socket acted in whichever campaign it joined first.** All four `context()`
+copies read the first key of a Map, which is arbitrary rather than wrong-ish.
+`socket.data.activeCampaignId` is set on join and falls back on leave.
+Unreachable through the UI, since the client closes its socket when the campaign
+changes — but room membership authenticates and does not authorize, and that is
+exactly the rule this violated.
+
+**Long range froze at posting time.** The client computed it and sent it with
+the card, so stepping into melee before pressing Attack still rolled at
+disadvantage. The server now measures from where the tokens are, and
+`combineRollModes` folds it in with the condition-derived mode. `longRange` is
+gone from the wire entirely — a hint that cannot be kept current is worse than
+no hint, and the mode select is the player's own call again.
+
+**A card echoed an unvalidated target id** to the whole room. Harmless, since
+`cardAction` resolved it properly later, but it is the one id on the wire nobody
+had looked at. Resolved through `tokenIn` at post time like everything else.
+
+**`damage:apply` invalidated one scene's cache out of however many it hit.**
+Fixed, and worth being straight about: **nothing visibly breaks without it.** The
+drag cache is read for positions, speed and sight, and damage moves none of
+those. The test written for it passed with the fix reverted, so it was deleted
+rather than kept — a test that cannot fail is worse than none. The one-line fix
+stays as a guard against the day damage touches speed.
+
+Each of the other three was verified by reverting the fix and watching its test
+fail. 404 tests.
+
+---
+
 ## Hidden passages — 2026-08-15
 
 Stage 1 of interactive map objects (switches, keys, puzzles). This stage is the

@@ -11,6 +11,7 @@ import {
   rollRequestSchema,
   savingThrowExpression,
   sendMessageSchema,
+  tokenDistanceInFeet,
   spellCondition,
   tokenDistance,
   spellSaveDC,
@@ -212,14 +213,7 @@ async function resolveActor(actorId: string | null, userId: string): Promise<Act
 
 /* ------------------------------------------------------------- cards */
 
-function buildCard(
-  item: Item,
-  actor: Actor,
-  aimedAt: { targetTokenId: string | null; longRange: boolean } = {
-    targetTokenId: null,
-    longRange: false,
-  },
-): WireCard {
+function buildCard(item: Item, actor: Actor, targetTokenId: string | null = null): WireCard {
   const s = item.system as Record<string, any>;
   const actions: WireCard['actions'] = [];
   let subtitle = '';
@@ -272,8 +266,7 @@ function buildCard(
     actions,
     saveAbility,
     saveDC,
-    targetTokenId: aimedAt.targetTokenId,
-    longRange: aimedAt.longRange,
+    targetTokenId,
   };
 }
 
@@ -292,9 +285,9 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
     return true;
   }
 
+  /** The campaign this socket is acting in, set when it joined. */
   function activeCampaign(): string | null {
-    const [first] = socket.data.rooms.keys();
-    return first ?? null;
+    return socket.data.activeCampaignId;
   }
 
   socket.on('chat:send', async (payload) => {
@@ -455,6 +448,12 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
       return;
     }
 
+    // Resolved rather than echoed: an id from another campaign is simply not
+    // found, the same rule every other handler follows.
+    const aimedAt = input.targetTokenId
+      ? await tokenIn(input.targetTokenId, campaignId)
+      : null;
+
     await persistAndDeliver(
       io,
       campaignId,
@@ -463,10 +462,7 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         actorId: actor.id,
         kind: 'card',
         body: item.name,
-        cardData: buildCard(item, actor, {
-          targetTokenId: input.targetTokenId,
-          longRange: input.longRange,
-        }),
+        cardData: buildCard(item, actor, aimedAt?.id ?? null),
       },
       { authorName: user.displayName, actorName: actor.name },
     );
@@ -511,13 +507,24 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
      * on top, but a condition on the board applies whether or not the client
      * remembered it.
      */
+    const caster = target ? await casterOn(campaignId, actor.id) : null;
+
     const conditionMode = target
       ? attackModeAgainst(
-          { conditions: await conditionsOn(campaignId, actor.id) },
+          { conditions: caster ? await conditionsOnToken(caster.token.id) : [] },
           { conditions: await conditionsOnToken(target.id) },
         )
       : { mode: 'normal' as const, reasons: [] as string[] };
-    const mode = combineRollModes(input.mode, conditionMode.mode);
+
+    // Measured from where the two of them are standing right now.
+    const farShot = Boolean(target && caster && longRangeShot(item, caster, target));
+    const reasons = farShot ? [...conditionMode.reasons, 'beyond normal range'] : conditionMode.reasons;
+
+    const mode = combineRollModes(
+      input.mode,
+      conditionMode.mode,
+      farShot ? 'disadvantage' : 'normal',
+    );
 
     switch (input.action) {
       case 'attack':
@@ -533,8 +540,8 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         // Named, so the table can see which condition earned it rather than
         // wondering why two dice appeared.
         label =
-          conditionMode.reasons.length > 0
-            ? `${item.name} — attack at ${mode} (${conditionMode.reasons.join('; ')})`
+          reasons.length > 0
+            ? `${item.name} — attack at ${mode} (${reasons.join('; ')})`
             : `${item.name} — attack`;
         break;
 
@@ -771,17 +778,41 @@ async function conditionsOnToken(tokenId: string): Promise<string[]> {
  * A character can have a token on several scenes, so this looks only at the
  * campaign's active one - the fight actually happening.
  */
-async function conditionsOn(campaignId: string, actorId: string): Promise<string[]> {
+async function casterOn(
+  campaignId: string,
+  actorId: string,
+): Promise<{ token: Token; feetPerSquare: number } | null> {
   const rows = await db
-    .select({ tokenId: tokens.id })
+    .select({ token: tokens, feetPerSquare: scenes.feetPerSquare })
     .from(tokens)
     .innerJoin(scenes, eq(tokens.sceneId, scenes.id))
     .innerJoin(campaigns, eq(campaigns.activeSceneId, scenes.id))
     .where(and(eq(campaigns.id, campaignId), eq(tokens.actorId, actorId)))
     .limit(1);
 
-  const tokenId = rows[0]?.tokenId;
-  return tokenId ? conditionsOnToken(tokenId) : [];
+  return rows[0] ?? null;
+}
+
+/**
+ * Whether the shot is beyond normal range, measured now rather than when the
+ * card was posted.
+ *
+ * The client used to work this out and send it with the card, which meant the
+ * disadvantage was frozen at posting time: step into melee before pressing
+ * Attack and the roll still carried it. Both circumstantial sources - the
+ * target's conditions and the distance - are the server's to compute, for the
+ * same reason ping colour is.
+ */
+function longRangeShot(
+  item: Item,
+  caster: { token: Token; feetPerSquare: number },
+  target: Token,
+): boolean {
+  const range = (item.system as { range?: { value?: number; long?: number | null } }).range;
+  if (!range?.long || !range.value) return false;
+
+  const feet = tokenDistanceInFeet(caster.token, target, 'standard', caster.feetPerSquare);
+  return feet > range.value && feet <= range.long;
 }
 
 /** The sheet behind a token, if it has one. */

@@ -130,7 +130,7 @@ export function TargetPanel({
   scene: WireScene;
   actor: Actor | null;
   items: Item[];
-  onUse: (item: Item, longRange: boolean) => void;
+  onUse: (item: Item) => void;
   onClear: () => void;
 }) {
   if (!self) {
@@ -189,10 +189,7 @@ export function TargetPanel({
             <li key={item.id}>
               <button
                 disabled={!legal}
-                // `longRange` travels with the use, so the disadvantage this
-                // panel already worked out reaches the roll instead of being
-                // printed and dropped.
-                onClick={() => onUse(item, longRange)}
+                onClick={() => onUse(item)}
                 className={`w-full rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
                   legal
                     ? 'border-ink-700 bg-ink-850 hover:border-ember-500'

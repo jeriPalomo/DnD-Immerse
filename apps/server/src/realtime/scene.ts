@@ -490,7 +490,9 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
   const user = socket.data.user;
 
   async function context(): Promise<{ campaignId: string; isDM: boolean } | null> {
-    const [campaignId] = socket.data.rooms.keys();
+    // The campaign this socket declared it is acting in, not whichever room it
+    // happens to have joined first.
+    const campaignId = socket.data.activeCampaignId;
     if (!campaignId) return null;
 
     // Re-checked per event; room membership authenticates but does not authorize.
