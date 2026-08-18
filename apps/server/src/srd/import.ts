@@ -10,7 +10,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { parseRange, type ItemSystem } from '@dnd/shared';
+import { auditSpellConditions, parseRange, type AbilityKey, type ItemSystem } from '@dnd/shared';
 import { db } from '../db/index.js';
 import { srdItems, srdMonsters, srdSpells } from '../db/schema.js';
 import { paths } from '../env.js';
@@ -364,6 +364,53 @@ export async function importSrd(): Promise<void> {
       `(${mastered} with weapon mastery), ${monsterRows.filter((r) => r.ruleset === '2024').length} monsters`,
   );
   console.log('  2024 spells are not published in the SRD dataset; 2024 campaigns use the 2014 list');
+
+  reportSpellConditions(spellRows);
+}
+
+/**
+ * Checks the curated `SPELL_CONDITIONS` table against what was just imported.
+ *
+ * This is the only moment the whole spell list is in hand, and the table's own
+ * unit tests cannot do this job: they look its keys up by themselves, which
+ * proves the lookup works and nothing about whether the keys match anything
+ * real. That is how "tasha's hideous laughter" sat in the table never matching
+ * a compendium row, since the SRD publishes it as plain "Hideous Laughter".
+ *
+ * A mismatch is the loud one. It means the table and the dataset disagree about
+ * which save a spell forces, which makes every casting of it quietly wrong.
+ */
+function reportSpellConditions(spells: { name: string; system: unknown }[]): void {
+  const audit = auditSpellConditions(
+    spells.map((row) => ({
+      name: row.name,
+      save: ((row.system as { save?: { ability?: AbilityKey } | null }).save?.ability ?? null),
+    })),
+  );
+
+  const total = audit.matched.length + audit.supplied.length + audit.absent.length +
+    audit.mismatched.length;
+
+  console.log(
+    `  spell conditions: ${audit.matched.length + audit.supplied.length}/${total} found` +
+      (audit.supplied.length > 0 ? ` (${audit.supplied.length} with no dc block of their own)` : '') +
+      (audit.absent.length > 0 ? `, ${audit.absent.length} not in this dataset` : ''),
+  );
+
+  // Declared gaps are expected; an undeclared one is a name that has drifted.
+  if (audit.unexpected.length > 0) {
+    console.warn(
+      `  WARNING: no compendium spell matches ${audit.unexpected.join(', ')} - ` +
+        'the name has drifted, and those conditions can never be applied',
+    );
+  }
+
+  for (const bad of audit.mismatched) {
+    console.warn(
+      `  WARNING: ${bad.spell} forces a ${bad.data.toUpperCase()} save in the dataset, ` +
+        `but the table says ${bad.table.toUpperCase()}`,
+    );
+  }
 }
 
 if (process.argv[1]?.endsWith('import.ts') || process.argv[1]?.endsWith('import.js')) {

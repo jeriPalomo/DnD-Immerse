@@ -346,6 +346,8 @@ export const SPELL_CONDITIONS: Record<string, SpellCondition> = {
   'blindness/deafness': { save: 'con', conditions: ['blinded'], rounds: 10, concentration: false },
   web: { save: 'dex', conditions: ['restrained'], rounds: 600, concentration: true },
   entangle: { save: 'str', conditions: ['restrained'], rounds: 10, concentration: true },
+  // Not in SRD 5.1. Kept because it fires on a hand-entered item of the same
+  // name, and `auditSpellConditions` reports it as absent rather than broken.
   'ensnaring strike': { save: 'str', conditions: ['restrained'], rounds: 10, concentration: true },
   'charm person': { save: 'wis', conditions: ['charmed'], rounds: 600, concentration: false },
   fear: { save: 'wis', conditions: ['frightened'], rounds: 10, concentration: true },
@@ -367,6 +369,7 @@ export const SPELL_CONDITIONS: Record<string, SpellCondition> = {
   'dominate person': { save: 'wis', conditions: ['charmed'], rounds: 10, concentration: true },
   'dominate beast': { save: 'wis', conditions: ['charmed'], rounds: 10, concentration: true },
   'dominate monster': { save: 'wis', conditions: ['charmed'], rounds: 600, concentration: true },
+  // Also absent from SRD 5.1; same reasoning.
   'ray of sickness': { save: 'con', conditions: ['poisoned'], rounds: 1, concentration: false },
   'blinding smite': { save: 'con', conditions: ['blinded'], rounds: 10, concentration: true },
   // Prone has no duration: you stand up out of it. The spell's own 1 minute is
@@ -395,4 +398,79 @@ export function spellCondition(name: string): SpellCondition | null {
   if (direct) return direct;
 
   return SPELL_CONDITIONS[key.replace(/^[a-z]+'s\s+/, '')] ?? null;
+}
+
+
+/** Entries this table knows SRD 5.1 does not carry, so absence is not news. */
+export const SPELL_CONDITIONS_NOT_IN_SRD: readonly string[] = [
+  'ensnaring strike',
+  'ray of sickness',
+  'blinding smite',
+] as const;
+
+export interface SpellConditionAudit {
+  /** The spell was found and agrees on the saving throw. */
+  matched: string[];
+  /** The spell was found but carries no save of its own; this table supplies it. */
+  supplied: string[];
+  /** Not in the dataset at all. Expected for the entries listed above. */
+  absent: string[];
+  /** Unexpectedly absent - a key that matches nothing and was not declared so. */
+  unexpected: string[];
+  /** Found, and the dataset disagrees about which save it forces. */
+  mismatched: { spell: string; table: AbilityKey; data: AbilityKey }[];
+}
+
+/**
+ * Checks this table against a real compendium.
+ *
+ * The reason this exists: `SPELL_CONDITIONS` is hand-written, and its unit
+ * tests looked its own keys up by themselves - which proves the lookup works
+ * and nothing about whether the keys match anything real. That is how
+ * "tasha's hideous laughter" sat here never matching a compendium row, since
+ * the SRD publishes it as plain "Hideous Laughter".
+ *
+ * So the check has to run where real data is: the importer calls this and
+ * prints the result, which is the one moment the whole spell list is in hand. A
+ * `mismatched` entry means this table and the handbook disagree about which
+ * save a spell forces, and that is the failure worth shouting about - it makes
+ * every casting of that spell quietly wrong.
+ */
+export function auditSpellConditions(
+  spells: { name: string; save: AbilityKey | null }[],
+): SpellConditionAudit {
+  const audit: SpellConditionAudit = {
+    matched: [],
+    supplied: [],
+    absent: [],
+    unexpected: [],
+    mismatched: [],
+  };
+
+  // Resolved the same way `spellCondition` resolves a cast, so the possessive
+  // rule is exercised by the audit rather than only by the lookup.
+  const found = new Map<string, AbilityKey | null>();
+  for (const spell of spells) {
+    const key = spell.name.trim().toLowerCase();
+    const resolved = key in SPELL_CONDITIONS ? key : key.replace(/^[a-z]+'s\s+/, '');
+    if (resolved in SPELL_CONDITIONS) found.set(resolved, spell.save);
+  }
+
+  for (const [key, entry] of Object.entries(SPELL_CONDITIONS)) {
+    if (!found.has(key)) {
+      audit.absent.push(key);
+      if (!SPELL_CONDITIONS_NOT_IN_SRD.includes(key)) audit.unexpected.push(key);
+      continue;
+    }
+
+    const dataSave = found.get(key) ?? null;
+    // No save in the data is fine: the SRD ships Web and Sleet Storm with no dc
+    // block at all, and this table is what supplies one.
+    if (dataSave === null) audit.supplied.push(key);
+    else if (dataSave !== entry.save) {
+      audit.mismatched.push({ spell: key, table: entry.save, data: dataSave });
+    } else audit.matched.push(key);
+  }
+
+  return audit;
 }

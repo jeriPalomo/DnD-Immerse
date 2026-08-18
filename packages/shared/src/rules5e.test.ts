@@ -16,9 +16,11 @@ import {
   skillBonus,
   speciesBonuses,
   spellAttackBonus,
+  auditSpellConditions,
   spellCondition,
   spellSaveDC,
   SPELL_CONDITIONS,
+  SPELL_CONDITIONS_NOT_IN_SRD,
   type AbilityScores,
 } from './rules5e.js';
 import { CONDITIONS } from './schemas.js';
@@ -325,5 +327,72 @@ describe('SPELL_CONDITIONS', () => {
 
   it('returns null for a spell it has never heard of', () => {
     expect(spellCondition('Bigby’s Interpretive Dance')).toBeNull();
+  });
+});
+
+
+describe('auditSpellConditions', () => {
+  const everything = Object.entries(SPELL_CONDITIONS).map(([name, entry]) => ({
+    name,
+    save: entry.save,
+  }));
+
+  it('matches every entry against a compendium that agrees', () => {
+    const audit = auditSpellConditions(everything);
+    expect(audit.matched).toHaveLength(Object.keys(SPELL_CONDITIONS).length);
+    expect(audit.absent).toEqual([]);
+    expect(audit.mismatched).toEqual([]);
+  });
+
+  it('catches a spell the data says forces a different save', () => {
+    // The failure the whole audit exists for: silently wrong on every casting.
+    const wrong = everything.map((s) =>
+      s.name === 'hold person' ? { ...s, save: 'con' as const } : s,
+    );
+    const audit = auditSpellConditions(wrong);
+
+    expect(audit.mismatched).toEqual([{ spell: 'hold person', table: 'wis', data: 'con' }]);
+    expect(audit.matched).not.toContain('hold person');
+  });
+
+  it('does not call a missing dc block a mismatch', () => {
+    // The SRD ships Web and Sleet Storm with no save of their own; this table
+    // is what supplies one, which is a supported case rather than a conflict.
+    const audit = auditSpellConditions(
+      everything.map((s) => (s.name === 'web' ? { ...s, save: null } : s)),
+    );
+    expect(audit.supplied).toContain('web');
+    expect(audit.mismatched).toEqual([]);
+  });
+
+  it('resolves a spell the handbook names after a wizard', () => {
+    const audit = auditSpellConditions(
+      everything.map((s) =>
+        s.name === 'hideous laughter' ? { ...s, name: "Tasha's Hideous Laughter" } : s,
+      ),
+    );
+    expect(audit.matched).toContain('hideous laughter');
+    expect(audit.absent).toEqual([]);
+  });
+
+  it('separates an expected absence from an unexpected one', () => {
+    // Absent entries are declared, so a NEW one -- a typo, or a name the
+    // dataset renamed -- stands out instead of joining a list of known gaps.
+    const audit = auditSpellConditions(
+      everything.filter((s) => !SPELL_CONDITIONS_NOT_IN_SRD.includes(s.name)),
+    );
+    expect(audit.absent.sort()).toEqual([...SPELL_CONDITIONS_NOT_IN_SRD].sort());
+    expect(audit.unexpected).toEqual([]);
+
+    const withTypo = auditSpellConditions(everything.filter((s) => s.name !== 'web'));
+    expect(withTypo.unexpected).toEqual(['web']);
+  });
+
+  it('lists only spells that are genuinely outside SRD 5.1', () => {
+    // A guard on the declaration itself: naming a spell here that IS in the
+    // dataset would hide a real regression behind an expected gap.
+    for (const name of SPELL_CONDITIONS_NOT_IN_SRD) {
+      expect(SPELL_CONDITIONS[name], `${name} is declared absent but not in the table`).toBeDefined();
+    }
   });
 });

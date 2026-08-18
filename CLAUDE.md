@@ -135,6 +135,19 @@ is revealed. `visibleTokens` still returns the tokens you control, and
 token and the remembered ground rather than an unbroken black rectangle. A
 client-side blur would be a devtools inspection away from the room anyway.
 
+**A curated table is checked against the data, not against itself.**
+`SPELL_CONDITIONS` is hand-written, and its unit tests looked its own keys up by
+themselves — which proves the lookup works and nothing about whether a key
+matches anything real. That is how `tasha's hideous laughter` sat there matching
+no compendium row for a whole commit: the SRD publishes it as plain "Hideous
+Laughter", stripping the wizard's name as it does from every spell that carries
+one. `auditSpellConditions` runs inside `npm run srd:import`, the one moment the
+whole spell list is in hand, and shouts on two things: a key that matches
+nothing (the name has drifted) and a spell whose dataset save disagrees with the
+table (every casting of it is quietly wrong). Gaps SRD 5.1 genuinely does not
+carry are declared in `SPELL_CONDITIONS_NOT_IN_SRD` so a new one stands out
+instead of joining a list of known ones.
+
 **A spell save is rolled by the target, against the caster's DC, and the DC is
 computed once.** `cardAction` rolled the *caster's* own save with the caster's
 proficiency against the caster's own DC — the wrong creature and the wrong

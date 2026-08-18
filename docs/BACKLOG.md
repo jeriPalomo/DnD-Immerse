@@ -144,7 +144,18 @@ nothing; `scene.ts` imported `toActiveEffect` and never used it. Both gone.
 
 Each fix has a regression test, and each test was checked against the broken
 code first — a passing test proves nothing until you have watched it fail. 389
-tests. Verified in the browser end to end: a hand-entered net reads **DC 12
+tests.
+
+**Then the underlying problem, rather than the one instance.** The wrong key
+was not really a typo; it was that nothing ever compared this table to real
+data. `auditSpellConditions` now runs inside `npm run srd:import` and prints
+`spell conditions: 14/17 found (2 with no dc block of their own), 3 not in this
+dataset`, warning loudly on a key that matches nothing and on any spell whose
+dataset save disagrees with the table. Verified by breaking both deliberately —
+reinstating the Tasha's key produced *"no compendium spell matches tasha's
+hideous laughter — the name has drifted"*, which is the bug that shipped,
+caught at import time. The three genuine SRD gaps are declared, so a new one
+stands out rather than blending in. 395 tests. Verified in the browser end to end: a hand-entered net reads **DC 12
 STR** on its card, and pressing Save posts *"Bandit — STR save vs Weighted Net
 (DC 12)"*, rolled by the bandit.
 
