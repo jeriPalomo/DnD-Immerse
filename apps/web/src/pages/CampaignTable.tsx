@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { OWNERSHIP, abilityModifier, formatModifier, templateForSpell } from '@dnd/shared';
+import type { WireToken } from '@dnd/shared';
 import { Alert, Badge, Card, Spinner } from '../components/ui.js';
 import { ChatPanel } from '../components/ChatPanel.js';
 import { BattleMap } from '../components/board/BattleMap.js';
 import { InitiativeTracker } from '../components/board/InitiativeTracker.js';
 import { SceneManager } from '../components/board/SceneManager.js';
+import { ReachPanel } from '../components/board/ReachPanel.js';
 import { TargetPanel } from '../components/board/TargetPanel.js';
 import { TokenHUD } from '../components/board/TokenHUD.js';
 import { api } from '../lib/api.js';
@@ -226,6 +228,44 @@ export default function CampaignTable() {
   const actingToken = isDM ? selected : (myToken ?? selected);
 
   /**
+   * Use an item on a creature.
+   *
+   * Shared by the target panel and the reach list rather than written twice:
+   * two copies of "post the card, then drop the spell's own template" is two
+   * places for a Fireball to stop drawing its circle.
+   */
+  function useItemOn(item: Item, victim: WireToken) {
+    if (!actingActorId) return;
+
+    // The card remembers who it was aimed at, so a spell save is rolled by the
+    // target rather than by the caster. Range is not carried: the server
+    // measures it when the button is pressed.
+    table.postCard(item.id, actingActorId, victim.id);
+    table.target(victim.id);
+
+    // An area spell also drops its own outline on the target, built from the
+    // spell's own area so Fireball is a 20 ft circle without anyone
+    // configuring one.
+    const built = templateForSpell(
+      item.system.areaOfEffect as { shape?: string; size?: number; width?: number | null } | null,
+      { x: victim.x + victim.w / 2, y: victim.y + victim.h / 2 },
+      actingToken
+        ? (Math.atan2(victim.y - actingToken.y, victim.x - actingToken.x) * 180) / Math.PI
+        : 0,
+    );
+    if (built) {
+      table.placeTemplate({
+        shape: built.shape,
+        x: built.x,
+        y: built.y,
+        direction: built.direction,
+        distance: built.distance,
+        width: built.width,
+      });
+    }
+  }
+
+  /**
    * The board's height budget. 8rem is the header; the turn bar takes its own
    * space above the grid while a fight is running, and without subtracting it a
    * tall map runs past the bottom of the window - the same class of bug as the
@@ -309,6 +349,18 @@ export default function CampaignTable() {
             HUD you have to hunt for after clicking a token is worse than one
             that is simply always in the same place. */}
         <div className={`flex flex-col gap-3 xl:h-[calc(100vh-8rem)] ${focusBoard ? 'hidden' : ''}`}>
+          {/* What the move made possible, before anything is targeted. */}
+          {scene && (
+            <ReachPanel
+              self={actingToken}
+              actor={actingActor}
+              items={actingItems}
+              tokens={tokens}
+              scene={scene}
+              onUse={useItemOn}
+            />
+          )}
+
           {targeted && scene && (
             <TargetPanel
               self={actingToken}
@@ -316,35 +368,7 @@ export default function CampaignTable() {
               scene={scene}
               actor={actingActor}
               items={actingItems}
-              onUse={(item) => {
-                if (!actingActorId) return;
-                // The card remembers who it was aimed at, so a spell save is
-                // rolled by the target rather than by the caster. Range is not
-                // carried: the server measures it when the button is pressed.
-                table.postCard(item.id, actingActorId, targeted.id);
-
-                // An area spell also drops its own outline on the target, built
-                // from the spell's own area so Fireball is a 20 ft circle
-                // without anyone configuring one.
-                const built = templateForSpell(
-                  item.system.areaOfEffect as { shape?: string; size?: number; width?: number | null } | null,
-                  { x: targeted.x + targeted.w / 2, y: targeted.y + targeted.h / 2 },
-                  actingToken
-                    ? (Math.atan2(targeted.y - actingToken.y, targeted.x - actingToken.x) * 180) /
-                      Math.PI
-                    : 0,
-                );
-                if (built) {
-                  table.placeTemplate({
-                    shape: built.shape,
-                    x: built.x,
-                    y: built.y,
-                    direction: built.direction,
-                    distance: built.distance,
-                    width: built.width,
-                  });
-                }
-              }}
+              onUse={(item) => useItemOn(item, targeted)}
               onClear={() => table.target(null)}
             />
           )}
