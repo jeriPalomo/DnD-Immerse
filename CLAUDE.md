@@ -496,6 +496,13 @@ above it. Run is stacked rather than tabbed because the fight is the thing you
 must never lose sight of; the bulky parts collapse so it keeps the top of the
 column.
 
+**The turn bar shows faces, not labels.** Names and initiative live in the
+tooltip; the bar itself is portraits. Twelve goblins are twelve identical
+pictures, and the answer to that is the ring around the one acting rather than a
+row of captions — which is also why the acting creature is drawn larger and at
+full opacity while the rest are dimmed. A creature with no art falls back to its
+initial, the same placeholder used everywhere else.
+
 **A creature that does not fit the turn bar is hidden, not clipped, and
 counted.** A dozen combatants overflow it, and a portrait sliced down the middle
 at the edge reads as a rendering fault. Fit is measured with

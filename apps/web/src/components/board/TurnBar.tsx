@@ -194,39 +194,25 @@ export function TurnBar() {
 
             <div
               data-entry-id={entry.id}
+              // The name lives here rather than on the face. Twelve goblins are
+              // twelve identical pictures, and the answer to that is the ring
+              // around the one acting, not a column of labels.
               title={`${entry.name} · initiative ${entry.initiative}`}
-              className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-1.5 py-1 ${
+              className={`relative shrink-0 overflow-hidden rounded-lg border-2 transition-colors ${
                 index === 0
-                  ? 'border-ember-400 bg-ember-500/15'
+                  ? 'size-12 border-ember-400 shadow-[0_0_0_3px_rgba(249,115,22,0.25)]'
                   : nextRound
-                    ? 'border-ink-800 opacity-50'
-                    : 'border-ink-800'
-              }`}
-            >
-            <div
-              className={`overflow-hidden rounded border border-ink-700 bg-ink-850 ${
-                index === 0 ? 'size-9' : 'size-7'
+                    ? 'size-9 border-ink-800 opacity-40'
+                    : 'size-9 border-ink-700 opacity-80'
               }`}
             >
               {entry.imageUrl ? (
                 <img src={entry.imageUrl} alt="" loading="lazy" className="size-full object-cover" />
               ) : (
-                <div className="flex size-full items-center justify-center text-[10px] text-ink-600">
+                <div className="flex size-full items-center justify-center bg-ink-850 font-display text-ink-400">
                   {entry.name.slice(0, 1).toUpperCase()}
                 </div>
               )}
-            </div>
-
-            <div className="min-w-0">
-              <div
-                className={`max-w-24 truncate text-xs ${
-                  index === 0 ? 'text-ink-100' : 'text-ink-400'
-                }`}
-              >
-                {entry.name}
-              </div>
-              <div className="font-mono text-[9px] text-ink-600">{entry.initiative}</div>
-            </div>
             </div>
           </Fragment>
         ))}

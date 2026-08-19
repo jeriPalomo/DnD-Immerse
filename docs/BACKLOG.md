@@ -25,6 +25,18 @@ audio system rather than extending it.
 
 ---
 
+## The turn bar is faces only — 2026-08-19
+
+Clarified after seeing it: the bar should show tokens, not names, and mark who
+is acting. Names and initiative moved to the tooltip, the acting creature is
+drawn at 48px against 36px with an ember border, and everything else is dimmed.
+
+Narrower entries mean more fit before the overflow counter is needed, which
+suits a horde. A creature with no uploaded art still shows its initial - the
+app-wide placeholder - since something has to occupy the square.
+
+---
+
 ## The turn bar overflows, and the flake is caught — 2026-08-19
 
 **Creatures past the edge are hidden and counted** rather than sliced in half.
