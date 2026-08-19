@@ -25,6 +25,28 @@ audio system rather than extending it.
 
 ---
 
+## A stamped monster can be swung — 2026-08-18
+
+`from-monster` created the actor and nothing else. A goblin arrived with an
+empty attack table, so the DM rolled its scimitar by hand off a stat block the
+app would not show them — and after the previous commit, players could read
+that block while the DM still could not use it.
+
+`itemsFromMonster` stamps actions as weapons, and traits, Multiattack and
+legendary actions as features. The numbers are **copied, not recomputed**: a
+monster's `+4` includes proficiency its stat line never states, so the item
+cancels the ability modifier and proficiency the dice engine would add and
+carries the published figure in `attackBonus`. Verified against the real
+bestiary: goblin Scimitar `+4 / 1d6+2 / 5 ft`, Shortbow `+4 / 80/320 ft`,
+dragon Bite `+14 / 2d10+8 / 10 ft`, Claw 5 ft, Tail 15 ft.
+
+Melee reach is filed as `ranged` rather than `touch`, because `reachOf` clamps
+touch to 5 ft and would have halved the dragon's bite. Save-based actions stay
+features on purpose: their DC is published, and `saveProfileFor` would recompute
+it from the NPC's sheet and be confidently wrong.
+
+---
+
 ## The player's side of the table — 2026-08-18
 
 **Only a DM creates campaign content.** `POST /api/actors` took
@@ -56,8 +78,8 @@ fourth time in this codebase — every field optional, no guard, so a body of
 `{}` reached `set({})` and threw. And `token:create` was not persisting
 `statsHidden`, found only because a test asserted the override worked.
 
-**Still open:** a monster stamped from the bestiary gets no items, so it has no
-attacks — the DM cannot swing a goblin from its sheet. Older than this work.
+~~**Still open:** a monster stamped from the bestiary gets no items, so it has
+no attacks.~~ **Done** — see below.
 
 ---
 

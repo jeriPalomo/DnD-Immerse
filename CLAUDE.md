@@ -185,6 +185,27 @@ not land until an unrelated event happened to push a full scene state.
 **AoE outlines and target lists come from the same geometry.** `templateCovers`
 decides both what is drawn and who is caught, so they cannot disagree.
 
+**A stamped monster's numbers are copied, not recomputed.** `from-monster` used
+to create the actor and nothing else, so a goblin arrived with an empty attack
+table and the DM rolled its scimitar by hand off a stat block the app would not
+show them. `itemsFromMonster` now stamps its actions as items — but a monster's
+`+4 to hit` includes proficiency its stat line never states, so it is not
+derivable from the sheet. `attackExpression` adds the actor's ability modifier
+and proficiency, so the item cancels both: proficiency off, ability STR, and
+`attackBonus` carrying the remainder. The same trick on `damageBonus` lets the
+published `damage_dice` — which already includes its flat bonus, `1d6+2` —
+stand exactly as written, and a critical still doubles only the dice. Melee
+reach is filed as `ranged`, never `touch`, because `reachOf` clamps touch to
+5 ft and would quietly halve an Adult Red Dragon's bite.
+
+**An action the SRD did not publish numbers for becomes a feature, not an
+attack.** Multiattack has no attack bonus, and a breath weapon has a *published*
+DC that `saveProfileFor` would recompute from the NPC's own sheet — offering
+that button means comparing against a confidently wrong number. Both are
+features carrying their full prose, so the DM reads "DC 21 Dexterity" and calls
+it. That is the old behaviour, which is merely manual; the alternative is the
+app being sure and wrong.
+
 **Bestiary art is compendium content, not an upload.** The SRD records carry a
 host-relative `image` for all 337 monsters, and it sat unread in the `data`
 blob for the life of the project — no column, no download, no `<img>` anywhere

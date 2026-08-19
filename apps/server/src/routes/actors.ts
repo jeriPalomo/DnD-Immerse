@@ -12,6 +12,7 @@ import {
   hitPointsGained,
   ownershipLevelSchema,
   parseHitDicePool,
+  parseItemSystem,
 } from '@dnd/shared';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
@@ -31,6 +32,7 @@ import { getBulkActorAccess, requireActorRead, requireActorWrite } from '../lib/
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
 import { syncLinkedTokens } from '../lib/linkedTokens.js';
+import { itemsFromMonster } from '../lib/monsterItems.js';
 import { storeImage } from '../lib/uploads.js';
 import { deleteOrphanedUploads } from '../lib/orphans.js';
 import type { ActorInput } from '@dnd/shared';
@@ -593,6 +595,28 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
 
     await db.insert(actors).values(actor);
     await db.insert(actorCampaigns).values({ actorId: actor.id, campaignId, assignedAt: Date.now() });
+
+    // Its attacks, traits and legendary actions. Without these the NPC arrived
+    // with an empty attack table and the DM rolled a goblin's scimitar by hand
+    // off a stat block the app would not show them.
+    const stamped = itemsFromMonster(monster.data as Record<string, unknown>, monster.str);
+    if (stamped.length > 0) {
+      await db.insert(items).values(
+        stamped.map((entry, index) => ({
+          id: newId(),
+          ownerActorId: actor.id,
+          campaignId: null,
+          type: entry.type,
+          name: entry.name,
+          imageUrl: null,
+          // Validated like every other item write, so a malformed action in the
+          // compendium fails here rather than at the first attack roll.
+          system: parseItemSystem(entry.type, entry.system),
+          sortOrder: index,
+          createdAt: Date.now(),
+        })),
+      );
+    }
 
     return { actor };
   });
