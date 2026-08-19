@@ -376,6 +376,15 @@ constants exist because `door: 2` sat as a bare integer described only in a
 comment, and went unread long enough that secret doors were being drawn, sent
 and clicked like any other.
 
+**Blocked ground stops you crossing it, not only standing on it.** The commit
+check tested the destination footprint alone, so a player could drag clean over
+a chasm and land on the far side - while the movement overlay, which is a flood
+fill, had already refused to route through it. The two disagreed, and the
+overlay was right. `pathBlocked` samples the segment at quarter-square steps,
+the same approximation walls make by testing centre to centre. **The square the
+creature starts on is skipped**: a DM may place a token on blocked ground or
+paint under one already standing there, and neither should strand it.
+
 **Painted ground is a map of the dungeon, and never leaves the DM room.** A
 pillar is four wall segments and drawing it that way is fine; a lake or a
 cave's ragged edge is not. `scene_terrain` holds two bitmaps per scene —

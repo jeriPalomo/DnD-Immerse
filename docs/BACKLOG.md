@@ -25,6 +25,25 @@ audio system rather than extending it.
 
 ---
 
+## Blocked ground stopped standing, not crossing — 2026-08-19
+
+Found while explaining the terrain tools rather than by a failure: the commit
+check tested only where a token landed, so a player could drag straight over a
+painted chasm and finish on clear ground the far side. Walls have always been
+tested as a crossing, and the movement overlay - a flood fill - already refused
+to route through blocked ground, so the overlay and the server disagreed about
+the same map.
+
+`pathBlocked` samples the line at quarter-square steps, fine enough to catch a
+single blocked square across a thirty-square drag. The starting square is
+skipped so a token the DM placed on a chasm, or one painted under, can still
+walk out.
+
+Verified live: a full-height band painted at x=4, a drag from (1,1) to x=7
+refused with the token still at (1,1), and an ordinary move to (2,2) unaffected.
+
+---
+
 ## Painted ground — 2026-08-19
 
 Raised while thinking about exploration out of combat. Two of the three worries

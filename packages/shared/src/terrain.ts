@@ -120,6 +120,50 @@ function clearAt(terrain: TerrainMap, x: number, y: number): void {
   }
 }
 
+/**
+ * Whether the straight line from one point to another crosses blocked ground.
+ *
+ * The destination check alone was not enough: it stopped a player *standing* on
+ * a chasm but not dragging clean across it in one motion and landing on the far
+ * side. Walls have always been tested as a crossing, and painted ground is the
+ * same promise - the movement overlay already refuses to route through it, so
+ * without this the overlay said one thing and the server allowed another.
+ *
+ * Sampled along the segment rather than traced as a supercover line: the step
+ * is a quarter of a square, far finer than the one-square obstacles it has to
+ * catch, and it is the same approximation walls make by testing centre to
+ * centre.
+ *
+ * The square the creature starts on is skipped. A DM may place a token on
+ * blocked ground deliberately, or paint under one that is already standing
+ * there, and neither should leave it unable to walk out.
+ */
+export function pathBlocked(
+  terrain: TerrainMap | null | undefined,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): boolean {
+  if (!terrain) return false;
+
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance < 1e-9) return false;
+
+  const origin = `${Math.floor(from.x)}:${Math.floor(from.y)}`;
+  const steps = Math.max(1, Math.ceil(distance / 0.25));
+
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const x = Math.floor(from.x + dx * t);
+    const y = Math.floor(from.y + dy * t);
+    if (`${x}:${y}` === origin) continue;
+    if (isBlockedAt(terrain, x, y)) return true;
+  }
+
+  return false;
+}
+
 export function encodeTerrain(terrain: TerrainMap): { blockedBitmap: string; difficultBitmap: string } {
   return {
     blockedBitmap: encodeFog(terrain.blocked),

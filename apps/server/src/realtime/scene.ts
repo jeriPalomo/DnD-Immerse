@@ -20,6 +20,7 @@ import {
   nextTokenName,
   paintTerrain,
   paintedCells,
+  pathBlocked,
   revealAll,
   terrainForGrid,
   terrainMatchesGrid,
@@ -871,7 +872,15 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       const from = tokenCenter(token);
       const to = tokenCenter({ x: snapped.x, y: snapped.y, w, h });
 
-      if (scene && footprintBlocked(await terrainOf(scene), snapped.x, snapped.y, w, h)) {
+      // Painted ground stops you standing on it AND crossing it. Testing only
+      // the destination let a player drag clean over a chasm and land on the
+      // far side - and the movement overlay, which is a flood fill, had already
+      // refused to route through it, so the two disagreed.
+      const ground = scene ? await terrainOf(scene) : null;
+      if (
+        ground &&
+        (footprintBlocked(ground, snapped.x, snapped.y, w, h) || pathBlocked(ground, from, to))
+      ) {
         socket.emit('error', { message: 'There is no footing there' });
         await broadcastToken(io, ctx.campaignId, token);
         return;
