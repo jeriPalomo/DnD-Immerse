@@ -9,7 +9,7 @@ import {
   type VisionWall,
 } from './vision.js';
 import { pointInPolygon } from './grid.js';
-import { createFog, decodeFog, encodeFog, isExplored, markVisible } from './fog.js';
+import { createFog, decodeFog, encodeFog, fogForGrid, isExplored, markExplored, markVisible } from './fog.js';
 
 function wall(x1: number, y1: number, x2: number, y2: number, over: Partial<VisionWall> = {}): VisionWall {
   return { x1, y1, x2, y2, blocksSight: 1, blocksMovement: 1, door: 0, doorState: 0, ...over };
@@ -267,5 +267,46 @@ describe('sightRadiusFeet', () => {
     // blinded player from opening any fog.
     const radius = sightRadiusFeet({ ...dwarf, blinded: true }, true, 60);
     expect(combinedVisibility([{ point: { x: 5, y: 5 }, radius }], [])).toEqual([]);
+  });
+});
+
+
+describe('fog is only valid at the grid it was written for', () => {
+  /** A player who has explored the 3x2 room in the top-left corner. */
+  function rememberedRoom(width: number) {
+    const fog = createFog(width, 10);
+    for (const [x, y] of [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1]]) markExplored(fog, x, y);
+    return fog;
+  }
+
+  it('keeps the memory when the grid has not moved', () => {
+    const stored = encodeFog(rememberedRoom(10));
+    const fog = fogForGrid(stored, { width: 10, height: 10 }, 10, 10);
+
+    expect(isExplored(fog, 1, 1)).toBe(true);
+    expect(isExplored(fog, 5, 5)).toBe(false);
+  });
+
+  it('drops it when the grid has changed, rather than smearing it', () => {
+    // The bits are indexed y * width + x. Decoded at 12 wide, that tidy room
+    // came back as [[0,0],[1,0],[2,0],[10,0],[11,0],[0,1]] -- ground the player
+    // never walked, drawn as remembered.
+    const stored = encodeFog(rememberedRoom(10));
+
+    const smeared = decodeFog(stored, 12, 10);
+    expect(isExplored(smeared, 10, 0)).toBe(true);
+
+    const fog = fogForGrid(stored, { width: 10, height: 10 }, 12, 10);
+    expect(isExplored(fog, 10, 0)).toBe(false);
+    expect(isExplored(fog, 1, 1)).toBe(false);
+  });
+
+  it('drops it when nothing was stored about the grid at all', () => {
+    expect(isExplored(fogForGrid(encodeFog(rememberedRoom(10)), null, 10, 10), 1, 1)).toBe(false);
+  });
+
+  it('notices a change in height as well as width', () => {
+    const stored = encodeFog(rememberedRoom(10));
+    expect(isExplored(fogForGrid(stored, { width: 10, height: 10 }, 10, 14), 1, 1)).toBe(false);
   });
 });

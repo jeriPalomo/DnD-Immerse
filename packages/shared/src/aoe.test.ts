@@ -155,3 +155,37 @@ describe('templateForSpell', () => {
     expect(templateForSpell({ shape: 'sphere', size: 0 }, { x: 0, y: 0 })).toBeNull();
   });
 });
+
+describe('a footprint is sampled where the creature actually is', () => {
+  const context = { feetPerSquare: 5 };
+  /** A 10 ft circle centred on the corner where four squares meet. */
+  const circle = { shape: 'circle' as const, x: 5, y: 5, distance: 10, direction: 0, width: 0 };
+
+  it('catches a Tiny creature that a fixed half-square sample missed', () => {
+    // Tiny is half a square, so its real centre is (x+0.25, y+0.25). A fixed
+    // +0.5 tested the corner OUTSIDE its own space: 2.16 away rather than 1.87,
+    // which reads as out of a 10 ft circle when the imp is standing in it.
+    const imp = { id: 'imp', x: 6.6, y: 5, w: 0.5, h: 0.5 };
+    expect(tokensInTemplate(circle, [imp], context).map((t) => t.id)).toEqual(['imp']);
+  });
+
+  it('and spares one the same sample wrongly caught', () => {
+    // The error runs both ways: up and left of the origin, the corner sample
+    // sat 1.84 from the centre while the sprite itself is 2.19 away.
+    const sprite = { id: 'sprite', x: 3.2, y: 3.2, w: 0.5, h: 0.5 };
+    expect(tokensInTemplate(circle, [sprite], context)).toEqual([]);
+  });
+
+  it('is unchanged for the sizes that are whole squares', () => {
+    const medium = { id: 'm', x: 5, y: 5, w: 1, h: 1 };
+    const dragon = { id: 'd', x: 4, y: 4, w: 4, h: 4 };
+    expect(tokensInTemplate(circle, [medium], context).map((t) => t.id)).toEqual(['m']);
+    // A Gargantuan straddling the edge is caught by any square of its footprint.
+    expect(tokensInTemplate(circle, [dragon], context).map((t) => t.id)).toEqual(['d']);
+  });
+
+  it('does not divide by zero on a token with no size', () => {
+    const degenerate = { id: 'z', x: 5, y: 5, w: 0, h: 0 };
+    expect(() => tokensInTemplate(circle, [degenerate], context)).not.toThrow();
+  });
+});

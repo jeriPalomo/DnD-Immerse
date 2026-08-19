@@ -247,6 +247,38 @@ Each fix verified by reverting it and watching its test fail. 407 tests.
 
 ---
 
+## Grid detection, fog and AoE geometry — 2026-08-17
+
+The last unaudited surface, and the one that looked safest: pure functions with
+unit tests behind them. Two defects, both in edge cases the tests did not reach.
+
+**Fog was scrambled by any change to the grid.** The bitmap is indexed
+`y * width + x`, so it only means anything at the width it was written at.
+`fog_exploration` stores `gridWidth` and `gridHeight` with the comment "needed
+to decode the rows" — and nothing ever read them back; `decodeFog` was handed
+the scene's *current* extent instead. Recalibrating the grid or replacing the
+map therefore reinterpreted every row at a new width. Demonstrated: a tidy 3×2
+explored room comes back as `[[0,0],[1,0],[2,0],[10,0],[11,0],[0,1]]` — ground
+the player never walked, drawn as remembered. `fogForGrid` now compares and
+drops the memory, which is a walk to recover rather than an ambush to lose.
+
+**A Tiny creature was tested outside its own square.** `tokensInTemplate`
+stepped in whole squares from a token's corner, sampling at `+0.5`. Tiny is half
+a square, so that point is the far corner *outside* the creature — 2.16 units
+from a fireball's centre when the imp is standing 1.87 away. Wrong in both
+directions, and reachable: `tokenSizeFor` gives every Tiny SRD monster a 0.5
+footprint, which `from-monster` puts straight onto the token. `tokenCenter`
+already used `w / 2` correctly, which is why vision never had this.
+
+**Grid detection came back clean.** The three documented failure modes —
+harmonics, prominence as a z-score, flat profiles — are each handled, the
+indexing is right on both axes, and `size` cannot escape its bounds. Nothing to
+fix, recorded so the next pass does not re-read it.
+
+Both fixes verified by reverting them and watching five tests fail. 415 tests.
+
+---
+
 ## Hidden passages — 2026-08-15
 
 Stage 1 of interactive map objects (switches, keys, puzzles). This stage is the

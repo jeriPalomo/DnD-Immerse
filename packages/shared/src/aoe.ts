@@ -139,9 +139,23 @@ export function tokensInTemplate<T extends TemplateTarget>(
   context: TemplateContext,
 ): T[] {
   return tokens.filter((token) => {
-    for (let dy = 0; dy < Math.max(1, Math.ceil(token.h)); dy++) {
-      for (let dx = 0; dx < Math.max(1, Math.ceil(token.w)); dx++) {
-        const centre = { x: token.x + dx + 0.5, y: token.y + dy + 0.5 };
+    // Sampled across the footprint the token actually has, not in whole squares
+    // from its corner. A Tiny creature is half a square, so a fixed +0.5 tested
+    // the corner OUTSIDE its own space - which flips the answer at the edge of a
+    // fireball, and every Tiny monster in the bestiary is one.
+    const width = token.w > 0 ? token.w : 1;
+    const height = token.h > 0 ? token.h : 1;
+    const columns = Math.max(1, Math.ceil(width));
+    const rows = Math.max(1, Math.ceil(height));
+    const stepX = width / columns;
+    const stepY = height / rows;
+
+    for (let dy = 0; dy < rows; dy++) {
+      for (let dx = 0; dx < columns; dx++) {
+        const centre = {
+          x: token.x + dx * stepX + stepX / 2,
+          y: token.y + dy * stepY + stepY / 2,
+        };
         if (templateCovers(template, centre, context)) return true;
       }
     }

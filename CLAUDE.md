@@ -301,6 +301,21 @@ players; the DM can place anything anywhere.
 player, base64 in `fog_exploration`. Unioning polygons grows without bound; a
 100×100 scene is 1.25 KB and merges with a bitwise OR.
 
+**A fog bitmap only means anything at the grid it was written for.** Bits are
+indexed `y * width + x`, so decoding at another width shifts every row: a tidy
+explored room comes back smeared diagonally across the board, ground the player
+never walked drawn as remembered. `fog_exploration` stores `gridWidth` and
+`gridHeight` for exactly this check and nothing read them for a year;
+`fogForGrid` does, and drops the memory when the grid has moved. Re-exploring
+costs a walk, where trusting a scrambled bitmap costs an ambush.
+
+**A footprint is sampled across the space it occupies.** `tokensInTemplate`
+stepped in whole squares from a token's corner, which is right for every size
+except Tiny — half a square, so a fixed `+0.5` tested the corner *outside* the
+creature. Every Tiny monster in the bestiary is one, and it flips the answer at
+the edge of a fireball in both directions. `tokenCenter` already did this
+correctly with `w / 2`, which is why vision was unaffected.
+
 **Token drag never touches the database.** `token:move` streams position at
 ~30Hz and is rebroadcast without a write; `token:commit` persists once on drop
 and applies the authoritative snap. A rejected move rebroadcasts the real

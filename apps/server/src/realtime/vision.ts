@@ -1,8 +1,8 @@
 import { and, eq } from 'drizzle-orm';
 import {
   combinedVisibility,
-  decodeFog,
   encodeFog,
+  fogForGrid,
   exploredCells,
   markVisible,
   pointInAnyPolygon,
@@ -156,10 +156,27 @@ export async function computePlayerView(
     .where(and(eq(fogExploration.sceneId, scene.id), eq(fogExploration.userId, userId)))
     .limit(1);
 
-  const fog = decodeFog(existing[0]?.exploredBitmap ?? '', gridWidth, gridHeight);
+  // The bitmap is indexed `y * width + x`, so it only means anything at the
+  // width it was written at. `gridWidth`/`gridHeight` are stored for exactly
+  // this check and were never read: recalibrating the grid or replacing the map
+  // reinterpreted every row at the new width, and a tidy explored room came
+  // back smeared diagonally across the board. A changed grid is a different map
+  // anyway, so the memory is dropped rather than shown as nonsense.
+  const stored = existing[0];
+  const sameGrid = Boolean(
+    stored && stored.gridWidth === gridWidth && stored.gridHeight === gridHeight,
+  );
+  const fog = fogForGrid(
+    stored?.exploredBitmap ?? '',
+    stored ? { width: stored.gridWidth, height: stored.gridHeight } : null,
+    gridWidth,
+    gridHeight,
+  );
   const newlySeen = markVisible(fog, polygons);
 
-  if (newlySeen > 0 || existing.length === 0) {
+  // Written back when the grid has changed too, so the stale dimensions do not
+  // survive to be compared against next time.
+  if (newlySeen > 0 || existing.length === 0 || !sameGrid) {
     await db
       .insert(fogExploration)
       .values({

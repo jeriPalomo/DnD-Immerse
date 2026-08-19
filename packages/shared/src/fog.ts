@@ -98,6 +98,30 @@ export function decodeFog(encoded: string, width: number, height: number): FogBi
   return fog;
 }
 
+/**
+ * A stored bitmap, but only if it still describes this grid.
+ *
+ * The bits are indexed `y * width + x`, so a bitmap only means anything at the
+ * width it was written at. Reinterpreted at another width every row shifts, and
+ * a tidy explored room comes back smeared diagonally across the board - ground
+ * the player never walked, drawn as remembered.
+ *
+ * A recalibrated grid or a replaced map is a different map, so the memory is
+ * dropped rather than shown as nonsense. Re-exploring costs a walk; trusting a
+ * scrambled bitmap costs the DM's ambush.
+ */
+export function fogForGrid(
+  encoded: string,
+  stored: { width: number; height: number } | null | undefined,
+  width: number,
+  height: number,
+): FogBitmap {
+  if (!stored || stored.width !== width || stored.height !== height) {
+    return createFog(width, height);
+  }
+  return decodeFog(encoded, width, height);
+}
+
 /** Explored squares as [x, y] pairs, for the client to render the dim layer. */
 export function exploredCells(fog: FogBitmap): [number, number][] {
   const cells: [number, number][] = [];
