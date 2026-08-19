@@ -496,6 +496,24 @@ above it. Run is stacked rather than tabbed because the fight is the thing you
 must never lose sight of; the bulky parts collapse so it keeps the top of the
 column.
 
+**A creature that does not fit the turn bar is hidden, not clipped, and
+counted.** A dozen combatants overflow it, and a portrait sliced down the middle
+at the edge reads as a rendering fault. Fit is measured with
+`getBoundingClientRect`, never `offsetLeft` — offsets are relative to the
+nearest *positioned* ancestor, which is not the strip, so comparing them
+against its width compares two coordinate spaces and cheerfully reports that
+everything fits at any width. The "+N later" counter keeps its space whether or
+not it has anything to say: appearing and disappearing would change the strip's
+width, which changes how many portraits fit, which changes the counter — a
+measurement that argues with itself. Because the order is rotated to the
+current turn, a hidden creature slides into view as its turn approaches, which
+is the point.
+
+**A ResizeObserver on a conditionally rendered node needs a ref callback.** The
+bar renders nothing until a fight starts, so an effect with `[]` dependencies
+runs while there is no strip to observe and never attaches — the fit then
+recomputed on a turn change but not on a resize.
+
 **The turn bar is rotated, and its height is subtracted from the board's.**
 `TurnBar` starts at whoever is acting and reads left to right, so turn order is
 reading order; the creature that just acted leaves the front and everyone

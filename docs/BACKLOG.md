@@ -25,6 +25,37 @@ audio system rather than extending it.
 
 ---
 
+## The turn bar overflows, and the flake is caught — 2026-08-19
+
+**Creatures past the edge are hidden and counted** rather than sliced in half.
+Two bugs found while building it, both only visible by measuring in a browser:
+fit was computed from `offsetLeft`, which is relative to the nearest positioned
+ancestor rather than the strip, so every creature "fitted" at every width; and
+the `ResizeObserver` was attached in a mount effect, which runs before any fight
+exists and so never attached at all — the fit followed turn changes but not
+resizes. Verified across 1500 / 1200 / 1000 / 820px and back: 12 / 9 / 7 / 6
+shown, nothing spilling, no page overflow, and it recovers when widened.
+
+**The intermittent failure is identified and fixed.** Seventeen ordinary runs
+never reproduced it; six under fourteen busy cores did, on the fourth:
+
+    the DM can correct the tracker > sets the round
+    AssertionError: expected 6 to be greater than or equal to 7
+
+Not a product bug — a racy test. It emitted `initiative:update`, slept a fixed
+300ms and then read state through `tracker()`, which itself emits `turn:next`.
+Two hazards in one: socket.io does not await a listener, so the update's write
+could still be in flight, and the read advanced the turn while it was. Under
+load the round was read before the update landed.
+
+Both tests of that shape now await the `initiative:state` the handler already
+broadcasts, so the state they assert on *is* the applied change — and the round
+assertion tightened from "at least 7" to exactly 7, since nothing advances the
+turn any more. Six loaded runs of the file and five loaded runs of the whole
+suite, all green.
+
+---
+
 ## A turn bar across the top — 2026-08-19
 
 Asked for after noticing the turn order was hard to read: an Octopath-style

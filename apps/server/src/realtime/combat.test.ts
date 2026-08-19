@@ -535,24 +535,44 @@ describe('the DM can correct the tracker', () => {
     entryId = state.entries[0].id;
   });
 
+  /**
+   * Waits for the broadcast the handler itself sends, rather than sleeping and
+   * hoping.
+   *
+   * `initiative:update` ends in `broadcastEncounter`, so the state that comes
+   * back IS the applied change. Sleeping a fixed 300ms and then calling
+   * `tracker()` raced it two ways: socket.io does not await a listener, so the
+   * update's write could still be in flight, and `tracker()` reads by emitting
+   * `turn:next` - a second event that advances the turn while the first is
+   * unfinished. Under load that read the round before the update landed and
+   * the test failed with "expected 6 to be greater than or equal to 7".
+   */
+  function afterUpdate(): Promise<{ round: number; entries: { id: string; initiative: number }[] }> {
+    return new Promise((resolve) => {
+      dmSocket.once('initiative:state', (payload: { encounter: never }) => resolve(payload.encounter));
+    });
+  }
+
   it('changes a mistyped initiative', async () => {
     // 71 for 17, the classic. Before this was wired there was no way back.
+    const applied = afterUpdate();
     dmSocket.emit('initiative:update', {
       encounterId,
       entries: [{ id: entryId, initiative: 3, sortOrder: 0 }],
     } as never);
-    await new Promise((r) => setTimeout(r, 300));
 
-    const state = await tracker();
+    const state = await applied;
     expect(state.entries.find((e) => e.id === entryId)?.initiative).toBe(3);
   });
 
   it('sets the round', async () => {
+    const applied = afterUpdate();
     dmSocket.emit('initiative:update', { encounterId, round: 7 } as never);
-    await new Promise((r) => setTimeout(r, 300));
 
-    const state = (await tracker()) as unknown as { round: number };
-    expect(state.round).toBeGreaterThanOrEqual(7);
+    // Exactly 7, not "at least": nothing advances the turn now, where reading
+    // through `tracker()` used to move it on and could tip into the next round.
+    const state = await applied;
+    expect(state.round).toBe(7);
   });
 
   it('refuses a player', async () => {
