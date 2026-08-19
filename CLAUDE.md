@@ -454,6 +454,20 @@ the filter was right — but a query that returns other people's rows and trusts
 the next ten lines to drop them is one edit away from being the leak, and it
 grows with the whole database rather than the request.
 
+**A player reads their own sheet without leaving the table.** `MySheetDrawer`
+is read-only on purpose: editing mid-combat is what the sheet page is for, and
+a drawer that can write hit points is one that can lose an edit when a damage
+roll arrives over the top of it. Every panel in it is the one the sheet already
+uses with `editable` off, so the two cannot describe the same spell
+differently. It has a visible button as well as the `C` key — the lesson of the
+shortcut panel, which nobody found while it was a keystroke only.
+
+**An NPC's attack rows print no ability chip.** The chip tells a player which
+score drives a weapon, which is true for a character and a lie for a stamped
+monster: a goblin's shortbow reads STR only because that is what the copied
+numbers cancel against. Suppressed on `actor.type === 'npc'` rather than
+printing something that looks like a bug.
+
 **A socket handler must never take an id on trust.** Room membership says which
 campaigns you are in; it does not say which one an id came from, and
 `context()` reports whichever campaign was joined first. Every handler that

@@ -13,6 +13,7 @@ import { api } from '../lib/api.js';
 import { useTable } from '../store/table.js';
 import { useAuth } from '../store/auth.js';
 import { ErrorBoundary } from '../components/ErrorBoundary.js';
+import { MySheetDrawer } from '../components/board/MySheetDrawer.js';
 import { ShortcutHelp } from '../components/board/ShortcutHelp.js';
 import { HandoutReveal } from '../components/board/HandoutReveal.js';
 import { Toast } from '../components/board/Toast.js';
@@ -35,6 +36,7 @@ export default function CampaignTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [showSheet, setShowSheet] = useState(false);
   const [focusBoard, setFocusBoard] = useState(false);
 
   useEffect(() => {
@@ -125,6 +127,9 @@ export default function CampaignTable() {
       if (campaign?.role === 'dm' && state.encounter) state.nextTurn();
     },
     '?': () => setShowHelp(true),
+    // Your own sheet, without leaving the board. Nothing to open if you have
+    // no character here - the DM runs NPCs from their own panels.
+    c: () => setShowSheet((open) => !open),
     '\\': () => setFocusBoard((on) => !on),
     // Explicitly requested, so Ctrl+F and Ctrl+R still reach the browser.
     'ctrl+z': (e) => {
@@ -164,11 +169,21 @@ export default function CampaignTable() {
 
         {/* The shortcut panel was reachable only by pressing "?", which nobody
             discovers. Same handler, given something to click. */}
+        {myActor && (
+          <button
+            onClick={() => setShowSheet(true)}
+            title={`Your sheet: ${myActor.name} (C)`}
+            className="ml-auto rounded border border-ink-700 px-2 py-0.5 text-xs text-ink-400 transition-colors hover:border-ink-500 hover:text-ink-100"
+          >
+            My sheet
+          </button>
+        )}
+
         <button
           onClick={() => setShowHelp(true)}
           title="Keyboard shortcuts (?)"
           aria-label="Keyboard shortcuts"
-          className="ml-auto size-6 shrink-0 rounded-full border border-ink-700 text-xs text-ink-500 transition-colors hover:border-ink-500 hover:text-ink-200"
+          className="size-6 shrink-0 rounded-full border border-ink-700 text-xs text-ink-500 transition-colors hover:border-ink-500 hover:text-ink-200"
         >
           ?
         </button>
@@ -310,6 +325,9 @@ export default function CampaignTable() {
       </div>
 
       {showHelp && <ShortcutHelp onClose={() => setShowHelp(false)} />}
+      {showSheet && myActor && (
+        <MySheetDrawer actor={myActor} items={myItems} onClose={() => setShowSheet(false)} />
+      )}
 
       <Toast />
 

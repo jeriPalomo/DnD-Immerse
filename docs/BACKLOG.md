@@ -25,6 +25,35 @@ audio system rather than extending it.
 
 ---
 
+## Permissions sweep, and the player's own sheet — 2026-08-19
+
+**Swept every REST route against its guard.** All six route files carry a
+global `requireAuth`; every id-taking route resolves its owner before acting —
+items through `requireActorWrite` on the owning actor, notes and journal pages
+through the scene or entry's campaign, token art through membership plus
+ownership. `requireActorRead` demands observer or better, so a `limited` viewer
+gets a 404 rather than a redacted sheet. Nothing else was over-sharing.
+
+**One real gap: `token:create` took `actorId` on trust.** Every other
+id-taking socket handler resolves through `tokenIn`/`wallIn`/`templateIn`; this
+one looked the actor up by id alone, so a DM could stamp a token from an actor
+in somebody else's game and copy its name, portrait, AC and hit points onto
+their board. Not practically exploitable — the id is an opaque nanoid and you
+must already be a DM — but it is the documented invariant, and closing it costs
+one join. Scoped to actors assigned here *or* authored here, because the app
+writes both signals and the first alone broke five tests that create an NPC
+without assigning it.
+
+**A player can read their own sheet at the table** (`C`, or the "My sheet"
+button): abilities, AC, HP, attacks, spells by level and inventory, read-only,
+reusing the sheet's own panels. Checking a spell mid-combat used to mean
+leaving the board and losing the map, the chat and your scroll position.
+
+**NPC attack rows no longer print an ability chip**, which read STR on a
+goblin's shortbow because that is what the copied numbers cancel against.
+
+---
+
 ## The stat block route leaked party sheets — 2026-08-19
 
 Found while auditing for what to fix next, and self-inflicted: the stat block

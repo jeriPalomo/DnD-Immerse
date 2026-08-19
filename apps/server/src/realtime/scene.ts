@@ -44,6 +44,7 @@ import {
   type EffectsView,
 } from '../lib/effects.js';
 import {
+  actorCampaigns,
   actors,
   campaigns,
   drawings as drawingsTable,
@@ -737,7 +738,37 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     // Stamp defaults from the actor's prototype token, so dropping an Ancient
     // Red Dragon lands a 4x4 unlinked token without the DM configuring it.
     if (input.actorId) {
-      const found = await db.select().from(actors).where(eq(actors.id, input.actorId)).limit(1);
+      // Scoped through `actorCampaigns` rather than taken on trust, the same
+      // rule `tokenIn` and `wallIn` follow. A DM stamping a token could
+      // otherwise name an actor id from somebody else's game and copy its
+      // name, portrait, AC and hit points onto their own board. The Tokens
+      // panel only ever offers actors assigned here, so nothing legitimate
+      // changes.
+      const assigned = await db
+        .select({ id: actorCampaigns.actorId })
+        .from(actorCampaigns)
+        .where(
+          and(
+            eq(actorCampaigns.actorId, input.actorId),
+            eq(actorCampaigns.campaignId, ctx.campaignId),
+          ),
+        )
+        .limit(1);
+
+      // Two ways to belong here, because the app writes both: assigned through
+      // `actorCampaigns`, or authored inside this campaign (`actors.campaignId`,
+      // which `from-monster` and the NPC form set). Either is a real signal;
+      // neither admits an actor from somebody else's game.
+      const found = await db
+        .select()
+        .from(actors)
+        .where(
+          and(
+            eq(actors.id, input.actorId),
+            assigned.length > 0 ? undefined : eq(actors.campaignId, ctx.campaignId),
+          ),
+        )
+        .limit(1);
       const actor = found[0];
       if (actor) {
         const proto = actor.prototypeToken;

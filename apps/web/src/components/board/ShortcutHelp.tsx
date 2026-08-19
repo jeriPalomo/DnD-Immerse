@@ -8,6 +8,7 @@ const SHORTCUTS: [string, string][] = [
   ['F', 'Fit the map to the window'],
   ['\\', 'Focus the board, hiding the side panels'],
   ['Ctrl+Z', 'Undo the last delete or move'],
+  ['C', 'Your own sheet, without leaving the board'],
   ['?', 'This list'],
 ];
 

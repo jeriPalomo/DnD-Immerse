@@ -166,6 +166,12 @@ function DeathSaves({
  * Attack rows built from weapon Items. The to-hit and damage numbers are
  * computed from the actor's abilities and proficiency, so re-rolling stats or
  * levelling up updates every weapon at once.
+ *
+ * An NPC stamped from the bestiary is the exception: its numbers are copied
+ * from the published block, and the ability keying them is an implementation
+ * detail of that copy - a goblin's shortbow reads STR only because that is
+ * what the offsets cancel against. The chip is suppressed there rather than
+ * printing something that looks like a mistake.
  */
 export function AttackList({ actor, weapons }: { actor: Actor; weapons: Item[] }) {
   const scores = { str: actor.str, dex: actor.dex, con: actor.con, int: actor.int, wis: actor.wis, cha: actor.cha };
@@ -202,7 +208,9 @@ export function AttackList({ actor, weapons }: { actor: Actor; weapons: Item[] }
             <tr key={weapon.id} className="text-ink-200">
               <td className="py-1.5">
                 {weapon.name}
-                <span className="ml-1.5 text-[10px] text-ink-500 uppercase">{ability}</span>
+                {actor.type !== 'npc' && (
+                  <span className="ml-1.5 text-[10px] text-ink-500 uppercase">{ability}</span>
+                )}
                 {/* 2024 weapon mastery; blank under 2014, where it does not exist. */}
                 {s.mastery && (
                   <span
