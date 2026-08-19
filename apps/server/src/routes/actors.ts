@@ -543,7 +543,10 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
       // Monsters are unlinked so each copy tracks its own HP, and sized from
       // the stat block: a Gargantuan dragon lands as a 4x4 token.
       prototypeToken: {
-        imageUrl: monster.imageUrl,
+        // No `imageUrl` here on purpose: `token:create` stamps board art from
+        // `actor.portraitUrl`, and nothing has ever read the prototype's own
+        // image. Setting it would be a value with no reader, and one that a
+        // later portrait upload could never override.
         w: monster.tokenSize,
         h: monster.tokenSize,
         actorLinked: false,

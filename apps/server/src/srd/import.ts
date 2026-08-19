@@ -82,6 +82,12 @@ async function load(file: string, ruleset: '2014' | '2024' = '2014', optional = 
  * because a third-party host was down leaves no compendium at all.
  */
 async function cacheMonsterImage(index: string, source: string): Promise<string | null> {
+  // `index` is upstream data, and it is about to become a path segment. The
+  // dataset only ever publishes slugs, but a `..` in one would climb out of
+  // data/srd/images/ and the claim in app.ts that these filenames are safe
+  // would stop being true.
+  if (!/^[a-z0-9-]+$/i.test(index)) return null;
+
   const filename = `${index}.webp`;
   const target = path.join(paths.srdImages, filename);
   const url = `/srd-images/${filename}`;
@@ -94,7 +100,12 @@ async function cacheMonsterImage(index: string, source: string): Promise<string 
   }
 
   try {
-    const response = await fetch(source.startsWith('http') ? source : `${IMAGE_HOST}${source}`);
+    const response = await fetch(source.startsWith('http') ? source : `${IMAGE_HOST}${source}`, {
+      // Without this a single stalled connection hangs its worker forever, and
+      // the Promise.all below never settles: the import would sit there having
+      // deleted nothing and written nothing, which is worse than no art.
+      signal: AbortSignal.timeout(20_000),
+    });
     if (!response.ok) return null;
 
     const encoded = await sharp(Buffer.from(await response.arrayBuffer()))
@@ -102,7 +113,14 @@ async function cacheMonsterImage(index: string, source: string): Promise<string 
       .webp({ quality: 82 })
       .toBuffer();
 
-    await fs.writeFile(target, encoded);
+    // Written to a temporary name and renamed, because rename is atomic and
+    // writeFile is not. An import killed mid-write would otherwise leave a
+    // truncated file that the `fs.access` check above accepts forever - a
+    // broken image no re-run can repair.
+    const staging = `${target}.${process.pid}.tmp`;
+    await fs.writeFile(staging, encoded);
+    await fs.rename(staging, target);
+
     return url;
   } catch {
     return null;
@@ -114,7 +132,17 @@ async function cacheMonsterImage(index: string, source: string): Promise<string 
  * Returns index -> local URL for those that succeeded.
  */
 async function cacheMonsterImages(monsters: Json[]): Promise<Map<string, string>> {
-  const pending = monsters.filter((m) => typeof m.image === 'string' && m.image);
+  // Deduped by index, not by row: the three published 2024 monsters carry the
+  // same index - and the same picture - as their 2014 counterparts, so without
+  // this two workers race to write one path, and the same file is fetched
+  // twice from somebody else's server.
+  const pending = [
+    ...new Map(
+      monsters
+        .filter((m) => typeof m.image === 'string' && m.image)
+        .map((m) => [m.index as string, m]),
+    ).values(),
+  ];
   const resolved = new Map<string, string>();
   if (pending.length === 0) return resolved;
 

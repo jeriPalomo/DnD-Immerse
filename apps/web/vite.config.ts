@@ -13,6 +13,9 @@ export default defineConfig({
     proxy: {
       '/api': { target: SERVER, changeOrigin: true },
       '/uploads': { target: SERVER, changeOrigin: true },
+      // Bestiary art. Without this every monster thumbnail 404s under
+      // `npm run dev`, which is the command the README tells you to develop on.
+      '/srd-images': { target: SERVER, changeOrigin: true },
       '/socket.io': { target: SERVER, ws: true, changeOrigin: true },
     },
   },
