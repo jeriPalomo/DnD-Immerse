@@ -18,6 +18,7 @@ import { HandoutReveal } from '../components/board/HandoutReveal.js';
 import { Toast } from '../components/board/Toast.js';
 import { SidebarTabs } from '../components/board/SidebarTabs.js';
 import { RunPanel } from '../components/board/RunPanel.js';
+import { TurnBar, TURN_BAR_HEIGHT_REM } from '../components/board/TurnBar.js';
 import { useHotkeys } from '../lib/useHotkeys.js';
 import type { Actor, Item } from '../store/sheet.js';
 
@@ -224,6 +225,14 @@ export default function CampaignTable() {
   /** The origin for range checks: the creature actually swinging. */
   const actingToken = isDM ? selected : (myToken ?? selected);
 
+  /**
+   * The board's height budget. 8rem is the header; the turn bar takes its own
+   * space above the grid while a fight is running, and without subtracting it a
+   * tall map runs past the bottom of the window - the same class of bug as the
+   * 5:1 map that once covered the sidebar.
+   */
+  const boardOffsetRem = 8 + (table.encounter?.isActive ? TURN_BAR_HEIGHT_REM + 0.75 : 0);
+
 
   return (
     <div className="mx-auto max-w-[110rem] px-4 py-4">
@@ -256,6 +265,8 @@ export default function CampaignTable() {
         </button>
       </div>
 
+      <TurnBar />
+
       <div
         className={
           focusBoard
@@ -280,9 +291,9 @@ export default function CampaignTable() {
             scene?.mapWidth && scene.mapHeight
               ? {
                   aspectRatio: `${scene.mapWidth} / ${scene.mapHeight}`,
-                  maxHeight: 'calc(100vh - 8rem)',
+                  maxHeight: `calc(100vh - ${boardOffsetRem}rem)`,
                 }
-              : { height: 'calc(100vh - 8rem)', minHeight: '420px' }
+              : { height: `calc(100vh - ${boardOffsetRem}rem)`, minHeight: '420px' }
           }
         >
           <ErrorBoundary label="The battle map">

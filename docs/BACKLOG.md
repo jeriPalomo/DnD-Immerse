@@ -25,6 +25,31 @@ audio system rather than extending it.
 
 ---
 
+## A turn bar across the top — 2026-08-19
+
+Asked for after noticing the turn order was hard to read: an Octopath-style
+strip that starts at the current creature and moves as turns are taken.
+
+Nothing new on the wire - initiative already sorted with the handbook's
+Dexterity tiebreaker, `advanceTurn` already wrapped rounds, and entries already
+carried portrait, name and initiative. What was missing was the shape: a
+vertical list in a 320px column answers "who is next" only if you read it.
+
+`TurnBar` rotates the order to start at the acting creature, marks where the
+next round begins, and animates with FLIP so the strip visibly moves rather than
+re-highlighting. The wrapping creature cross-fades rather than sliding the whole
+width of the screen. Reduced-motion cuts straight to the new state.
+
+**The board's height budget had to change with it.** `calc(100vh - 8rem)` is
+the sizing this file already warns about - a 5:1 map once overflowed and covered
+the sidebar - so `TURN_BAR_HEIGHT_REM` is exported and subtracted while the bar
+is up. Verified: no horizontal scroll, sidebar intact.
+
+Shown to players too, since turn order is public at a real table, and carrying
+no hit points at all keeps the redaction question from arising.
+
+---
+
 ## Three DM quality-of-life items — 2026-08-19
 
 **The DM was playing as a random monster.** `myActor` picked the first actor

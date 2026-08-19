@@ -496,6 +496,21 @@ above it. Run is stacked rather than tabbed because the fight is the thing you
 must never lose sight of; the bulky parts collapse so it keeps the top of the
 column.
 
+**The turn bar is rotated, and its height is subtracted from the board's.**
+`TurnBar` starts at whoever is acting and reads left to right, so turn order is
+reading order; the creature that just acted leaves the front and everyone
+shuffles up. Movement is FLIP - measure after the reorder, put each node back
+with a transform, release it next frame - which needs `key={entry.id}` to keep
+React moving the same DOM nodes rather than rebuilding them. The wrapping
+creature *fades* instead of sliding, because a portrait travelling the full
+width of the screen reads as a glitch rather than a turn. `prefers-reduced-motion`
+skips it entirely. It draws no hit points at all: names and initiative are
+already public in the tracker, while a health bar would have needed one shape
+for the DM and another for players. **`TURN_BAR_HEIGHT_REM` is exported because
+the board's `calc(100vh - 8rem)` has to subtract it while a fight is running** -
+that sizing is the load-bearing kind, and a bar above the grid otherwise pushes
+a tall map past the bottom of the window.
+
 **`TurnPrompt` folds conditions with `deriveToken`, the same function the
 server uses.** A 5e turn is move, one action, usually a bonus action — and
 everything hanging off the creature complicates it: an incapacitated creature
