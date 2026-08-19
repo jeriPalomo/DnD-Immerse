@@ -454,6 +454,29 @@ the filter was right — but a query that returns other people's rows and trusts
 the next ten lines to drop them is one edit away from being the leak, and it
 grows with the whole database rather than the request.
 
+**The DM's panel is split by when a tool is used, not by what it is.** Building
+a map, calibrating a grid and drawing walls are done alone between sessions;
+initiative, damage and dropping a monster in are done with four people
+watching. They were interleaved across Combat / Scene / Journal, and placing a
+creature sat two clicks inside the prep panel — so adding a goblin mid-fight
+meant leaving the initiative order and finding the way back, several times a
+session. `RunPanel` now stacks everything used during play, `SceneManager` is
+prep only, and the two sit behind one switch that renders **only for the DM**:
+a player has no prep tools, so they get the run panel directly with no chrome
+above it. Run is stacked rather than tabbed because the fight is the thing you
+must never lose sight of; the bulky parts collapse so it keeps the top of the
+column.
+
+**`TurnPrompt` folds conditions with `deriveToken`, the same function the
+server uses.** A 5e turn is move, one action, usually a bonus action — and
+everything hanging off the creature complicates it: an incapacitated creature
+acts not at all, a concentrating one loses its spell to damage. The speed shown
+must be the speed the server will allow, which is why it derives rather than
+reads: those two drifted once already, and a paralyzed token read Speed 0 in
+the HUD while the server offered it a full 30 ft. Its attack list comes from the
+stat block route, which is already permission-checked and already knows how to
+answer for a stamped monster, a hand-written NPC or a bare token.
+
 **A player reads their own sheet without leaving the table.** `MySheetDrawer`
 is read-only on purpose: editing mid-combat is what the sheet page is for, and
 a drawer that can write hit points is one that can lose an edit when a damage

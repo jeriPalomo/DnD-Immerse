@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../ui.js';
 import { api } from '../../lib/api.js';
-import { MonsterBrowser } from './MonsterBrowser.js';
 import { useTable } from '../../store/table.js';
 import type { WireScene } from '@dnd/shared';
 
@@ -15,16 +14,13 @@ interface SceneRow extends WireScene {
   hidden: boolean;
 }
 
-interface PartyActor {
-  id: string;
-  name: string;
-  type: string;
-  portraitUrl: string | null;
-}
-
 /**
- * DM-only scene controls: create scenes, upload maps, calibrate the grid, and
- * drop tokens from the campaign's actors.
+ * DM-only scene prep: create scenes, upload maps, calibrate the grid, and set
+ * up vision and walls.
+ *
+ * Placing creatures used to live here as a fourth sub-tab, which put a
+ * mid-combat action two clicks inside a panel you otherwise only open when
+ * nobody is at the table. It is `CreaturePanel` now.
  */
 interface GridGuess {
   size: number;
@@ -34,12 +30,11 @@ interface GridGuess {
 }
 
 export function SceneManager({ campaignId }: { campaignId: string }) {
-  const { scene, activateScene, createToken, wallTool, setWallTool, walls, eraseDrawing } = useTable();
+  const { scene, activateScene, wallTool, setWallTool, walls, eraseDrawing } = useTable();
   const [scenes, setScenes] = useState<SceneRow[]>([]);
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
-  const [actors, setActors] = useState<PartyActor[]>([]);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<'scenes' | 'tokens' | 'grid' | 'vision'>('scenes');
+  const [tab, setTab] = useState<'scenes' | 'grid' | 'vision'>('scenes');
   const [localDarkness, setLocalDarkness] = useState(0);
   const [guess, setGuess] = useState<GridGuess | null>(null);
   const [browsing, setBrowsing] = useState(false);
@@ -76,15 +71,11 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
   }, [scene?.id]);
 
   const load = useCallback(async () => {
-    const [sceneRes, actorRes] = await Promise.all([
-      api.get<{ scenes: SceneRow[]; activeSceneId: string | null }>(
-        `/api/campaigns/${campaignId}/scenes`,
-      ),
-      api.get<{ actors: PartyActor[] }>(`/api/campaigns/${campaignId}/actors`),
-    ]);
+    const sceneRes = await api.get<{ scenes: SceneRow[]; activeSceneId: string | null }>(
+      `/api/campaigns/${campaignId}/scenes`,
+    );
     setScenes(sceneRes.scenes);
     setActiveSceneId(sceneRes.activeSceneId);
-    setActors(actorRes.actors);
   }, [campaignId]);
 
   useEffect(() => {
@@ -158,32 +149,6 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
     await load();
   }
 
-  /**
-   * An NPC of your own, as opposed to one lifted from the bestiary.
-   *
-   * The client never sent `type: 'npc'` before, so the only NPCs that could
-   * exist came from the bestiary and were hostile by construction - there was
-   * no way to put a friendly innkeeper or a hired sword on the board at all.
-   * These start neutral; rename and re-flag from the token HUD.
-   */
-  async function createNpc() {
-    setBusy(true);
-    try {
-      const { actor } = await api.post<{ actor: { id: string } }>('/api/actors', {
-        name: 'New NPC',
-        type: 'npc',
-        // Named here as well as in the assignment below: the server authorises
-        // NPC creation against this campaign's DM, and cannot do that for an
-        // actor with no campaign at all.
-        campaignId,
-      });
-      await api.post(`/api/actors/${actor.id}/campaigns/${campaignId}`);
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function patchScene(sceneId: string, fields: Record<string, unknown>) {
     await api.patch(`/api/scenes/${sceneId}`, fields);
     await load();
@@ -196,7 +161,7 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
   return (
     <div className="p-2">
       <div className="mb-3 flex gap-1">
-        {(['scenes', 'tokens', 'grid', 'vision'] as const).map((key) => (
+        {(['scenes', 'grid', 'vision'] as const).map((key) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -455,40 +420,6 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
         </div>
       )}
 
-      {tab === 'tokens' && (
-        <div>
-          <div className="mb-2 flex justify-end gap-1.5">
-            <Button size="sm" variant="ghost" loading={busy} onClick={() => void createNpc()}>
-              New NPC
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => setBrowsing(true)}>
-              Add from bestiary
-            </Button>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {actors.map((actor) => (
-              <button
-                key={actor.id}
-                disabled={!scene}
-                onClick={() =>
-                  createToken({ sceneId: scene!.id, actorId: actor.id, x: 1, y: 1, name: actor.name })
-                }
-                className="rounded-lg border border-ink-700 bg-ink-850 px-2 py-1 text-xs text-ink-200 transition-colors hover:border-ember-500 disabled:opacity-40"
-              >
-                {actor.name}
-                {actor.type === 'npc' && <span className="ml-1 text-ink-600">NPC</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {browsing && (
-        <MonsterBrowser
-          campaignId={campaignId}
-          onAdded={() => void load()}
-          onClose={() => setBrowsing(false)}
-        />
-      )}
     </div>
   );
 }

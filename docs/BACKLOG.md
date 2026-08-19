@@ -25,6 +25,36 @@ audio system rather than extending it.
 
 ---
 
+## The DM's panel, reorganised — 2026-08-19
+
+Raised by the observation that Combat / Scene / Journal all sit side by side.
+They do, and the reason it grates is that they group by what a thing *is*
+rather than when you *use* it. Prep — maps, grids, walls, notes — happens alone
+between sessions. Running a table happens with four people waiting. Placing a
+creature was filed under prep, two clicks inside `Scene → Tokens`, so adding a
+goblin to a live fight meant leaving the initiative order and navigating back.
+
+`RunPanel` stacks the play tools; `SceneManager` keeps scenes, grid and vision
+and loses its `tokens` sub-tab to a new `CreaturePanel`. One switch, DM-only —
+a player has no prep, so they get the run panel with no switch above it rather
+than a pointless one-tab bar. Stacked rather than tabbed, because the whole
+point is that the fight never disappears; the bulky sections collapse.
+
+Two aids on top, both from data already on hand:
+
+- **`TurnPrompt`** — whose turn, how far it moves, what it can do, and what its
+  conditions forbid. Speed comes from `deriveToken` so it cannot disagree with
+  what the server will allow; attacks come from the stat block route.
+- **`EnemyHealth`** — one bar per hostile, so "how is this going" is one glance
+  rather than a dozen clicks. Filtered on `disposition`, never `ownerUserId`:
+  a friendly NPC the DM runs is not a threat, and conflating the two is how a
+  green ally ends up on a list of things trying to kill the party.
+
+Verified as both roles. A player sees no switch, no enemy list, no turn prompt,
+and enemy HP still reads `—`.
+
+---
+
 ## The intermittent test failure — 2026-08-19
 
 Chased deliberately rather than waited for. Six clean runs proved nothing, so

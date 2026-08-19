@@ -5,7 +5,6 @@ import { Alert, Badge, Card, Spinner } from '../components/ui.js';
 import { ChatPanel } from '../components/ChatPanel.js';
 import { BattleMap } from '../components/board/BattleMap.js';
 import { InitiativeTracker } from '../components/board/InitiativeTracker.js';
-import { JournalPanel } from '../components/board/JournalPanel.js';
 import { SceneManager } from '../components/board/SceneManager.js';
 import { TargetPanel } from '../components/board/TargetPanel.js';
 import { TokenHUD } from '../components/board/TokenHUD.js';
@@ -18,6 +17,7 @@ import { ShortcutHelp } from '../components/board/ShortcutHelp.js';
 import { HandoutReveal } from '../components/board/HandoutReveal.js';
 import { Toast } from '../components/board/Toast.js';
 import { SidebarTabs } from '../components/board/SidebarTabs.js';
+import { RunPanel } from '../components/board/RunPanel.js';
 import { useHotkeys } from '../lib/useHotkeys.js';
 import type { Actor, Item } from '../store/sheet.js';
 
@@ -281,25 +281,37 @@ export default function CampaignTable() {
             />
           )}
 
-          <SidebarTabs
-            tabs={[
-              { id: 'combat', label: 'Combat', node: <InitiativeTracker isDM={Boolean(isDM)} /> },
-              ...(isDM && id
-                ? [
-                    { id: 'scene', label: 'Scene', node: <SceneManager campaignId={id} /> },
-                  ]
-                : []),
-              ...(id
-                ? [
-                    {
-                      id: 'journal',
-                      label: 'Journal',
-                      node: <JournalPanel campaignId={id} isDM={Boolean(isDM)} />,
-                    },
-                  ]
-                : []),
-            ]}
-          />
+          {/*
+            Split by WHEN a tool is used, not by what it is.
+
+            Everything under Run is touched with four people watching: whose
+            turn it is, what just took damage, dropping a goblin in. Everything
+            under Prep is done alone between sessions: building a map,
+            calibrating its grid, drawing walls. Placing a creature used to sit
+            two clicks inside the prep panel, so a mid-fight addition meant
+            leaving the initiative order and finding your way back.
+
+            A player has no prep tools at all, so they get the Run panel
+            directly with no switch above it - the same three-tab column they
+            have always had.
+          */}
+          {isDM && id ? (
+            <SidebarTabs
+              tabs={[
+                { id: 'run', label: 'Run', node: <RunPanel campaignId={id} isDM /> },
+                { id: 'prep', label: 'Prep', node: <SceneManager campaignId={id} /> },
+              ]}
+            />
+          ) : id ? (
+            // No prep tools for a player, so no switch to put above them.
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-ink-700 bg-ink-900 p-1.5">
+              <ErrorBoundary label="The table">
+                <RunPanel campaignId={id} isDM={false} />
+              </ErrorBoundary>
+            </div>
+          ) : (
+            <InitiativeTracker isDM={false} />
+          )}
 
           {/* Pinned below the tabs: the party is for glancing at, not working in. */}
           <Card className="shrink-0 p-3">
