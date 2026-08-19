@@ -25,6 +25,27 @@ audio system rather than extending it.
 
 ---
 
+## Playtesting as a player, and fog the DM owns — 2026-08-19
+
+**`npm run playtest`.** The player's side of the app is the half that cannot be
+checked from the DM's chair, and two real bugs proved it this week. It builds,
+seeds a throwaway database in the system temp directory, starts the server and
+opens two browser windows in separate contexts — one cookie jar each, or you are
+the same person twice. Verified: both windows land at the table signed in as
+different people, and `data/app.db` keeps its old timestamp throughout.
+
+**Fog controls.** Exploration was written only by the vision sweep, so a DM could
+neither open a door dramatically nor clear a map for reuse. `fog:reveal` and
+`fog:reset` are DM-only, scoped through the campaign, and end in a full scene
+push. Verified against the database rather than by eye: before, one player had
+146 of 10,000 squares; after reveal, all four campaign members had rows with
+10,000 of 10,000; after reset, no rows at all.
+
+Scene-wide rather than painted — revealing an arbitrary region needs a drag tool
+and a polygon on the wire, which is a bigger job and a natural follow-up.
+
+---
+
 ## Consumables that do something — 2026-08-19
 
 A potion carried a type, a use count and prose, so the card it posted had a name

@@ -79,6 +79,9 @@ interface TableState {
   target: (tokenId: string | null) => void;
 
   activateScene: (sceneId: string) => void;
+  /** DM-only fog controls; the server refuses anyone else. */
+  revealFog: (sceneId: string) => void;
+  resetFog: (sceneId: string) => void;
   createToken: (payload: Record<string, unknown>) => void;
   moveToken: (tokenId: string, x: number, y: number) => void;
   commitToken: (tokenId: string, x: number, y: number) => void;
@@ -385,6 +388,14 @@ export const useTable = create<TableState>((set, get) => ({
 
   activateScene(sceneId) {
     get().socket?.emit('scene:activate', { sceneId });
+  },
+
+  revealFog(sceneId) {
+    get().socket?.emit('fog:reveal', { sceneId });
+  },
+
+  resetFog(sceneId) {
+    get().socket?.emit('fog:reset', { sceneId });
   },
 
   createToken(payload) {

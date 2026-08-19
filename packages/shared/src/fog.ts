@@ -27,6 +27,22 @@ export function createFog(width: number, height: number): FogBitmap {
   return { width, height, bits: new Uint8Array(Math.ceil(cells / 8)) };
 }
 
+/**
+ * Every square explored, for a DM opening the lights on a scene.
+ *
+ * Set cell by cell rather than by filling the byte array, because the last byte
+ * usually holds spare bits past the final square: filling it would mark cells
+ * that do not exist, and `exploredCells` would then report squares off the edge
+ * of the map.
+ */
+export function revealAll(width: number, height: number): FogBitmap {
+  const fog = createFog(width, height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) markExplored(fog, x, y);
+  }
+  return fog;
+}
+
 function index(fog: FogBitmap, x: number, y: number): number | null {
   if (x < 0 || y < 0 || x >= fog.width || y >= fog.height) return null;
   return y * fog.width + x;

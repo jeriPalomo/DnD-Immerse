@@ -13,8 +13,10 @@ import {
   PLAIN_WALL,
   SECRET_DOOR,
   drawingCreateSchema,
+  encodeFog,
   movementBlocked,
   nextTokenName,
+  revealAll,
   movementQuerySchema,
   pingSchema,
   reachableSquares,
@@ -47,7 +49,9 @@ import {
 import {
   actorCampaigns,
   actors,
+  campaignMembers,
   campaigns,
+  fogExploration,
   drawings as drawingsTable,
   mapNotes,
   scenes,
@@ -567,6 +571,75 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     }
     return { campaignId, isDM: membership.isDM };
   }
+
+  /**
+   * Fog the DM owns, rather than only the vision sweep owning it.
+   *
+   * Exploration was written per player as they walked and never touched again,
+   * so there was no way to open a door dramatically and no way to reuse a map.
+   * Both of these write the same per-player bitmap the sweep does, and both end
+   * in a full scene push - a change that alters sight pushes the whole scene,
+   * never one token.
+   */
+  socket.on('fog:reveal', async ({ sceneId }) => {
+    const ctx = await context();
+    if (!ctx || !ctx.isDM) {
+      socket.emit('error', { message: 'Only the DM can change the fog' });
+      return;
+    }
+
+    // Resolved through the campaign rather than taken on trust, like every
+    // other id-taking handler here.
+    const scene = await sceneOf(sceneId);
+    if (!scene || scene.campaignId !== ctx.campaignId) return;
+
+    const { gridWidth, gridHeight } = gridExtent(scene);
+    const bitmap = encodeFog(revealAll(gridWidth, gridHeight));
+
+    const members = await db
+      .select({ userId: campaignMembers.userId })
+      .from(campaignMembers)
+      .where(eq(campaignMembers.campaignId, ctx.campaignId));
+
+    for (const { userId } of members) {
+      await db
+        .insert(fogExploration)
+        .values({
+          sceneId: scene.id,
+          userId,
+          // Stored with the bitmap so a later recalibration drops this the same
+          // way it drops honestly explored ground: a different grid is a
+          // different map, and the bits would decode smeared.
+          gridWidth,
+          gridHeight,
+          exploredBitmap: bitmap,
+          updatedAt: Date.now(),
+        })
+        .onConflictDoUpdate({
+          target: [fogExploration.sceneId, fogExploration.userId],
+          set: { gridWidth, gridHeight, exploredBitmap: bitmap, updatedAt: Date.now() },
+        });
+    }
+
+    await broadcastSceneState(io, ctx.campaignId);
+  });
+
+  socket.on('fog:reset', async ({ sceneId }) => {
+    const ctx = await context();
+    if (!ctx || !ctx.isDM) {
+      socket.emit('error', { message: 'Only the DM can change the fog' });
+      return;
+    }
+
+    const scene = await sceneOf(sceneId);
+    if (!scene || scene.campaignId !== ctx.campaignId) return;
+
+    // Rows away entirely rather than a cleared bitmap: the next sweep writes a
+    // fresh one at whatever grid the scene has by then.
+    await db.delete(fogExploration).where(eq(fogExploration.sceneId, scene.id));
+
+    await broadcastSceneState(io, ctx.campaignId);
+  });
 
   socket.on('scene:activate', async ({ sceneId }) => {
     const ctx = await context();

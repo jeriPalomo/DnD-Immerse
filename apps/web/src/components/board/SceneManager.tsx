@@ -30,7 +30,8 @@ interface GridGuess {
 }
 
 export function SceneManager({ campaignId }: { campaignId: string }) {
-  const { scene, activateScene, wallTool, setWallTool, walls, eraseDrawing } = useTable();
+  const { scene, activateScene, revealFog, resetFog, wallTool, setWallTool, walls, eraseDrawing } =
+    useTable();
   const [scenes, setScenes] = useState<SceneRow[]>([]);
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -277,6 +278,35 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
             With vision on, each player sees only what their tokens can see. Walls
             are computed on the server, so players never receive the geometry.
           </p>
+
+          {/* Fog the DM owns. Exploration is otherwise written only by walking,
+              so there was no way to open a door dramatically and no way to
+              reuse a map. */}
+          <div className="rounded-lg border border-ink-800 p-2">
+            <div className="mb-1.5 text-[10px] tracking-wider text-ink-500 uppercase">Fog</div>
+            <div className="flex gap-1.5">
+              <Button size="sm" variant="secondary" onClick={() => revealFog(scene.id)}>
+                Reveal all
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  // Every player's exploration at once, and nothing brings it
+                  // back - unlike a deleted token, there is no undo for this.
+                  if (confirm('Forget what every player has explored on this scene?')) {
+                    resetFog(scene.id);
+                  }
+                }}
+              >
+                Reset
+              </Button>
+            </div>
+            <p className="mt-1.5 text-[11px] text-ink-500">
+              Reveal opens the whole scene to everyone; reset puts it back to darkness
+              and they explore again by walking.
+            </p>
+          </div>
 
           <label className="flex items-center gap-2 text-xs text-ink-300">
             <input

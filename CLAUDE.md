@@ -381,6 +381,26 @@ and clicked like any other.
 crossed and a curtain the reverse. Collision is enforced on `token:commit` for
 players; the DM can place anything anywhere.
 
+**The DM owns the fog as well as the vision sweep.** Exploration used to be
+written only by walking, so there was no way to open a door dramatically and no
+way to reuse a map. `fog:reveal` writes a fully explored bitmap for every
+campaign member at the scene's current grid; `fog:reset` deletes the scene's
+rows so the next sweep starts from nothing. Both are DM-only, both resolve the
+scene through the campaign rather than trusting the id, and both end in
+`broadcastSceneState` — a change that alters sight pushes the whole scene.
+`revealAll` sets cells rather than filling the byte array, because the last byte
+holds spare bits past the final square and filling it would report ground off
+the edge of the map. Reveal changes what is *remembered*, never what is sent:
+wall geometry still never reaches a player.
+
+**`npm run playtest` opens the table as both a DM and a player.** The player's
+half cannot be checked from the DM's chair — a stat block route that handed one
+player another's inventory, and monster attacks the DM could not reach, both
+survived precisely because nobody logged in as a player. The script builds,
+seeds a throwaway database under the system temp directory, starts the server
+and opens two windows in separate browser contexts, since one context is one
+cookie jar and one person. It never opens `data/`.
+
 **Fog is a bitmap, not accumulated polygons.** One bit per grid square per
 player, base64 in `fog_exploration`. Unioning polygons grows without bound; a
 100×100 scene is 1.25 KB and merges with a bitwise OR.

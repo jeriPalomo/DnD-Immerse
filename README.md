@@ -40,6 +40,25 @@ Useful scripts:
 | `npm run db:generate` | New migration after a schema change |
 | `npm run build` | Production build |
 | `npm run backup` | Snapshot the database and uploads into `data/backups/` |
+| `npm run playtest` | Open the table twice — as you, and as a player |
+
+## Seeing it as a player
+
+```bash
+npm run playtest
+```
+
+Two windows, side by side: you as the DM on the left, a player on the right,
+both already signed in and sitting at the table. Click around in either.
+
+Half of this app is invisible from the DM's chair — what a player is sent, what
+they may open, what stays hidden — so it is worth looking at that half whenever
+you change anything near it. The seeded accounts are `dm@example.com` and
+`thorin@`, `elaria@`, `gareth@`, all with the password `demo-password`, so you
+can open a third window by hand for a bigger party.
+
+It runs against a throwaway database in your system temp folder and rebuilds it
+each time. **Your real campaign in `data/` is never opened.**
 
 ## Letting your friends in
 

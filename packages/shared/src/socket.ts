@@ -516,6 +516,9 @@ export interface ClientToServerEvents {
   'campaign:leave': (payload: { campaignId: string }) => void;
 
   'scene:activate': (payload: { sceneId: string }) => void;
+  /** DM-only. Opens the whole scene to every player, or forgets it entirely. */
+  'fog:reveal': (payload: { sceneId: string }) => void;
+  'fog:reset': (payload: { sceneId: string }) => void;
 
   'token:move': (payload: TokenMovePayload) => void;
   'token:commit': (payload: TokenCommitPayload) => void;
