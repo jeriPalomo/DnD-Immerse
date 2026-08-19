@@ -664,6 +664,13 @@ export const srdMonsters = sqliteTable(
     xp: integer('xp').notNull().default(0),
     /** Token footprint in grid units, derived from `size` on import. */
     tokenSize: real('token_size').notNull().default(1),
+    /**
+     * Cached bestiary art, served from `/srd-images/` — deliberately not
+     * `/uploads/`, so `deleteUpload` ignores it and deleting an NPC stamped
+     * from this monster cannot remove art the whole compendium shares. Null
+     * when upstream publishes no image, or the download failed.
+     */
+    imageUrl: text('image_url'),
     data: text('data', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
   },
   (t) => [index('srd_monsters_name_idx').on(t.name), index('srd_monsters_cr_idx').on(t.challengeRating)],

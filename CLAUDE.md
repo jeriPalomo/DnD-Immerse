@@ -185,6 +185,18 @@ not land until an unrelated event happened to push a full scene state.
 **AoE outlines and target lists come from the same geometry.** `templateCovers`
 decides both what is drawn and who is caught, so they cannot disagree.
 
+**Bestiary art is compendium content, not an upload.** The SRD records carry a
+host-relative `image` for all 337 monsters, and it sat unread in the `data`
+blob for the life of the project — no column, no download, no `<img>` anywhere
+in the client. `srd:import` now caches them under `data/srd/images/` and serves
+them from `/srd-images/`, deliberately *not* `/uploads/`: one file is shared by
+every NPC stamped from that monster, and `deleteUpload` ignores any URL that
+does not start with `/uploads/`, so deleting one goblin cannot take the goblin
+picture away from the other four. They are re-derivable by re-running the
+import, which is why `npm run backup` does not copy them. A download failure
+is never fatal — art is a nicety, and an import that dies halfway because a
+third-party host was down leaves no compendium at all.
+
 **Uploaded files are deleted with the record that owns them**, except where
 another row still points at the same file — a token stamped from an actor
 reuses its portrait, and one piece of art can be the map for two scenes. Rows
@@ -320,6 +332,15 @@ correctly with `w / 2`, which is why vision was unaffected.
 ~30Hz and is rebroadcast without a write; `token:commit` persists once on drop
 and applies the authoritative snap. A rejected move rebroadcasts the real
 position so the client corrects rather than sitting desynced.
+
+**The Characters page has two shelves, split on `type`.** Sheets you rolled up
+and the cast a campaign accumulates are different things that happen to share a
+table: one goblin per encounter buries the four characters you actually play.
+The split is on `type`, never on campaign assignment — an unassigned NPC is
+still an NPC, and a character is yours whether or not it is currently at a
+table. The roster's empty state names the bestiary, which lives on the battle
+map, because a DM looking at an empty shelf here has no way to guess where NPCs
+come from.
 
 **NPCs are absent from a player's roster, not redacted.** A row reading
 "Ancient Red Dragon — sheet not shared" spoils the encounter just as thoroughly

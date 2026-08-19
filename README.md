@@ -130,6 +130,11 @@ Compendium content is the **System Reference Document 5.1** by Wizards of the
 Coast, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/),
 sourced via [5e-bits/5e-database](https://github.com/5e-bits/5e-database).
 
+Bestiary art is fetched from the [5e-bits API](https://www.dnd5eapi.co) by
+`npm run srd:import` and cached under `data/srd/images/`. Those images are the
+5e-bits project's own, not part of the CC BY 4.0 SRD text — check their terms
+before using this anywhere beyond a private table.
+
 ## Layout
 
 ```

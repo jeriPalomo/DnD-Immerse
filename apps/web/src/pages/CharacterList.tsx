@@ -7,8 +7,21 @@ import type { Actor } from '../store/sheet.js';
 
 type RosterEntry = Actor & { campaigns: { id: string; name: string }[] };
 
+/**
+ * Two shelves, because these are two different things that happened to share a
+ * table: sheets you rolled up, and the cast a campaign accumulates - NPCs you
+ * wrote and monsters stamped out of the bestiary. Mixed together, one goblin
+ * per encounter buries the four characters you actually play.
+ *
+ * The split is on `type`, not on campaign assignment: an unassigned NPC is
+ * still an NPC, and a character belongs to you whether or not it is currently
+ * at a table.
+ */
+type Shelf = 'characters' | 'roster';
+
 export default function CharacterList() {
   const [actors, setActors] = useState<RosterEntry[]>([]);
+  const [shelf, setShelf] = useState<Shelf>('characters');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -38,13 +51,24 @@ export default function CharacterList() {
     }
   }
 
+  const characters = actors.filter((actor) => actor.type !== 'npc');
+  const roster = actors.filter((actor) => actor.type === 'npc');
+  const shown = shelf === 'characters' ? characters : roster;
+
+  const tabs: { key: Shelf; label: string; count: number }[] = [
+    { key: 'characters', label: 'My characters', count: characters.length },
+    { key: 'roster', label: 'Campaign roster', count: roster.length },
+  ];
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-10">
-      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold text-ink-100">Your characters</h1>
           <p className="mt-1 text-sm text-ink-400">
-            Characters belong to you, not to a campaign — bring them into any story you join.
+            {shelf === 'characters'
+              ? 'Characters belong to you, not to a campaign — bring them into any story you join.'
+              : 'NPCs you wrote and monsters stamped from the bestiary, for the campaigns you run.'}
           </p>
         </div>
         <Button onClick={() => void create()} loading={creating}>
@@ -52,19 +76,45 @@ export default function CharacterList() {
         </Button>
       </header>
 
+      <div className="mb-6 flex gap-1 border-b border-ink-800">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setShelf(tab.key)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
+              shelf === tab.key
+                ? 'border-arcane-500 text-ink-100'
+                : 'border-transparent text-ink-400 hover:text-ink-200'
+            }`}
+          >
+            {tab.label}
+            <span className="ml-1.5 text-xs text-ink-500">{tab.count}</span>
+          </button>
+        ))}
+      </div>
+
       {error && <Alert>{error}</Alert>}
 
       {loading ? (
         <Spinner />
-      ) : actors.length === 0 ? (
-        <EmptyState
-          title="No characters yet"
-          description="Create a sheet, then assign it to one of your campaigns to bring it to the table."
-          action={<Button onClick={() => void create()}>Create your first character</Button>}
-        />
+      ) : shown.length === 0 ? (
+        shelf === 'characters' ? (
+          <EmptyState
+            title="No characters yet"
+            description="Create a sheet, then assign it to one of your campaigns to bring it to the table."
+            action={<Button onClick={() => void create()}>Create your first character</Button>}
+          />
+        ) : (
+          // Named rather than described: the bestiary lives on the battle map,
+          // and a DM looking at an empty roster here has no way to guess that.
+          <EmptyState
+            title="No NPCs yet"
+            description="Open a scene and use the bestiary to stamp a monster, or write an NPC by hand. They collect here."
+          />
+        )
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2">
-          {actors.map((actor) => (
+          {shown.map((actor) => (
             <li key={actor.id}>
               <Link to={`/characters/${actor.id}`} className="block h-full">
                 <Card className="flex h-full gap-4 p-4 transition-colors hover:border-ink-600 hover:bg-ink-850">

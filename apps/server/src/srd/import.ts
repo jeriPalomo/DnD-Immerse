@@ -10,6 +10,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import sharp from 'sharp';
 import { auditSpellConditions, parseRange, type AbilityKey, type ItemSystem } from '@dnd/shared';
 import { db } from '../db/index.js';
 import { srdItems, srdMonsters, srdSpells } from '../db/schema.js';
@@ -17,6 +18,15 @@ import { paths } from '../env.js';
 
 const BASE_2014 = 'https://raw.githubusercontent.com/5e-bits/5e-database/main/src/2014/en';
 const BASE_2024 = 'https://raw.githubusercontent.com/5e-bits/5e-database/main/src/2024/en';
+
+/**
+ * Monster art lives on the API host, not in the data repo: records carry a
+ * host-relative `image` like `/api/images/monsters/goblin.png`.
+ */
+const IMAGE_HOST = 'https://www.dnd5eapi.co';
+
+/** Downloads run in parallel, but not 337-at-once at somebody else's server. */
+const IMAGE_CONCURRENCY = 8;
 
 const SOURCES = {
   spells: '5e-SRD-Spells.json',
@@ -56,6 +66,73 @@ async function load(file: string, ruleset: '2014' | '2024' = '2014', optional = 
   console.log(`${(text.length / 1024).toFixed(0)}KB`);
 
   return JSON.parse(text);
+}
+
+/**
+ * Fetches bestiary art once and caches it under `data/srd/images/`, the same
+ * download-once-then-offline contract the JSON has.
+ *
+ * Bytes are re-encoded through sharp rather than written as received, for the
+ * reason uploads are: the output is generated from decoded pixels, so a file
+ * that is both a valid PNG and a valid script cannot survive the trip. 512px
+ * is plenty for a browser row and a token at any zoom this board reaches.
+ *
+ * A failure here is never fatal. Art is a nicety; a bestiary with no pictures
+ * is the product as it shipped last week, whereas an import that dies halfway
+ * because a third-party host was down leaves no compendium at all.
+ */
+async function cacheMonsterImage(index: string, source: string): Promise<string | null> {
+  const filename = `${index}.webp`;
+  const target = path.join(paths.srdImages, filename);
+  const url = `/srd-images/${filename}`;
+
+  try {
+    await fs.access(target);
+    return url;
+  } catch {
+    // Not cached yet.
+  }
+
+  try {
+    const response = await fetch(source.startsWith('http') ? source : `${IMAGE_HOST}${source}`);
+    if (!response.ok) return null;
+
+    const encoded = await sharp(Buffer.from(await response.arrayBuffer()))
+      .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 82 })
+      .toBuffer();
+
+    await fs.writeFile(target, encoded);
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves art for every monster that names one, `IMAGE_CONCURRENCY` at a time.
+ * Returns index -> local URL for those that succeeded.
+ */
+async function cacheMonsterImages(monsters: Json[]): Promise<Map<string, string>> {
+  const pending = monsters.filter((m) => typeof m.image === 'string' && m.image);
+  const resolved = new Map<string, string>();
+  if (pending.length === 0) return resolved;
+
+  process.stdout.write(`  caching ${pending.length} monster images... `);
+
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(IMAGE_CONCURRENCY, pending.length) }, async () => {
+      while (cursor < pending.length) {
+        const monster = pending[cursor++];
+        const url = await cacheMonsterImage(monster.index, monster.image);
+        if (url) resolved.set(monster.index, url);
+      }
+    }),
+  );
+
+  console.log(`${resolved.size} available`);
+  return resolved;
 }
 
 /* -------------------------------------------------------------- helpers */
@@ -261,6 +338,13 @@ export async function importSrd(): Promise<void> {
     load(SOURCES.monsters, '2024', true),
   ]);
 
+  // Art is fetched before the tables are rebuilt so a row is only ever written
+  // with a URL whose file is already on disk.
+  const monsterImages = await cacheMonsterImages([
+    ...(monsters as Json[]),
+    ...(monsters2024 as Json[]),
+  ]);
+
   // Replace wholesale so a re-run picks up upstream corrections.
   await db.delete(srdSpells);
   await db.delete(srdMonsters);
@@ -307,6 +391,7 @@ export async function importSrd(): Promise<void> {
     challengeRating: formatCR(m.challenge_rating),
     xp: m.xp ?? 0,
     tokenSize: tokenSizeFor(m.size),
+    imageUrl: monsterImages.get(m.index) ?? null,
     data: m as Record<string, unknown>,
   });
 
@@ -362,6 +447,9 @@ export async function importSrd(): Promise<void> {
   console.log(
     `  2024: ${itemRows.filter((r) => r.ruleset === '2024').length} items ` +
       `(${mastered} with weapon mastery), ${monsterRows.filter((r) => r.ruleset === '2024').length} monsters`,
+  );
+  console.log(
+    `  ${monsterRows.filter((r) => r.imageUrl).length} of ${monsterRows.length} monsters have art`,
   );
   console.log('  2024 spells are not published in the SRD dataset; 2024 campaigns use the 2014 list');
 

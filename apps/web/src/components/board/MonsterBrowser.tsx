@@ -11,6 +11,8 @@ interface Monster {
   hitPoints: number;
   challengeRating: string;
   tokenSize: number;
+  /** Cached SRD art under /srd-images/, null where upstream published none. */
+  imageUrl: string | null;
 }
 
 /** One page. The server caps at 200; 60 fills the panel without a long wait. */
@@ -166,6 +168,20 @@ export function MonsterBrowser({
               {monsters.map((monster) => (
                 <li key={monster.id} className="hover:bg-ink-850">
                   <div className="flex items-center gap-3 px-4 py-2.5">
+                    <div className="size-10 shrink-0 overflow-hidden rounded border border-ink-700 bg-ink-800">
+                      {monster.imageUrl ? (
+                        <img
+                          src={monster.imageUrl}
+                          alt=""
+                          loading="lazy"
+                          className="size-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex size-full items-center justify-center font-display text-sm text-ink-600">
+                          {monster.name.slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
+                    </div>
                     <button
                       onClick={() => setExpanded(expanded === monster.id ? null : monster.id)}
                       className="min-w-0 flex-1 text-left"

@@ -325,6 +325,7 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
         hitPoints: srdMonsters.hitPoints,
         challengeRating: srdMonsters.challengeRating,
         tokenSize: srdMonsters.tokenSize,
+        imageUrl: srdMonsters.imageUrl,
       })
       .from(srdMonsters)
       .where(query.q ? like(srdMonsters.name, `%${query.q}%`) : undefined)

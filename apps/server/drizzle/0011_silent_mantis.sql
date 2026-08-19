@@ -1,0 +1,1 @@
+ALTER TABLE `srd_monsters` ADD `image_url` text;

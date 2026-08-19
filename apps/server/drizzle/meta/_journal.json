@@ -78,6 +78,13 @@
       "when": 1786986029970,
       "tag": "0010_married_loa",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1787102047927,
+      "tag": "0011_silent_mantis",
+      "breakpoints": true
     }
   ]
 }

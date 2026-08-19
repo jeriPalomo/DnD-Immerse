@@ -31,6 +31,13 @@ export const paths = {
   db: path.join(env.dataDir, 'app.db'),
   uploads: path.join(env.dataDir, 'uploads'),
   srd: path.join(env.dataDir, 'srd'),
+  /**
+   * Cached bestiary art. Kept out of `uploads/` on purpose: these files are
+   * shared by every NPC stamped from a monster and are re-derivable by
+   * re-running the import, so they must not be swept by the orphan cleanup
+   * that owns user uploads.
+   */
+  srdImages: path.join(env.dataDir, 'srd', 'images'),
 } as const;
 
 export const UPLOAD_SUBDIRS = ['maps', 'tokens', 'avatars', 'handouts'] as const;
@@ -44,7 +51,7 @@ export const UPLOAD_SUBDIRS = ['maps', 'tokens', 'avatars', 'handouts'] as const
  * die with an opaque SQLITE_CANTOPEN.
  */
 export function ensureDataDirs(): void {
-  for (const dir of [env.dataDir, paths.uploads, paths.srd]) {
+  for (const dir of [env.dataDir, paths.uploads, paths.srd, paths.srdImages]) {
     fs.mkdirSync(dir, { recursive: true });
   }
   for (const sub of UPLOAD_SUBDIRS) {

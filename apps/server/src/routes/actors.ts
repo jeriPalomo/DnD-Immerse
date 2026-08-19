@@ -536,9 +536,14 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
       challengeRating: monster.challengeRating,
       race: monster.type,
       alignment: monster.alignment,
+      // Bestiary art, where upstream published any. This is a `/srd-images/`
+      // URL shared by every copy of the monster, not an upload - deleting one
+      // goblin must not take the goblin picture away from the other four.
+      portraitUrl: monster.imageUrl,
       // Monsters are unlinked so each copy tracks its own HP, and sized from
       // the stat block: a Gargantuan dragon lands as a 4x4 token.
       prototypeToken: {
+        imageUrl: monster.imageUrl,
         w: monster.tokenSize,
         h: monster.tokenSize,
         actorLinked: false,

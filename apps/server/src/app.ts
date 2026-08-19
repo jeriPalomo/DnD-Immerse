@@ -36,6 +36,18 @@ export async function buildApp() {
     maxAge: '7d',
   });
 
+  // Bestiary art from the SRD import. Served separately from uploads so the
+  // orphan sweep, which only ever touches `/uploads/`, cannot delete art that
+  // every NPC stamped from a monster shares. Filenames come from the monster
+  // index, never from a request.
+  await app.register(fastifyStatic, {
+    root: paths.srdImages,
+    prefix: '/srd-images/',
+    decorateReply: false,
+    cacheControl: true,
+    maxAge: '30d',
+  });
+
   app.decorateRequest('user', null);
   app.addHook('preHandler', attachUser);
 
@@ -108,7 +120,15 @@ async function serveClient(app: FastifyInstance): Promise<void> {
   const html = fs.readFileSync(index, 'utf8');
 
   app.setNotFoundHandler((request, reply) => {
-    if (request.method !== 'GET' || request.url.startsWith('/api') || request.url.startsWith('/uploads')) {
+    // A missing asset path must 404, not fall through to the SPA shell: an
+    // <img> that receives index.html renders as a broken image with a 200,
+    // which is a great deal harder to diagnose than a 404.
+    if (
+      request.method !== 'GET' ||
+      request.url.startsWith('/api') ||
+      request.url.startsWith('/uploads') ||
+      request.url.startsWith('/srd-images')
+    ) {
       return reply.code(404).send({ error: 'Not found' });
     }
     return reply.type('text/html').header('cache-control', 'no-cache').send(html);
