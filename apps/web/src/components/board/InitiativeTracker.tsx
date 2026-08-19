@@ -172,6 +172,24 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
                       {entry.initiative}
                     </span>
                   )}
+                  {/* A face reads faster than a name once a fight has a dozen
+                      creatures in it. Falls back to the initial, the way the
+                      token HUD and the roster cards already do. */}
+                  <div className="size-6 shrink-0 overflow-hidden rounded border border-ink-800 bg-ink-850">
+                    {entry.imageUrl ? (
+                      <img
+                        src={entry.imageUrl}
+                        alt=""
+                        loading="lazy"
+                        className="size-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex size-full items-center justify-center text-[9px] text-ink-600">
+                        {entry.name.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+
                   <span className={`min-w-0 flex-1 truncate text-xs ${isActive ? 'text-ink-100' : 'text-ink-300'}`}>
                     {entry.name}
                   </span>

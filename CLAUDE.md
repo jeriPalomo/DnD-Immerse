@@ -333,14 +333,27 @@ correctly with `w / 2`, which is why vision was unaffected.
 and applies the authoritative snap. A rejected move rebroadcasts the real
 position so the client corrects rather than sitting desynced.
 
-**The Characters page has two shelves, split on `type`.** Sheets you rolled up
-and the cast a campaign accumulates are different things that happen to share a
-table: one goblin per encounter buries the four characters you actually play.
-The split is on `type`, never on campaign assignment — an unassigned NPC is
-still an NPC, and a character is yours whether or not it is currently at a
-table. The roster's empty state names the bestiary, which lives on the battle
-map, because a DM looking at an empty shelf here has no way to guess where NPCs
-come from.
+**Characters and NPCs are two pages, split on `type`.** Sheets you rolled up
+and the cast a campaign accumulates are different jobs — play and prep — that
+happen to share a table: one goblin per encounter buries the four characters
+you actually play. They were briefly two tabs on one page, which still read as
+one thing. The split is on `type`, never on campaign assignment — an unassigned
+NPC is still an NPC, and a character is yours whether or not it is currently at
+a table. `ActorCard` and `useRoster` in `components/roster.tsx` are shared by
+both pages, because the card is identical and two copies would drift. The NPC
+empty state names the bestiary, which lives on the battle map behind Scene →
+Tokens, because a DM looking at an empty shelf here has no way to guess where
+NPCs come from.
+
+**A hidden scene is filed, not withheld.** `scenes.hidden` shelves a finished or
+half-built scene out of the DM's own list; it hides nothing from players, who
+have never been able to list scenes at all — `routes/scenes.ts` is `requireDM`
+and they only ever receive the active one. Hiding the live scene is therefore
+allowed and does not end it: what the party is looking at is
+`campaigns.activeSceneId`, which the flag does not touch, and the row keeps its
+Live badge inside the hidden section so it cannot be lost track of. The flag
+rides on the DM-only list payload, never on `WireScene`, for the same reason
+`sortOrder` does.
 
 **NPCs are absent from a player's roster, not redacted.** A row reading
 "Ancient Red Dragon — sheet not shared" spoils the encounter just as thoroughly

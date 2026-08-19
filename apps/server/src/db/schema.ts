@@ -275,6 +275,16 @@ export const scenes = sqliteTable(
      */
     playerDrawing: integer('player_drawing', { mode: 'boolean' }).notNull().default(true),
 
+    /**
+     * DM-side shelving only. Players have never been able to list scenes - the
+     * routes are `requireDM` and they only ever receive the active one - so
+     * this hides nothing from them; it puts a finished or half-built scene out
+     * of the DM's own way. Hiding the live scene is allowed and does not end
+     * it: what the party is looking at is decided by `campaigns.activeSceneId`,
+     * never by this flag.
+     */
+    hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
+
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: epoch('created_at'),
   },

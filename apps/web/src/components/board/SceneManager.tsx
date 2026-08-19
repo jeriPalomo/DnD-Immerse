@@ -7,6 +7,12 @@ import type { WireScene } from '@dnd/shared';
 
 interface SceneRow extends WireScene {
   sortOrder: number;
+  /**
+   * DM-side shelving, carried here rather than on `WireScene` for the same
+   * reason `sortOrder` is: the player payload has no business knowing how the
+   * DM has filed their scenes.
+   */
+  hidden: boolean;
 }
 
 interface PartyActor {
@@ -37,6 +43,7 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
   const [localDarkness, setLocalDarkness] = useState(0);
   const [guess, setGuess] = useState<GridGuess | null>(null);
   const [browsing, setBrowsing] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
 
   useEffect(() => {
     if (scene) setLocalDarkness(scene.darkness);
@@ -113,6 +120,30 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
     }
   }
 
+  /** Optimistic, like the rename: this list is the DM's own. */
+  function renameScene(sceneId: string, name: string) {
+    setScenes((current) => current.map((s) => (s.id === sceneId ? { ...s, name } : s)));
+    void patchScene(sceneId, { name });
+  }
+
+  function showToPlayers(sceneId: string) {
+    activateScene(sceneId);
+    setActiveSceneId(sceneId);
+  }
+
+  /**
+   * Shelves a scene out of the DM's way.
+   *
+   * Deliberately not refused for the live scene: hiding it is a filing
+   * decision, and what the party is looking at is `activeSceneId`, which this
+   * does not touch. The row keeps its Live badge inside the hidden section so
+   * it cannot be lost track of.
+   */
+  function setSceneHidden(sceneId: string, hidden: boolean) {
+    setScenes((current) => current.map((s) => (s.id === sceneId ? { ...s, hidden } : s)));
+    void patchScene(sceneId, { hidden });
+  }
+
   /**
    * Deletes a scene and everything on it.
    *
@@ -155,6 +186,9 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
     if (activeSceneId === sceneId) activateScene(sceneId);
   }
 
+  const visibleScenes = scenes.filter((row) => !row.hidden);
+  const hiddenScenes = scenes.filter((row) => row.hidden);
+
   return (
     <div className="p-2">
       <div className="mb-3 flex gap-1">
@@ -173,70 +207,52 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
 
       {tab === 'scenes' && (
         <div className="space-y-2">
-          {scenes.map((row) => (
-            <div
+          {visibleScenes.map((row) => (
+            <SceneRowCard
               key={row.id}
-              className={`rounded-lg border p-2 ${
-                row.id === activeSceneId ? 'border-ember-500/50 bg-ember-500/5' : 'border-ink-700'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <SceneName
-                  name={row.name}
-                  onRename={(name) => {
-                    // Optimistic: the list is the DM's own, and a rename that
-                    // waits for a round trip feels broken while you type.
-                    setScenes((current) =>
-                      current.map((s) => (s.id === row.id ? { ...s, name } : s)),
-                    );
-                    void patchScene(row.id, { name });
-                  }}
-                />
-                {row.id === activeSceneId ? (
-                  <span className="text-[10px] text-ember-400 uppercase">Live</span>
-                ) : (
-                  <button
-                    onClick={() => {
-                      activateScene(row.id);
-                      setActiveSceneId(row.id);
-                    }}
-                    className="rounded border border-ink-600 px-2 py-0.5 text-[11px] text-ink-300 hover:border-ember-500"
-                  >
-                    Show players
-                  </button>
-                )}
-              </div>
-              <div className="mt-1.5 flex items-center gap-2">
-                <label className="cursor-pointer text-[11px] text-arcane-400 hover:underline">
-                  {row.mapImageUrl ? 'Replace map' : 'Upload map'}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="sr-only"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) void uploadMap(row.id, file);
-                    }}
-                  />
-                </label>
-                {row.mapWidth > 0 && (
-                  <span className="text-[10px] text-ink-600">
-                    {row.mapWidth}×{row.mapHeight}px
-                  </span>
-                )}
-                <button
-                  onClick={() => void removeScene(row.id, row.name)}
-                  className="ml-auto text-[11px] text-ink-600 hover:text-red-400"
-                  title={`Delete ${row.name}`}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
+              row={row}
+              isActive={row.id === activeSceneId}
+              onRename={renameScene}
+              onActivate={showToPlayers}
+              onSetHidden={setSceneHidden}
+              onUpload={uploadMap}
+              onDelete={removeScene}
+            />
           ))}
+
           <Button size="sm" variant="secondary" onClick={() => void createScene()} loading={busy}>
             New scene
           </Button>
+
+          {hiddenScenes.length > 0 && (
+            <div className="pt-1">
+              <button
+                onClick={() => setShowHidden((open) => !open)}
+                className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-[11px] text-ink-500 hover:text-ink-300"
+              >
+                <span>{showHidden ? '▾' : '▸'}</span>
+                Hidden
+                <span className="text-ink-600">{hiddenScenes.length}</span>
+              </button>
+
+              {showHidden && (
+                <div className="mt-1 space-y-2">
+                  {hiddenScenes.map((row) => (
+                    <SceneRowCard
+                      key={row.id}
+                      row={row}
+                      isActive={row.id === activeSceneId}
+                      onRename={renameScene}
+                      onActivate={showToPlayers}
+                      onSetHidden={setSceneHidden}
+                      onUpload={uploadMap}
+                      onDelete={removeScene}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -478,6 +494,105 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
  * until the overlay matches the map's own squares. Because token positions are
  * stored in grid units, recalibrating here never moves the tokens.
  */
+/**
+ * One scene in the DM's list.
+ *
+ * Extracted because the visible list and the hidden section render the same
+ * row; copying it would let the two drift.
+ *
+ * The thumbnail is the point of the redesign: a list of names gives no answer
+ * to "which one was the crypt", and the map is already on the row.
+ */
+function SceneRowCard({
+  row,
+  isActive,
+  onRename,
+  onActivate,
+  onSetHidden,
+  onUpload,
+  onDelete,
+}: {
+  row: SceneRow;
+  isActive: boolean;
+  onRename: (sceneId: string, name: string) => void;
+  onActivate: (sceneId: string) => void;
+  onSetHidden: (sceneId: string, hidden: boolean) => void;
+  onUpload: (sceneId: string, file: File) => void | Promise<void>;
+  onDelete: (sceneId: string, name: string) => void | Promise<void>;
+}) {
+  return (
+    <div
+      className={`rounded-lg border p-2 ${
+        isActive ? 'border-ember-500/50 bg-ember-500/5' : 'border-ink-700'
+      } ${row.hidden ? 'opacity-60' : ''}`}
+    >
+      <div className="flex items-center gap-2">
+        <div className="size-9 shrink-0 overflow-hidden rounded border border-ink-700 bg-ink-850">
+          {row.mapImageUrl ? (
+            <img src={row.mapImageUrl} alt="" loading="lazy" className="size-full object-cover" />
+          ) : (
+            <div className="flex size-full items-center justify-center text-[9px] text-ink-600">
+              No map
+            </div>
+          )}
+        </div>
+
+        <SceneName name={row.name} onRename={(name) => onRename(row.id, name)} />
+
+        {isActive ? (
+          <span className="text-[10px] text-ember-400 uppercase">Live</span>
+        ) : (
+          <button
+            onClick={() => onActivate(row.id)}
+            className="rounded border border-ink-600 px-2 py-0.5 text-[11px] text-ink-300 hover:border-ember-500"
+          >
+            Show players
+          </button>
+        )}
+      </div>
+
+      <div className="mt-1.5 flex items-center gap-2">
+        <label className="cursor-pointer text-[11px] text-arcane-400 hover:underline">
+          {row.mapImageUrl ? 'Replace map' : 'Upload map'}
+          <input
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void onUpload(row.id, file);
+            }}
+          />
+        </label>
+        {row.mapWidth > 0 && (
+          <span className="text-[10px] text-ink-600">
+            {row.mapWidth}×{row.mapHeight}px
+          </span>
+        )}
+
+        <button
+          onClick={() => onSetHidden(row.id, !row.hidden)}
+          className="ml-auto text-[11px] text-ink-600 hover:text-ink-300"
+          title={
+            row.hidden
+              ? `Unhide ${row.name}`
+              : `Hide ${row.name} — players are unaffected, they never see this list`
+          }
+        >
+          {row.hidden ? 'Unhide' : 'Hide'}
+        </button>
+        <button
+          onClick={() => void onDelete(row.id, row.name)}
+          className="text-[11px] text-ink-600 hover:text-red-400"
+          title={`Delete ${row.name}`}
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The scene name, editable in place.
  *

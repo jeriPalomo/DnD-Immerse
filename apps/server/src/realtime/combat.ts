@@ -93,6 +93,7 @@ async function projectEncounter(campaignId: string, isDM: boolean): Promise<Wire
       hp: showHp ? (token?.hp ?? null) : null,
       maxHp: showHp ? (token?.maxHp ?? null) : null,
       conditions: token ? conditionsOf(effects.get(token.id)) : [],
+      imageUrl: token?.imageUrl ?? null,
       hpRedacted: !showHp,
     };
   });

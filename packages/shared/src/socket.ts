@@ -138,6 +138,13 @@ export interface WireInitiativeEntry {
   hp: number | null;
   maxHp: number | null;
   conditions: string[];
+  /**
+   * The token's art, so a twelve-creature fight is scannable by face rather
+   * than by reading twelve names. Carries no secret: `name` above is already
+   * sent unredacted, so a goblin's picture says nothing the word "Goblin" did
+   * not. If names are ever redacted, this must be redacted with them.
+   */
+  imageUrl: string | null;
   /** Players do not see enemy hit points, only a rough state. */
   hpRedacted: boolean;
 }

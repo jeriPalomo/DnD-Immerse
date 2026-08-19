@@ -161,6 +161,17 @@ export default function CampaignTable() {
         </Link>
         {isDM && <Badge tone="dm">DM</Badge>}
         {scene && <span className="text-xs text-ink-500">{scene.name}</span>}
+
+        {/* The shortcut panel was reachable only by pressing "?", which nobody
+            discovers. Same handler, given something to click. */}
+        <button
+          onClick={() => setShowHelp(true)}
+          title="Keyboard shortcuts (?)"
+          aria-label="Keyboard shortcuts"
+          className="ml-auto size-6 shrink-0 rounded-full border border-ink-700 text-xs text-ink-500 transition-colors hover:border-ink-500 hover:text-ink-200"
+        >
+          ?
+        </button>
       </div>
 
       <div

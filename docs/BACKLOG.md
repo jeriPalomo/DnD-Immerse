@@ -25,6 +25,38 @@ audio system rather than extending it.
 
 ---
 
+## A UI pass from the DM's chair — 2026-08-18
+
+Raised after playing the finished build, all of it from the DM side.
+
+**Scenes can be hidden.** The list grew without bound and had no way to put a
+finished scene away. `scenes.hidden` (migration `0012`) partitions the DM's
+list into the working set and a collapsed **Hidden (n)** section. It withholds
+nothing from players — they have never had a scene list, `routes/scenes.ts`
+being `requireDM` — so hiding the live scene is allowed and leaves it live,
+keeping its Live badge where it can still be seen. Verified with a direct
+`GET /scenes` as a player: 403, "Only the DM can do that".
+
+**Characters and NPCs are separate pages.** The two shelves added the day
+before were tabs on one page, which still read as one thing. Now `/characters`
+and `/npcs`, with a third nav entry. `ActorCard` and `useRoster` moved to
+`components/roster.tsx` and are shared, rather than the card being copied.
+
+**Three things now show a face.** The initiative tracker had no image of any
+kind, which made a twelve-creature fight a column of names; `WireInitiativeEntry`
+gained `imageUrl`, fed from the token the entry already joins. It leaks nothing:
+`name` was already sent unredacted, so a goblin's picture says nothing the word
+"Goblin" did not — **if names are ever redacted, this must be redacted with
+them.** The scene list gained map thumbnails, which is what makes a partitioned
+list worth scanning. And `ShortcutHelp` gained a visible `?` button: it was
+reachable only by pressing `?`, which nobody discovers.
+
+**Still open:** whether the NPCs nav entry should hide itself for users who own
+none. `POST /api/actors` accepts `type: 'npc'` from anyone, so the page is not
+DM-only, and a player who never makes NPCs sees an empty shelf.
+
+---
+
 ## Status effects, whispers and four defects — 2026-08-17
 
 The through-line: **conditions were half-built, and the two halves disagreed on

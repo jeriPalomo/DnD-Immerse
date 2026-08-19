@@ -8,6 +8,7 @@ import CampaignDetail from './pages/CampaignDetail.js';
 import CampaignList from './pages/CampaignList.js';
 import CampaignTable from './pages/CampaignTable.js';
 import CharacterList from './pages/CharacterList.js';
+import NpcList from './pages/NpcList.js';
 import CharacterSheet from './pages/CharacterSheet.js';
 import { useAuth } from './store/auth.js';
 import type { ReactNode } from 'react';
@@ -74,6 +75,16 @@ export default function App() {
         }
       />
       <Route
+        path="/npcs"
+        element={
+          <RequireAuth>
+            <Shell>
+              <NpcList />
+            </Shell>
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/characters/:id"
         element={
           <RequireAuth>
@@ -126,6 +137,7 @@ function Shell({ children }: { children: ReactNode }) {
             <nav className="flex gap-4 text-sm">
               <NavLink to="/campaigns">Campaigns</NavLink>
               <NavLink to="/characters">Characters</NavLink>
+              <NavLink to="/npcs">NPCs</NavLink>
             </nav>
           </div>
           <div className="flex items-center gap-3">
