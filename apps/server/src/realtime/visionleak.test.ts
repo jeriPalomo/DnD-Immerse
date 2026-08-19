@@ -502,6 +502,43 @@ describe('invariant: stat blocks are granted, hit points never', () => {
     for (const token of player.tokens) expect(token.statsHidden).toBe(false);
   });
 
+  it("refuses another player's character sheet, whatever the enemy-stats setting says", async () => {
+    // The grant is about creatures the party fights. A character sheet is
+    // governed by ownership, as it is everywhere else - the roster shows
+    // another player's character at name level and no further. Without this
+    // the route handed over their ability scores and their whole inventory.
+    const bob = await register('bob@vision.local', 'Bob');
+    const invite = await api<{ campaign: { inviteCode: string } }>(
+      'GET', `/api/campaigns/${campaignId}`, undefined, dm.cookie,
+    );
+    await api('POST', '/api/campaigns/join', { inviteCode: invite.campaign.inviteCode }, bob.cookie);
+
+    const sheet = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors', { name: 'Bob PC', type: 'character', str: 18 }, bob.cookie,
+    );
+    await api('POST', `/api/actors/${sheet.actor.id}/campaigns/${campaignId}`, {}, bob.cookie);
+
+    const placed = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, x: 8, y: 8, name: 'Bob PC', actorId: sheet.actor.id, ownerUserId: bob.userId,
+    } as never);
+    const theirs = (await placed)!.token.id;
+
+    await expect(
+      api('GET', `/api/campaigns/${campaignId}/tokens/${theirs}/statblock`, undefined, alice.cookie),
+    ).rejects.toThrow(/not been shared/i);
+
+    // Its owner still reads it, and so does the DM.
+    const own = await api<{ statBlock: unknown }>(
+      'GET', `/api/campaigns/${campaignId}/tokens/${theirs}/statblock`, undefined, bob.cookie,
+    );
+    expect(own.statBlock).toBeTruthy();
+    const dmSees = await api<{ statBlock: unknown }>(
+      'GET', `/api/campaigns/${campaignId}/tokens/${theirs}/statblock`, undefined, dm.cookie,
+    );
+    expect(dmSees.statBlock).toBeTruthy();
+  });
+
   it('refuses a token id from another campaign', async () => {
     const other = await api<{ campaign: { id: string } }>(
       'POST', '/api/campaigns', { name: 'Somebody else’s game' }, alice.cookie,

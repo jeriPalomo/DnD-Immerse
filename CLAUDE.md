@@ -296,6 +296,15 @@ is on 7 HP changes how a table plays; that is the DM's to reveal. This is
 *separate* from whether players may read a stat block, and stays true whatever
 that setting says — see below.
 
+**The enemy-stats grant covers creatures, never a character sheet.** A player
+character is not an enemy, and `mayReadStats` reads "not yours" as "theirs to
+show" — so the stat block route handed another player's ability scores *and
+their whole inventory* to anyone at the table, while the roster three lines away
+correctly showed them at name level. Sheets are governed by `getActorAccess`
+everywhere else, and this route defers to it for `character` actors: observer or
+better, or 403. A second gate on the same data is a second chance to disagree
+with the first.
+
 **What a creature is, and how close it is to dying, are two decisions.**
 `campaigns.playersSeeEnemyStats` (default **on**) lets players read the stat
 block of a creature they do not control — abilities, speed, actions, CR, and

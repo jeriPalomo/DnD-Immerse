@@ -25,6 +25,23 @@ audio system rather than extending it.
 
 ---
 
+## The stat block route leaked party sheets — 2026-08-19
+
+Found while auditing for what to fix next, and self-inflicted: the stat block
+route added the day before never consulted `getActorAccess`. `mayReadStats`
+answers a question about *creatures* — is this one's block shared — and reads
+"not yours" as "fair game", so a player asking about another player's character
+token got their ability scores, AC, speed and their entire item list. The roster
+API three lines away answered the same question correctly (`access: 1`, no
+scores), which is what made it obvious once looked at.
+
+Character actors now defer to `getActorAccess`: observer or better, or 403.
+Verified against the live app — the identical request that returned Elaria's
+sheet now answers "That sheet has not been shared with you". Regression test
+covers the owner and the DM still reading it.
+
+---
+
 ## A stamped monster can be swung — 2026-08-18
 
 `from-monster` created the actor and nothing else. A goblin arrived with an

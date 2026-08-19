@@ -28,7 +28,7 @@ import {
 } from '../db/schema.js';
 import { campaignAllowsStats, mayReadStats, tokenIn } from '../realtime/scene.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
-import { getBulkActorAccess, requireActorRead, requireActorWrite } from '../lib/access.js';
+import { getActorAccess, getBulkActorAccess, requireActorRead, requireActorWrite } from '../lib/access.js';
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
 import { syncLinkedTokens } from '../lib/linkedTokens.js';
@@ -659,6 +659,18 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
       ? await db.select().from(actors).where(eq(actors.id, token.actorId)).limit(1)
       : [];
     const actor = actorRows[0];
+
+    // A player character is not an enemy, and the enemy-stats grant has no
+    // business deciding who reads one. Sheets are governed by ownership
+    // everywhere else - the roster shows another player's character at name
+    // level and nothing more - and this route would otherwise have handed over
+    // their ability scores and their whole inventory to anyone at the table.
+    if (actor && actor.type === 'character' && !membership.isDM) {
+      const access = await getActorAccess(actor.id, user.id);
+      if (!access || access.level < OWNERSHIP.observer) {
+        throw new HttpError(403, 'That sheet has not been shared with you');
+      }
+    }
 
     // Stamped from the bestiary: the full published block, which the actor
     // never carried - `from-monster` copies the hot scalars and drops actions,
