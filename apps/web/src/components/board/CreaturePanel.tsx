@@ -26,6 +26,7 @@ export function CreaturePanel({ campaignId }: { campaignId: string }) {
   const [actors, setActors] = useState<PartyActor[]>([]);
   const [busy, setBusy] = useState(false);
   const [browsing, setBrowsing] = useState(false);
+  const [quantity, setQuantity] = useState(1);
 
   const load = useCallback(async () => {
     const res = await api.get<{ actors: PartyActor[] }>(`/api/campaigns/${campaignId}/actors`);
@@ -61,8 +62,23 @@ export function CreaturePanel({ campaignId }: { campaignId: string }) {
 
   return (
     <div className="p-2">
-      <div className="mb-2 flex justify-end gap-1.5">
-        <Button size="sm" variant="ghost" loading={busy} onClick={() => void createNpc()}>
+      <div className="mb-2 flex items-center gap-1.5">
+        <label className="flex items-center gap-1 text-[11px] text-ink-500">
+          &times;
+          <input
+            type="number"
+            min={1}
+            max={12}
+            value={quantity}
+            aria-label="How many to place"
+            onChange={(e) =>
+              setQuantity(Math.max(1, Math.min(12, Number(e.target.value) || 1)))
+            }
+            className="w-11 rounded border border-ink-600 bg-ink-850 px-1 py-0.5 text-center text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
+          />
+        </label>
+
+        <Button size="sm" variant="ghost" className="ml-auto" loading={busy} onClick={() => void createNpc()}>
           New NPC
         </Button>
         <Button size="sm" variant="secondary" onClick={() => setBrowsing(true)}>
@@ -87,7 +103,14 @@ export function CreaturePanel({ campaignId }: { campaignId: string }) {
               key={actor.id}
               disabled={!scene}
               onClick={() =>
-                createToken({ sceneId: scene!.id, actorId: actor.id, x: 1, y: 1, name: actor.name })
+                createToken({
+                  sceneId: scene!.id,
+                  actorId: actor.id,
+                  x: 1,
+                  y: 1,
+                  name: actor.name,
+                  quantity,
+                })
               }
               className="flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-850 px-2 py-1 text-xs text-ink-200 transition-colors hover:border-ember-500 disabled:opacity-40"
             >

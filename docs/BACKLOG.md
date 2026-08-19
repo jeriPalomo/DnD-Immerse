@@ -25,6 +25,37 @@ audio system rather than extending it.
 
 ---
 
+## Three DM quality-of-life items — 2026-08-19
+
+**The DM was playing as a random monster.** `myActor` picked the first actor
+they own from a name-ordered list, and a DM owns every NPC they create. The
+symptom, confirmed in the browser before touching anything: select the goblin,
+target a character, and the panel says *"No weapons or spells on this sheet"* —
+because it was reading the Ancient Red Dragon, which the seed creates without
+items. It also decided the token range was measured from and the name on the
+DM's chat messages. `mine` now requires `type === 'character'` and the acting
+creature follows the selection. Verified after: the same click offers Scimitar
+and Shortbow.
+
+**Placing several monsters at once.** A quantity of up to twelve, each landing
+in a free square via the existing `firstFreeSquare`, named Goblin, Goblin 2,
+Goblin 3… `nextTokenName` counts on from the highest present rather than the
+count, so removing Goblin 2 cannot make the next one a second Goblin 3. Seven
+unit tests, including regex metacharacters in a name — "Kobold (scout)" is an
+ordinary thing to type and an unescaped bracket throws.
+
+Hit points are deliberately *not* rolled per copy: the published average is what
+the stat block says and what a DM expects.
+
+**A conditions reference**, listing all sixteen with what they do and whether
+the app enforces them. The automated flag is derived from `CONDITION_EFFECTS`
+rather than written twice, so the five it does not enforce say "by hand"
+honestly. Tooltips on the condition chips in the token HUD and the tracker use
+the same text. Not DM-gated — a player asking what restrained does is asking the
+same question.
+
+---
+
 ## The DM's panel, reorganised — 2026-08-19
 
 Raised by the observation that Combat / Scene / Journal all sit side by side.

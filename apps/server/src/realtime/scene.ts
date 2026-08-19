@@ -14,6 +14,7 @@ import {
   SECRET_DOOR,
   drawingCreateSchema,
   movementBlocked,
+  nextTokenName,
   movementQuerySchema,
   pingSchema,
   reachableSquares,
@@ -791,54 +792,70 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     }
 
     const existing = await db.select().from(tokens).where(eq(tokens.sceneId, input.sceneId));
-    const snapped = firstFreeSquare(
-      snapTokenPosition({ x: input.x, y: input.y }, w, h),
-      w,
-      h,
-      existing,
-      scene,
-    );
 
-    const token = {
-      id: newId(),
-      sceneId: input.sceneId,
-      name: name ?? '',
+    // Placed one at a time inside a loop rather than in a batch, because each
+    // copy has to see the ones before it: `firstFreeSquare` needs the square
+    // its predecessor took, and `nextTokenName` needs its number. A batch would
+    // stack six goblins on one square and call them all Goblin.
+    const placedOnScene = [...existing];
+    const created: Token[] = [];
+
+    for (let copy = 0; copy < input.quantity; copy++) {
+      const snapped = firstFreeSquare(
+        snapTokenPosition({ x: input.x, y: input.y }, w, h),
+        w,
+        h,
+        placedOnScene,
+        scene,
+      );
+
+      const token = {
+        id: newId(),
+        sceneId: input.sceneId,
+        name: nextTokenName(name ?? '', placedOnScene.map((t) => t.name)),
       imageUrl: imageUrl ?? null,
       actorId: input.actorId,
       actorLinked,
-      ownerUserId: ownerUserId ?? null,
-      x: snapped.x,
-      y: snapped.y,
-      w,
-      h,
-      rotation: input.rotation,
-      layer: input.layer,
-      // Last stop for the default, now that the schema no longer applies one.
-      disposition: disposition ?? 'hostile',
-      visionRange: input.visionRange,
-      darkvisionRange: input.darkvisionRange,
-      lightBright: input.lightBright,
-      lightDim: input.lightDim,
-      hp: hp ?? null,
-      maxHp: maxHp ?? null,
-      ac: ac ?? null,
-      hidden: input.hidden,
-      locked: input.locked,
-      statsHidden: input.statsHidden,
-      createdAt: Date.now(),
-    };
+        ownerUserId: ownerUserId ?? null,
+        x: snapped.x,
+        y: snapped.y,
+        w,
+        h,
+        rotation: input.rotation,
+        layer: input.layer,
+        // Last stop for the default, now that the schema no longer applies one.
+        disposition: disposition ?? 'hostile',
+        visionRange: input.visionRange,
+        darkvisionRange: input.darkvisionRange,
+        lightBright: input.lightBright,
+        lightDim: input.lightDim,
+        hp: hp ?? null,
+        maxHp: maxHp ?? null,
+        ac: ac ?? null,
+        hidden: input.hidden,
+        locked: input.locked,
+        statsHidden: input.statsHidden,
+        createdAt: Date.now(),
+      };
 
-    await db.insert(tokens).values(token);
-    // Conditions are rows, not a column, so a token stamped with any go in here.
-    if (input.conditions.length > 0) await setConditions(token.id, input.conditions);
+      await db.insert(tokens).values(token);
+      // Conditions are rows, not a column, so a token stamped with any go in here.
+      if (input.conditions.length > 0) await setConditions(token.id, input.conditions);
+
+      placedOnScene.push(token as Token);
+      created.push(token as Token);
+    }
+
     invalidateDragCache(input.sceneId);
 
     // Sight is checked here as well as hidden-ness. Placing an ambusher behind
     // a wall used to ship its full stat line - name, HP, position - to every
     // player, and unlike a drag frame nothing corrected it until the next full
     // scene push.
-    const placed = await tokenIn(token.id, ctx.campaignId);
-    if (placed) await broadcastToken(io, ctx.campaignId, placed, 'token:created');
+    for (const made of created) {
+      const placed = await tokenIn(made.id, ctx.campaignId);
+      if (placed) await broadcastToken(io, ctx.campaignId, placed, 'token:created');
+    }
   });
 
   socket.on('token:update', async (payload) => {

@@ -2,7 +2,13 @@ import { useState } from 'react';
 import { api } from '../../lib/api.js';
 import { useTable } from '../../store/table.js';
 import { TokenStatBlock } from './TokenStatBlock.js';
-import { CONDITIONS, DISPOSITIONS, DISPOSITION_HINT, deriveToken } from '@dnd/shared';
+import {
+  CONDITIONS,
+  CONDITION_SUMMARY,
+  DISPOSITIONS,
+  DISPOSITION_HINT,
+  deriveToken,
+} from '@dnd/shared';
 import type { WireToken } from '@dnd/shared';
 
 /**
@@ -357,6 +363,7 @@ export function TokenHUD({
                   <button
                     key={condition}
                     onClick={() => toggleCondition(condition)}
+                    title={CONDITION_SUMMARY[condition]}
                     className={`rounded px-1.5 py-0.5 text-[10px] capitalize transition-colors ${
                       active
                         ? 'bg-arcane-500/30 text-arcane-400'

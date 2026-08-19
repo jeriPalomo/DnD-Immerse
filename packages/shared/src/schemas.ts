@@ -142,6 +142,43 @@ export const tokenInputSchema = z.object({
   statsHidden: z.boolean().default(false),
 });
 
+/**
+ * How many copies to place at once.
+ *
+ * An encounter is rarely one goblin, and placing six of them one click at a
+ * time - each landing on the same square until dragged apart, each called
+ * "Goblin" - is the most repetitive thing a DM does.
+ */
+export const tokenQuantitySchema = z.number().int().min(1).max(12).default(1);
+
+/**
+ * The next free number for a repeated creature, given what is already on the
+ * scene.
+ *
+ * The first goblin stays "Goblin" and later ones become "Goblin 2", "Goblin 3".
+ * Existing tokens are never renamed: a creature's name changing under the DM
+ * mid-fight is worse than an unnumbered first one, and the initiative order
+ * would shuffle under them.
+ */
+export function nextTokenName(base: string, existing: string[]): string {
+  const trimmed = base.trim() || 'Token';
+  // A creature's name is free text and may hold regex metacharacters - "Kobold
+  // (scout)" is an ordinary thing for a DM to type.
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(String.raw`^${escaped}(?: (\d+))?$`, 'i');
+
+  let highest = 0;
+  let taken = false;
+  for (const name of existing) {
+    const match = pattern.exec(name.trim());
+    if (!match) continue;
+    taken = true;
+    highest = Math.max(highest, match[1] ? Number(match[1]) : 1);
+  }
+
+  return taken ? `${trimmed} ${highest + 1}` : trimmed;
+}
+
 export type TokenInput = z.infer<typeof tokenInputSchema>;
 
 export const CONDITIONS = [

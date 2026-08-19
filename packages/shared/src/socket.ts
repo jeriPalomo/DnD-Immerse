@@ -5,6 +5,7 @@ import {
   rollRequestSchema,
   sendMessageSchema,
   tokenInputSchema,
+  tokenQuantitySchema,
 } from './schemas.js';
 import type { ChatKind, MemberRole, RollResult, TokenLayer } from './schemas.js';
 
@@ -269,7 +270,10 @@ export const tokenCommitSchema = z.object({
   h: z.number().optional(),
 });
 
-export const tokenCreateSchema = tokenInputSchema.extend({ sceneId: z.string() });
+export const tokenCreateSchema = tokenInputSchema.extend({
+  sceneId: z.string(),
+  quantity: tokenQuantitySchema,
+});
 
 export const tokenUpdateSchema = tokenInputSchema.partial().extend({ tokenId: z.string() });
 

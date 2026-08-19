@@ -3,6 +3,7 @@ import { InitiativeTracker } from './InitiativeTracker.js';
 import { CreaturePanel } from './CreaturePanel.js';
 import { EnemyHealth } from './EnemyHealth.js';
 import { TurnPrompt } from './TurnPrompt.js';
+import { ConditionsReference } from './ConditionsReference.js';
 import { JournalPanel } from './JournalPanel.js';
 
 /**
@@ -33,6 +34,12 @@ export function RunPanel({ campaignId, isDM }: { campaignId: string; isDM: boole
           <CreaturePanel campaignId={campaignId} />
         </Section>
       )}
+
+      {/* Not DM-gated: a player wanting to know what restrained does is asking
+          the same question. */}
+      <Section title="What conditions do">
+        <ConditionsReference />
+      </Section>
 
       <Section title="Journal">
         <JournalPanel campaignId={campaignId} isDM={isDM} />

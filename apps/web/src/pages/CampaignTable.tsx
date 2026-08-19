@@ -33,6 +33,9 @@ export default function CampaignTable() {
   const [party, setParty] = useState<PartyMember[]>([]);
   const [myActor, setMyActor] = useState<Actor | null>(null);
   const [myItems, setMyItems] = useState<Item[]>([]);
+  /** The DM's acting creature: the sheet behind the token they have selected. */
+  const [dmActor, setDmActor] = useState<Actor | null>(null);
+  const [dmItems, setDmItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
@@ -58,7 +61,14 @@ export default function CampaignTable() {
         setCampaign(campaignRes.campaign);
         setParty(partyRes.actors);
 
-        const mine = partyRes.actors.find((a) => a.ownerUserId === user?.id);
+        // Your own character, not merely an actor you own. A DM owns every NPC
+        // they create, and this list is ordered by name - so without the type
+        // check the DM "played as" whichever NPC sorted first, which decided
+        // the attacks they were offered, the token range was measured from,
+        // and the name on their chat messages.
+        const mine = partyRes.actors.find(
+          (a) => a.ownerUserId === user?.id && a.type === 'character',
+        );
         if (mine) {
           useTable.getState().setActiveActor(mine.id);
           const sheet = await api.get<{ actor: Actor; items: Item[] }>(`/api/actors/${mine.id}`);
@@ -138,6 +148,49 @@ export default function CampaignTable() {
     },
   });
 
+  /**
+   * Follow the DM's selection with the sheet behind it, so the target panel
+   * offers that creature's own attacks. Players never take this path: their
+   * character is fixed for the session and fetched once above.
+   *
+   * Above the early returns, with the store read directly rather than through
+   * the values derived below them: this component returns early while loading,
+   * and a hook after that point is React error #310 - more hooks on the second
+   * render than the first.
+   */
+  const selectedActorId =
+    campaign?.role === 'dm'
+      ? (table.tokens.find((t) => t.id === table.selectedTokenId)?.actorId ?? null)
+      : null;
+
+  useEffect(() => {
+    if (!selectedActorId) {
+      setDmActor(null);
+      setDmItems([]);
+      return;
+    }
+
+    let cancelled = false;
+    void api
+      .get<{ actor: Actor; items: Item[] }>(`/api/actors/${selectedActorId}`)
+      .then((sheet) => {
+        if (cancelled) return;
+        setDmActor(sheet.actor);
+        setDmItems(sheet.items);
+      })
+      .catch(() => {
+        // An unlinked token with no sheet behind it is ordinary, not an error.
+        if (!cancelled) {
+          setDmActor(null);
+          setDmItems([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedActorId]);
+
   if (loading) return <Spinner />;
   if (error) {
     return (
@@ -156,6 +209,20 @@ export default function CampaignTable() {
   const myToken = tokens.find((t) => t.actorId && t.actorId === activeActorId) ?? null;
 
   const canEditSelected = Boolean(selected && (isDM || selected.ownerUserId === user?.id));
+
+  /**
+   * Who is acting.
+   *
+   * A player always acts as their own character. A DM acts as whatever they
+   * have selected, which is the only answer that can be right: they run every
+   * monster on the board, so "the DM's creature" is a question about the
+   * current click, not about ownership.
+   */
+  const actingActor = isDM ? dmActor : myActor;
+  const actingItems = isDM ? dmItems : myItems;
+  const actingActorId = isDM ? (dmActor?.id ?? null) : activeActorId;
+  /** The origin for range checks: the creature actually swinging. */
+  const actingToken = isDM ? selected : (myToken ?? selected);
 
 
   return (
@@ -233,17 +300,17 @@ export default function CampaignTable() {
         <div className={`flex flex-col gap-3 xl:h-[calc(100vh-8rem)] ${focusBoard ? 'hidden' : ''}`}>
           {targeted && scene && (
             <TargetPanel
-              self={myToken ?? selected}
+              self={actingToken}
               target={targeted}
               scene={scene}
-              actor={myActor}
-              items={myItems}
+              actor={actingActor}
+              items={actingItems}
               onUse={(item) => {
-                if (!activeActorId) return;
+                if (!actingActorId) return;
                 // The card remembers who it was aimed at, so a spell save is
                 // rolled by the target rather than by the caster. Range is not
                 // carried: the server measures it when the button is pressed.
-                table.postCard(item.id, activeActorId, targeted.id);
+                table.postCard(item.id, actingActorId, targeted.id);
 
                 // An area spell also drops its own outline on the target, built
                 // from the spell's own area so Fireball is a 20 ft circle
@@ -251,8 +318,9 @@ export default function CampaignTable() {
                 const built = templateForSpell(
                   item.system.areaOfEffect as { shape?: string; size?: number; width?: number | null } | null,
                   { x: targeted.x + targeted.w / 2, y: targeted.y + targeted.h / 2 },
-                  myToken
-                    ? (Math.atan2(targeted.y - myToken.y, targeted.x - myToken.x) * 180) / Math.PI
+                  actingToken
+                    ? (Math.atan2(targeted.y - actingToken.y, targeted.x - actingToken.x) * 180) /
+                      Math.PI
                     : 0,
                 );
                 if (built) {

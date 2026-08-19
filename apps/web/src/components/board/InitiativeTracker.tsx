@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { tokensInTemplate } from '@dnd/shared';
+import { CONDITION_SUMMARY, tokensInTemplate } from '@dnd/shared';
 import { Button } from '../ui.js';
 import { useTable } from '../../store/table.js';
 import { GroupRoll } from './GroupRoll.js';
@@ -250,6 +250,7 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
                     {entry.conditions.map((condition) => (
                       <span
                         key={condition}
+                        title={CONDITION_SUMMARY[condition]}
                         className="rounded bg-arcane-500/20 px-1 text-[9px] text-arcane-400 capitalize"
                       >
                         {condition}

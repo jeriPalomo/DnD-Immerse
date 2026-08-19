@@ -454,6 +454,35 @@ the filter was right — but a query that returns other people's rows and trusts
 the next ten lines to drop them is one edit away from being the leak, and it
 grows with the whole database rather than the request.
 
+**The acting creature is the one you selected, and a DM plays no character by
+default.** `myActor` was "the first actor you own, ordered by name" — and a DM
+owns every NPC they create, so they acted as whichever monster sorted first.
+That decided the attacks offered in the target panel, the token range was
+measured from, and the `actorId` stamped on their chat messages. It also made
+the monster attacks stamped by `from-monster` unreachable: with a goblin
+selected the panel read "No weapons or spells on this sheet", because it was
+looking at the Ancient Red Dragon. `mine` now requires `type === 'character'`,
+and a DM's acting creature follows their selection — the only answer that can
+be right when they run every monster on the board.
+
+**Repeated creatures are numbered, and never renamed afterwards.**
+`nextTokenName` leaves the first "Goblin" alone and calls the next ones
+"Goblin 2", "Goblin 3", counting on from the highest already present rather
+than the count — killing Goblin 2 must not let the next one reuse the name and
+put two of them in the initiative order. Placement loops rather than batching
+because each copy has to see the ones before it: `firstFreeSquare` needs the
+square its predecessor took, and the numbering needs its number.
+
+**A condition's summary is prose; whether the app enforces it is derived.**
+`CONDITION_SUMMARY` is what a person reads, `CONDITION_EFFECTS` is what the
+engine applies, and `conditionIsAutomated` reads the second rather than
+restating it — so the reference cannot claim automation that is not there. Five
+conditions have no mechanical entry (charmed, deafened, exhaustion,
+incapacitated, concentrating) because they turn on intent rather than a number,
+and the panel says "by hand" for them instead of pretending. Unit tests check
+the table against `CONDITIONS` in both directions, because a curated table
+checked against itself proves nothing.
+
 **The DM's panel is split by when a tool is used, not by what it is.** Building
 a map, calibrating a grid and drawing walls are done alone between sessions;
 initiative, damage and dropping a monster in are done with four people

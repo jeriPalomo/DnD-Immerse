@@ -289,6 +289,47 @@ export const CONDITION_EFFECTS: Record<string, EffectChange[]> = {
   ],
 };
 
+/**
+ * What each condition does, in one line, from the SRD.
+ *
+ * Prose, not mechanics: `CONDITION_EFFECTS` above is what the engine applies,
+ * and this is what a person needs to read at the table. Kept beside it so the
+ * two are edited together, and deliberately not merged into it - a condition
+ * the app does not automate still has to be explainable, which is most of the
+ * point.
+ */
+export const CONDITION_SUMMARY: Record<string, string> = {
+  blinded: 'Cannot see, and automatically fails any check needing sight. Attacks against it have advantage; its own attacks have disadvantage.',
+  charmed: 'Cannot attack the charmer or target them with harmful effects. The charmer has advantage on social checks against it.',
+  deafened: 'Cannot hear, and automatically fails any check needing hearing.',
+  exhaustion: 'Six levels, each worse than the last: disadvantage on checks, then half speed, then disadvantage on attacks and saves, then half hit points, then speed 0, then death.',
+  frightened: 'Disadvantage on attacks and checks while the source is in sight, and it cannot willingly move closer to it.',
+  grappled: 'Speed 0. Ends if the grappler is incapacitated, or if it is moved out of reach.',
+  incapacitated: 'No actions, no bonus actions, no reactions.',
+  invisible: 'Cannot be seen without magic or a special sense. Attacks against it have disadvantage; its own attacks have advantage.',
+  paralyzed: 'Incapacitated, cannot move or speak, and fails STR and DEX saves automatically. Attacks against it have advantage, and any hit from within 5 ft is a critical.',
+  petrified: 'Turned to stone: incapacitated, unaware, and resistant to all damage. Attacks against it have advantage.',
+  poisoned: 'Disadvantage on attack rolls and ability checks.',
+  prone: 'Movement costs double to crawl. Its attacks have disadvantage; attacks against it have advantage within 5 ft and disadvantage beyond.',
+  restrained: 'Speed 0, disadvantage on its attacks and DEX saves. Attacks against it have advantage.',
+  stunned: 'Incapacitated, cannot move, speaks only falteringly, and fails STR and DEX saves. Attacks against it have advantage.',
+  unconscious: 'Incapacitated, prone, unaware, and drops what it holds. Fails STR and DEX saves; attacks against it have advantage and any hit from within 5 ft is a critical.',
+  concentrating: 'Holding a spell. Taking damage forces a Constitution save, DC 10 or half the damage, whichever is higher.',
+};
+
+/**
+ * Whether the app enforces a condition's mechanics, or leaves them to the DM.
+ *
+ * Derived from `CONDITION_EFFECTS` rather than written down a second time, so
+ * it cannot claim automation that does not exist. Five conditions have no
+ * entry - charmed, deafened, exhaustion, incapacitated and concentrating -
+ * because what they do is about intent and fiction rather than a number the
+ * server can fold in, and saying so is better than pretending.
+ */
+export function conditionIsAutomated(condition: string): boolean {
+  return Boolean(CONDITION_EFFECTS[condition]);
+}
+
 export function conditionEffect(condition: string): ActiveEffect | null {
   const changes = CONDITION_EFFECTS[condition];
   if (!changes) return null;
