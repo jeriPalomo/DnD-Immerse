@@ -433,6 +433,85 @@ describe('invariant: enemy hit points are the DM’s to reveal', () => {
   });
 });
 
+/**
+ * Whether players may read a creature's stat block is the DM's call, and it is
+ * a *separate* call from hit points. The whole point of splitting them is that
+ * a table can agree "you know what an ogre is" without conceding "you know the
+ * ogre is on 7", so the tests that matter here are the ones proving the second
+ * never rides along with the first.
+ */
+describe('invariant: stat blocks are granted, hit points never', () => {
+  let ogreId: string;
+
+  beforeAll(async () => {
+    const placed = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, x: 6, y: 6, name: 'Ogre', hp: 7, maxHp: 59, disposition: 'hostile',
+    } as never);
+    ogreId = (await placed)!.token.id;
+  });
+
+  it('lets a player read the block while the campaign allows it', async () => {
+    const block = await api<{ statBlock: Record<string, unknown> }>(
+      'GET', `/api/campaigns/${campaignId}/tokens/${ogreId}/statblock`, undefined, alice.cookie,
+    );
+    expect(block.statBlock).toBeTruthy();
+    // The creature has no sheet behind it in this test, so what matters is that
+    // the answer carries no hit points of any kind.
+    expect(JSON.stringify(block)).not.toContain('59');
+    expect(JSON.stringify(block)).not.toMatch(/"hit_points"|"hitPoints"|"hpMax"/);
+  });
+
+  it('refuses once the DM turns the campaign setting off', async () => {
+    await api('PATCH', `/api/campaigns/${campaignId}`, { playersSeeEnemyStats: false }, dm.cookie);
+
+    await expect(
+      api('GET', `/api/campaigns/${campaignId}/tokens/${ogreId}/statblock`, undefined, alice.cookie),
+    ).rejects.toThrow();
+
+    // The DM is never locked out of their own monster.
+    const dmSees = await api<{ statBlock: unknown }>(
+      'GET', `/api/campaigns/${campaignId}/tokens/${ogreId}/statblock`, undefined, dm.cookie,
+    );
+    expect(dmSees.statBlock).toBeTruthy();
+
+    await api('PATCH', `/api/campaigns/${campaignId}`, { playersSeeEnemyStats: true }, dm.cookie);
+  });
+
+  it('refuses the one creature the DM closes, while the rest stay open', async () => {
+    const placed = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, x: 7, y: 7, name: 'The Boss', statsHidden: true, disposition: 'hostile',
+    } as never);
+    const boss = (await placed)!.token.id;
+
+    await expect(
+      api('GET', `/api/campaigns/${campaignId}/tokens/${boss}/statblock`, undefined, alice.cookie),
+    ).rejects.toThrow();
+
+    const stillOpen = await api<{ statBlock: unknown }>(
+      'GET', `/api/campaigns/${campaignId}/tokens/${ogreId}/statblock`, undefined, alice.cookie,
+    );
+    expect(stillOpen.statBlock).toBeTruthy();
+  });
+
+  it('never tells a player which creature the DM has closed', async () => {
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    // `statsHidden` marks the interesting one. Players are told what they may
+    // read, never what has been withheld from them.
+    for (const token of player.tokens) expect(token.statsHidden).toBe(false);
+  });
+
+  it('refuses a token id from another campaign', async () => {
+    const other = await api<{ campaign: { id: string } }>(
+      'POST', '/api/campaigns', { name: 'Somebody else’s game' }, alice.cookie,
+    );
+    await expect(
+      api('GET', `/api/campaigns/${other.campaign.id}/tokens/${ogreId}/statblock`, undefined, alice.cookie),
+    ).rejects.toThrow();
+  });
+});
+
 describe('fog exploration persists', () => {
   it('remembers ground already walked, across a reconnect', async () => {
     const before = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));

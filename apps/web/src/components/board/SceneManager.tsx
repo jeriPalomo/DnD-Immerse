@@ -172,6 +172,10 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
       const { actor } = await api.post<{ actor: { id: string } }>('/api/actors', {
         name: 'New NPC',
         type: 'npc',
+        // Named here as well as in the assignment below: the server authorises
+        // NPC creation against this campaign's DM, and cannot do that for an
+        // actor with no campaign at all.
+        campaignId,
       });
       await api.post(`/api/actors/${actor.id}/campaigns/${campaignId}`);
       await load();

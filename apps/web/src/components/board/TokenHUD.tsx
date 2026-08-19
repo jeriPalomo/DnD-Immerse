@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../lib/api.js';
 import { useTable } from '../../store/table.js';
+import { TokenStatBlock } from './TokenStatBlock.js';
 import { CONDITIONS, DISPOSITIONS, DISPOSITION_HINT, deriveToken } from '@dnd/shared';
 import type { WireToken } from '@dnd/shared';
 
@@ -13,18 +14,21 @@ import type { WireToken } from '@dnd/shared';
  */
 export function TokenHUD({
   token,
+  campaignId,
   isDM,
   canEdit,
   onUpdate,
   onDelete,
 }: {
   token: WireToken;
+  campaignId: string;
   isDM: boolean;
   canEdit: boolean;
   onUpdate: (fields: Record<string, unknown>) => void;
   onDelete: () => void;
 }) {
   const [uploadingArt, setUploadingArt] = useState(false);
+  const [showStats, setShowStats] = useState(false);
 
   async function uploadArt(file: File) {
     setUploadingArt(true);
@@ -146,6 +150,18 @@ export function TokenHUD({
         <div className="flex shrink-0 items-center gap-1.5">
           {token.ac !== null && (
             <span className="rounded bg-ink-800 px-2 py-0.5 text-xs text-ink-300">AC {token.ac}</span>
+          )}
+          {/* Offered on the server's answer, not the client's opinion: the
+              route re-checks, so drawing this anyway earns a 403. */}
+          {token.statsVisible && (
+            <button
+              onClick={() => setShowStats(true)}
+              title="What is this creature?"
+              aria-label="Stat block"
+              className="rounded px-1.5 py-0.5 text-sm text-ink-500 transition-colors hover:text-ink-200"
+            >
+              📖
+            </button>
           )}
           {/* Visibility is the thing a DM reaches for mid-sentence, so it sits
               here rather than at the bottom of the panel. */}
@@ -410,6 +426,25 @@ export function TokenHUD({
                 </div>
               )}
 
+            {/* Only ever restrictive: this closes one creature while the
+                campaign default stays open. It cannot open a creature when the
+                campaign has stats off, so there is one direction to think in. */}
+            <button
+              onClick={() => onUpdate({ statsHidden: !token.statsHidden })}
+              className={`w-full rounded border px-2 py-1 text-xs transition-colors ${
+                token.statsHidden
+                  ? 'border-ember-400 bg-ember-500/20 text-ember-300'
+                  : 'border-ink-700 text-ink-400 hover:text-ink-200'
+              }`}
+              title={
+                token.statsHidden
+                  ? 'Players cannot read this creature’s stat block'
+                  : 'Players may read this creature’s stat block, if the campaign allows it'
+              }
+            >
+              {token.statsHidden ? 'Stats hidden' : 'Stats shared'}
+            </button>
+
             {/* Visibility moved to the eye in the header. */}
             <div className="flex gap-1.5">
               <button
@@ -433,6 +468,14 @@ export function TokenHUD({
             </>
           )}
         </div>
+      )}
+
+      {showStats && (
+        <TokenStatBlock
+          campaignId={campaignId}
+          tokenId={token.id}
+          onClose={() => setShowStats(false)}
+        />
       )}
     </div>
   );

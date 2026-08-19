@@ -137,7 +137,9 @@ function Shell({ children }: { children: ReactNode }) {
             <nav className="flex gap-4 text-sm">
               <NavLink to="/campaigns">Campaigns</NavLink>
               <NavLink to="/characters">Characters</NavLink>
-              <NavLink to="/npcs">NPCs</NavLink>
+              {/* Only a DM can create an NPC, so for everyone else this is a
+                  link to a shelf that can never fill. */}
+              {user?.dmOfAny && <NavLink to="/npcs">NPCs</NavLink>}
             </nav>
           </div>
           <div className="flex items-center gap-3">

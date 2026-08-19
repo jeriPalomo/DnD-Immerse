@@ -68,6 +68,18 @@ export const campaigns = sqliteTable('campaigns', {
    * and "you left the duke's study through the window" is the useful half.
    */
   recap: text('recap').notNull().default(''),
+  /**
+   * Whether players may read the stat block of a creature they do not control:
+   * abilities, speed, actions, CR, and the conditions it is under.
+   *
+   * On by default - knowing what you are fighting is ordinary play. This never
+   * covers hit points, which stay redacted by `showHp` in every payload
+   * regardless: "the ogre is on 7" is the DM's to narrate, and that is a
+   * separate decision from "the ogre is an ogre".
+   */
+  playersSeeEnemyStats: integer('players_see_enemy_stats', { mode: 'boolean' })
+    .notNull()
+    .default(true),
   createdAt: epoch('created_at'),
 });
 
@@ -112,6 +124,17 @@ export const actors = sqliteTable(
       .default('character'),
     name: text('name').notNull(),
     portraitUrl: text('portrait_url'),
+    /**
+     * The compendium row this NPC was stamped from, where it was.
+     *
+     * `from-monster` copies the hot scalars - abilities, AC, HP, CR - and drops
+     * everything else, so actions, senses and special abilities exist only in
+     * the compendium. Without this link there is no route from a goblin on the
+     * board back to what a goblin can do. Null for hand-written NPCs and for
+     * anything stamped before the column existed; those fall back to their own
+     * columns and items.
+     */
+    srdMonsterId: text('srd_monster_id'),
 
     className: text('class_name').notNull().default(''),
     subclass: text('subclass').notNull().default(''),
@@ -345,6 +368,13 @@ export const tokens = sqliteTable(
     /** Hidden tokens are stripped from player payloads entirely, server-side. */
     hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
     locked: integer('locked', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * Overrides `campaigns.playersSeeEnemyStats` downward for this one
+     * creature - the boss whose tricks are the encounter. Only ever
+     * restrictive: it cannot open a creature up when the campaign has stats
+     * closed, so there is one direction to reason about.
+     */
+    statsHidden: integer('stats_hidden', { mode: 'boolean' }).notNull().default(false),
     createdAt: epoch('created_at'),
   },
   (t) => [index('tokens_scene_idx').on(t.sceneId)],

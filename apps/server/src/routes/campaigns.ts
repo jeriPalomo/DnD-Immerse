@@ -100,10 +100,19 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     await requireDM(id, user.id);
 
     const input = campaignInputSchema
-      .extend({ ruleset: z.enum(['2014', '2024']) })
+      .extend({
+        ruleset: z.enum(['2014', '2024']),
+        playersSeeEnemyStats: z.boolean(),
+      })
       .partial()
       .parse(request.body);
-    await db.update(campaigns).set(input).where(eq(campaigns.id, id));
+
+    // Every field is optional, so a payload of `{}` reaches `set({})`, which
+    // throws "No values to set". The fourth place in this codebase to need
+    // this guard - see the invariant in CLAUDE.md.
+    if (Object.keys(input).length > 0) {
+      await db.update(campaigns).set(input).where(eq(campaigns.id, id));
+    }
 
     const rows = await db.select().from(campaigns).where(eq(campaigns.id, id)).limit(1);
     return { campaign: { ...rows[0], role: 'dm' as const } };

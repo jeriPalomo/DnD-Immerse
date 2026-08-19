@@ -6,6 +6,12 @@ export interface AuthUser {
   email: string;
   displayName: string;
   avatarUrl: string | null;
+  /**
+   * Whether this user runs any campaign. Decides only whether DM surfaces are
+   * offered - every DM-only route still authorises itself against its own
+   * campaign, so a client that lies about this gains nothing.
+   */
+  dmOfAny: boolean;
 }
 
 interface AuthState {

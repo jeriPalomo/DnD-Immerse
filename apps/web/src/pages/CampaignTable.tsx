@@ -258,6 +258,7 @@ export default function CampaignTable() {
           {selected && (
             <TokenHUD
               token={selected}
+              campaignId={id ?? ''}
               isDM={Boolean(isDM)}
               canEdit={canEditSelected}
               onUpdate={(fields) => table.updateToken(selected.id, fields)}

@@ -16,7 +16,16 @@ import {
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
-import { actorCampaigns, actors, campaignMembers, campaigns, items, ownership } from '../db/schema.js';
+import {
+  actorCampaigns,
+  actors,
+  campaignMembers,
+  campaigns,
+  items,
+  ownership,
+  srdMonsters,
+} from '../db/schema.js';
+import { campaignAllowsStats, mayReadStats, tokenIn } from '../realtime/scene.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { getBulkActorAccess, requireActorRead, requireActorWrite } from '../lib/access.js';
 import { rollExpression } from '../lib/dice.js';
@@ -161,6 +170,20 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
 
     const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'New Character';
     const type = body.type === 'npc' ? 'npc' : 'character';
+    const campaignId = typeof body.campaignId === 'string' ? body.campaignId : null;
+
+    // An NPC is campaign content, and campaign content is the DM's. This was
+    // the one creation path left open to players: tokens, scenes and
+    // `from-monster` have always been DM-gated, so a player could not place an
+    // NPC but could fill their own roster with them.
+    //
+    // Refused rather than quietly downgraded to a character. Silently making
+    // something other than what was asked for is how you end up debugging a
+    // report that a character "turned into" an NPC.
+    if (type === 'npc') {
+      if (!campaignId) throw new HttpError(400, 'An NPC needs a campaign');
+      await requireDM(campaignId, user.id);
+    }
 
     // Start from a fully defaulted sheet, then layer any supplied fields over it.
     const input = actorInputSchema.parse({ ...emptyActor(name, type), ...body, name, type });
@@ -168,7 +191,7 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
     const actor = {
       id: newId(),
       ownerUserId: user.id,
-      campaignId: typeof body.campaignId === 'string' ? body.campaignId : null,
+      campaignId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       ...toRow(input),
@@ -561,11 +584,128 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       ...toRow(input),
+      // Set here rather than through `actorInputSchema`: this is provenance the
+      // server knows, not a field a client may claim. Routing it through the
+      // input schema would let anyone POST an actor asserting it is an ancient
+      // dragon's stat block.
+      srdMonsterId: monster.id,
     };
 
     await db.insert(actors).values(actor);
     await db.insert(actorCampaigns).values({ actorId: actor.id, campaignId, assignedAt: Date.now() });
 
     return { actor };
+  });
+
+  /* ------------------------------------------------------------ stat block */
+
+  /**
+   * What a creature on the board *is*: abilities, speed, actions, CR.
+   *
+   * Authorised on the server, never by the client: `mayReadStats` is the same
+   * function the token payload uses, so the button the player sees and the
+   * answer they get cannot disagree. The token id is looked up through
+   * `tokenIn`, which joins to `scenes.campaignId`, so an id borrowed from
+   * another table is simply not found.
+   *
+   * **Hit points are stripped from every branch.** They are a separate
+   * decision, they stay the DM's, and a stat block is the obvious place for
+   * them to leak back in.
+   */
+  app.get('/api/campaigns/:campaignId/tokens/:tokenId/statblock', async (request) => {
+    const user = assertUser(request);
+    const { campaignId, tokenId } = request.params as { campaignId: string; tokenId: string };
+    const membership = await requireMembership(campaignId, user.id);
+
+    const token = await tokenIn(tokenId, campaignId);
+    if (!token) throw new HttpError(404, 'No such creature');
+
+    // A hidden token does not exist as far as a player is concerned, and must
+    // not become discoverable by asking this route about it.
+    if (!membership.isDM && token.hidden && token.ownerUserId !== user.id) {
+      throw new HttpError(404, 'No such creature');
+    }
+
+    const allowed = await campaignAllowsStats(campaignId);
+    if (!mayReadStats(token, membership.isDM, user.id, allowed)) {
+      throw new HttpError(403, 'The DM has not shared this creature’s stats');
+    }
+
+    const actorRows = token.actorId
+      ? await db.select().from(actors).where(eq(actors.id, token.actorId)).limit(1)
+      : [];
+    const actor = actorRows[0];
+
+    // Stamped from the bestiary: the full published block, which the actor
+    // never carried - `from-monster` copies the hot scalars and drops actions,
+    // senses and special abilities entirely.
+    if (actor?.srdMonsterId) {
+      const rows = await db
+        .select()
+        .from(srdMonsters)
+        .where(eq(srdMonsters.id, actor.srdMonsterId))
+        .limit(1);
+
+      if (rows[0]) {
+        const { hitPoints, hitDice, data, ...rest } = rows[0];
+        const { hit_points, hit_dice, hit_points_roll, ...safeData } =
+          (data ?? {}) as Record<string, unknown>;
+        return {
+          source: 'compendium' as const,
+          name: token.name,
+          imageUrl: token.imageUrl,
+          statBlock: { ...rest, data: safeData },
+        };
+      }
+    }
+
+    // A token placed straight onto the board, with no sheet behind it. Thin,
+    // but a player who presses the button deserves what the board already
+    // knows rather than an error - and the DM can still see it is thin.
+    if (!actor) {
+      return {
+        source: 'token' as const,
+        name: token.name,
+        imageUrl: token.imageUrl,
+        statBlock: {
+          size: token.w >= 4 ? 'Gargantuan' : token.w >= 3 ? 'Huge' : token.w >= 2 ? 'Large' : '',
+          type: '',
+          alignment: '',
+          armorClass: token.ac,
+          challengeRating: '',
+        },
+      };
+    }
+
+    const ownedItems = await db
+      .select()
+      .from(items)
+      .where(eq(items.ownerActorId, actor.id))
+      .orderBy(asc(items.sortOrder));
+
+    return {
+      source: 'actor' as const,
+      name: token.name,
+      imageUrl: token.imageUrl,
+      statBlock: {
+        size: '',
+        type: actor.race,
+        alignment: actor.alignment,
+        armorClass: actor.armorClass,
+        speed: `${actor.speed} ft.`,
+        str: actor.str,
+        dex: actor.dex,
+        con: actor.con,
+        int: actor.int,
+        wis: actor.wis,
+        cha: actor.cha,
+        challengeRating: actor.challengeRating,
+        items: ownedItems.map((item) => ({
+          id: item.id,
+          name: item.name,
+          type: item.type,
+        })),
+      },
+    };
   });
 }

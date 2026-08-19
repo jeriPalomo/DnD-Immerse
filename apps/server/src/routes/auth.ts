@@ -1,8 +1,8 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { loginSchema, passwordChangeSchema, registerSchema } from '@dnd/shared';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
-import { users } from '../db/schema.js';
+import { campaignMembers, users } from '../db/schema.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import {
   SESSION_COOKIE,
@@ -22,6 +22,35 @@ function publicUser(user: User) {
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
   };
+}
+
+/**
+ * The shape every endpoint that returns "you" must send.
+ *
+ * `dmOfAny` decides whether DM-only surfaces are offered at all, so a route
+ * that answered with a bare `publicUser` would blank the DM's nav until the
+ * next refresh. One helper, used by all four, rather than four chances to
+ * forget.
+ */
+async function sessionUser(user: User) {
+  return { ...publicUser(user), dmOfAny: await isDmOfAny(user.id) };
+}
+
+/**
+ * Whether this user runs any campaign at all.
+ *
+ * The nav is global while `isDM` is per-campaign, so a surface like the NPC
+ * roster - which only a DM can ever fill - has nothing to gate on without
+ * this. Answering "would any DM control be useful to you" is all it does; it
+ * authorises nothing, and every DM-only route still checks its own campaign.
+ */
+async function isDmOfAny(userId: string): Promise<boolean> {
+  const rows = await db
+    .select({ campaignId: campaignMembers.campaignId })
+    .from(campaignMembers)
+    .where(and(eq(campaignMembers.userId, userId), eq(campaignMembers.role, 'dm')))
+    .limit(1);
+  return rows.length > 0;
 }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
@@ -46,7 +75,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const token = await createSession(user.id);
     reply.setCookie(SESSION_COOKIE, token, sessionCookieOptions);
-    return { user: publicUser(user) };
+    return { user: await sessionUser(user) };
   });
 
   app.post('/api/auth/login', async (request, reply) => {
@@ -65,7 +94,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const token = await createSession(user.id);
     reply.setCookie(SESSION_COOKIE, token, sessionCookieOptions);
-    return { user: publicUser(user) };
+    return { user: await sessionUser(user) };
   });
 
   app.post('/api/auth/logout', async (request, reply) => {
@@ -75,7 +104,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/api/auth/me', async (request) => {
-    return { user: request.user ? publicUser(request.user) : null };
+    if (!request.user) return { user: null };
+    return { user: await sessionUser(request.user) };
   });
 
   app.patch('/api/auth/me', { preHandler: requireAuth }, async (request) => {
@@ -92,7 +122,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const rows = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
-    return { user: publicUser(rows[0]) };
+    return { user: await sessionUser(rows[0]) };
   });
 
   /**

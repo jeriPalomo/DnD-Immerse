@@ -68,6 +68,19 @@ export interface WireToken {
   conditions: string[];
   /** The same effects with their names and countdowns, for the HUD. */
   effects: WireEffect[];
+  /**
+   * Whether this viewer may open the creature's stat block. Decided on the
+   * server from the campaign setting and the token's own override, and sent so
+   * the client knows whether to offer the button - never so it can decide. The
+   * route re-checks; an honest client is not a security assumption.
+   */
+  statsVisible: boolean;
+  /**
+   * The DM's per-creature override. Sent as `false` to players whatever it
+   * really is: telling them the DM has closed *this* creature marks it as the
+   * interesting one, which is most of what closing it was meant to withhold.
+   */
+  statsHidden: boolean;
   /** Only ever true in a DM payload; hidden tokens are stripped for players. */
   hidden: boolean;
   locked: boolean;

@@ -173,6 +173,25 @@ export function CampaignSettings({
             </select>
           </Field>
 
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={campaign.playersSeeEnemyStats ?? true}
+              onChange={(e) => patch({ playersSeeEnemyStats: e.target.checked }, true)}
+              className="mt-0.5 size-4 shrink-0 accent-arcane-500"
+            />
+            <span>
+              <span className="block text-sm font-medium text-ink-200">
+                Players can read enemy stat blocks
+              </span>
+              <span className="mt-0.5 block text-xs text-ink-500">
+                Abilities, speed, actions and conditions for creatures they do not control.
+                Hit points are never included — those stay yours to narrate. Turn a single
+                creature off with “Hide stats” on its token.
+              </span>
+            </span>
+          </label>
+
           <div>
             <span className="mb-1.5 block text-sm font-medium text-ink-200">Campaign banner</span>
             <AvatarUpload

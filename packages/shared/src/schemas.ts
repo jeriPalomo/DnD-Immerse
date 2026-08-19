@@ -138,6 +138,8 @@ export const tokenInputSchema = z.object({
   conditions: z.array(z.string().max(40)).max(30).default([]),
   hidden: z.boolean().default(false),
   locked: z.boolean().default(false),
+  /** Closes this one creature's stat block while the campaign default stays open. */
+  statsHidden: z.boolean().default(false),
 });
 
 export type TokenInput = z.infer<typeof tokenInputSchema>;

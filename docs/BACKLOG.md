@@ -25,6 +25,42 @@ audio system rather than extending it.
 
 ---
 
+## The player's side of the table — 2026-08-18
+
+**Only a DM creates campaign content.** `POST /api/actors` took
+`type: 'npc'` from anyone — the one creation path never gated, while tokens,
+scenes and `from-monster` all were. Nothing in the UI offered it, which is
+precisely why it lasted: the absence of a button is not a permission. It now
+requires a `campaignId` and runs it through `requireDM`, refusing rather than
+silently downgrading to a character. Four tests created NPCs without a campaign
+as *setup* and were updated to pass one; four new tests assert the refusal,
+including that a DM of one campaign cannot make an NPC in another.
+
+**Enemy stat blocks are granted, hit points never.** Players asked to see what
+they are fighting. `campaigns.playersSeeEnemyStats` (default on) opens the
+block — abilities, speed, actions, CR, conditions — and `tokens.statsHidden`
+closes one creature for the boss. Hit points were deliberately excluded from
+the grant and stay redacted by `showHp`; the stat block route strips them from
+all three branches (compendium, actor, bare token). Verified in a browser: a
+player reads Nimble Escape and Scimitar off a goblin and gets "Hit points are
+not shown — ask the DM".
+
+`actors.srdMonsterId` is new, because `from-monster` copied the hot scalars and
+dropped actions and traits entirely — there was no route from a goblin on the
+board back to what a goblin does. Null for hand-written NPCs and anything
+stamped earlier; those fall back to their own columns, and a token with no
+sheet at all falls back to what the board knows.
+
+**Also fixed:** `PATCH /api/campaigns/:id` had the empty-`set` bug for the
+fourth time in this codebase — every field optional, no guard, so a body of
+`{}` reached `set({})` and threw. And `token:create` was not persisting
+`statsHidden`, found only because a test asserted the override worked.
+
+**Still open:** a monster stamped from the bestiary gets no items, so it has no
+attacks — the DM cannot swing a goblin from its sheet. Older than this work.
+
+---
+
 ## A UI pass from the DM's chair — 2026-08-18
 
 Raised after playing the finished build, all of it from the DM side.

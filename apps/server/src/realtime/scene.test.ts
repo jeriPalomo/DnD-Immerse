@@ -178,6 +178,7 @@ describe('token placement', () => {
       {
         name: 'Ancient Red Dragon',
         type: 'npc',
+        campaignId,
         hpMax: 546,
         armorClass: 22,
         prototypeToken: { w: 4, h: 4, actorLinked: false, disposition: 'hostile' },
@@ -328,6 +329,7 @@ describe('initiative and damage', () => {
       {
         name: 'Orc',
         type: 'npc',
+        campaignId,
         hpMax: 30,
         hpCurrent: 30,
         dex: 12,

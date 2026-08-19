@@ -271,7 +271,33 @@ name and a description; anything left blank falls back to the Zod schema's
 default on the server. An item you cannot swing is decorative.
 
 **Enemy hit points are redacted from players in the tracker.** Knowing the boss
-is on 7 HP changes how a table plays; that is the DM's to reveal.
+is on 7 HP changes how a table plays; that is the DM's to reveal. This is
+*separate* from whether players may read a stat block, and stays true whatever
+that setting says — see below.
+
+**What a creature is, and how close it is to dying, are two decisions.**
+`campaigns.playersSeeEnemyStats` (default **on**) lets players read the stat
+block of a creature they do not control — abilities, speed, actions, CR, and
+the conditions it is under; `tokens.statsHidden` closes one creature while the
+campaign stays open, for the boss whose tricks are the encounter. The override
+is only ever restrictive, so there is one direction to reason about. **Neither
+ever widens hit points**, which stay behind `showHp` in every payload and are
+stripped from the stat block response in all three of its branches. `statsHidden`
+is sent to players as `false` whatever it really is: telling them the DM closed
+*this* creature marks it as the interesting one, which is most of what closing
+it withheld. `mayReadStats` in `realtime/scene.ts` answers this for both the
+token payload and the route, because a button that appears and an answer that
+refuses is worse than neither.
+
+**Only a DM creates campaign content.** `POST /api/actors` accepted
+`type: 'npc'` from anyone for the life of the project — the one creation path
+left open, while `token:create`, every scene route and `from-monster` were all
+gated. It now requires a `campaignId` and passes it through `requireDM`, and
+refuses rather than quietly downgrading to a character. Players still create
+and edit their own sheets, items and spells: that is theirs, not the
+campaign's. The NPCs nav entry is gated on `dmOfAny` from `/api/auth/me`, which
+offers surfaces and authorises nothing — the absence of a button was never a
+permission, which is exactly how this hole survived unnoticed.
 
 **Visibility is stored, not inferred from grants.** Journal sharedness is a
 column on the entry. Deriving it from "does an ownership row exist" meant a

@@ -208,7 +208,7 @@ describe('death saves', () => {
 
   it('refuses a player rolling for someone else', async () => {
     const other = await api<{ actor: { id: string } }>(
-      'POST', '/api/actors', { name: 'DM NPC', type: 'npc', hpMax: 10, hpCurrent: 0 }, dm.cookie,
+      'POST', '/api/actors', { name: 'DM NPC', type: 'npc', campaignId, hpMax: 10, hpCurrent: 0 }, dm.cookie,
     );
 
     const created = next<{ token: WireToken }>(dmSocket, 'token:created');

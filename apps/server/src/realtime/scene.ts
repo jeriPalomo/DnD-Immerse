@@ -89,7 +89,7 @@ async function activeSceneOf(campaignId: string) {
  */
 const dragCache = new Map<
   string,
-  { walls: Wall[]; tokens: Token[]; effects: EffectsView; at: number }
+  { walls: Wall[]; tokens: Token[]; effects: EffectsView; allowsStats: boolean; at: number }
 >();
 const DRAG_CACHE_TTL_MS = 5000;
 
@@ -100,7 +100,7 @@ export function invalidateDragCache(sceneId: string): void {
 async function dragState(
   sceneId: string,
   campaignId: string,
-): Promise<{ walls: Wall[]; tokens: Token[]; effects: EffectsView }> {
+): Promise<{ walls: Wall[]; tokens: Token[]; effects: EffectsView; allowsStats: boolean }> {
   const cached = dragCache.get(sceneId);
   if (cached && Date.now() - cached.at < DRAG_CACHE_TTL_MS) return cached;
 
@@ -111,10 +111,23 @@ async function dragState(
   // Cached alongside the walls for the same reason: a blinded token's sight is
   // recomputed on every drag frame, and effects are what decide that.
   const effects = await effectsViewFor(campaignId, sceneTokens.map((token) => token.id));
+  // Cached for the same reason again: token:move runs at ~30Hz per player, and
+  // a per-frame lookup of a campaign setting would be a query per frame.
+  const allowsStats = await campaignAllowsStats(campaignId);
 
-  const entry = { walls: sceneWalls, tokens: sceneTokens, effects, at: Date.now() };
+  const entry = { walls: sceneWalls, tokens: sceneTokens, effects, allowsStats, at: Date.now() };
   dragCache.set(sceneId, entry);
   return entry;
+}
+
+/** The campaign's default for whether players may read enemy stat blocks. */
+export async function campaignAllowsStats(campaignId: string): Promise<boolean> {
+  const rows = await db
+    .select({ allowed: campaigns.playersSeeEnemyStats })
+    .from(campaigns)
+    .where(eq(campaigns.id, campaignId))
+    .limit(1);
+  return rows[0]?.allowed ?? true;
 }
 
 /* ----------------------------------------------------------- projection */
@@ -153,7 +166,20 @@ function toWireScene(scene: Scene): WireScene {
  * another player: the party knowing each other's hit points is the point of a
  * party panel. What is hidden is unowned tokens - monsters.
  */
-function toWireToken(token: Token, effects: EffectsView, showHp = true): WireToken {
+/**
+ * `showStats` covers what a creature *is* - the conditions it is under, and the
+ * stat block reachable from it. `showHp` covers how close it is to dying, and
+ * the two are deliberately separate decisions: a table can agree that knowing
+ * an ogre is an ogre is ordinary play while "the ogre is on 7" stays the DM's
+ * to narrate.
+ */
+function toWireToken(
+  token: Token,
+  effects: EffectsView,
+  showHp = true,
+  showStats = true,
+  isDM = true,
+): WireToken {
   return {
     id: token.id,
     sceneId: token.sceneId,
@@ -179,8 +205,12 @@ function toWireToken(token: Token, effects: EffectsView, showHp = true): WireTok
     ac: token.ac,
     // Derived from the token's effect rows rather than a column, so the label,
     // the mechanics and the timer are one thing that cannot disagree.
-    conditions: conditionsOf(effects.byToken.get(token.id)),
-    effects: toWireEffects(effects.byToken.get(token.id), effects.round),
+    conditions: showStats ? conditionsOf(effects.byToken.get(token.id)) : [],
+    effects: showStats ? toWireEffects(effects.byToken.get(token.id), effects.round) : [],
+    /** Whether this viewer may ask for the stat block. Never a client decision. */
+    statsVisible: showStats,
+    // Never leaked to players: see the note on WireToken.
+    statsHidden: isDM ? token.statsHidden : false,
     hidden: token.hidden,
     locked: token.locked,
   };
@@ -202,6 +232,7 @@ export function filterTokensFor(
   isDM: boolean,
   userId: string,
   effects: EffectsView,
+  campaignAllowsStats: boolean,
 ): WireToken[] {
   if (isDM) return list.map((token) => toWireToken(token, effects));
 
@@ -211,7 +242,34 @@ export function filterTokensFor(
       if (token.hidden && token.ownerUserId !== userId) return false;
       return true;
     })
-    .map((token) => toWireToken(token, effects, Boolean(token.ownerUserId)));
+    .map((token) =>
+      toWireToken(
+        token,
+        effects,
+        Boolean(token.ownerUserId),
+        mayReadStats(token, false, userId, campaignAllowsStats),
+        false,
+      ),
+    );
+}
+
+/**
+ * Whether a viewer may read what a creature is.
+ *
+ * One function, used by both the payload gate and the stat block route, so the
+ * board and the API cannot disagree about who may see what. The per-token flag
+ * is only ever restrictive - it cannot open a creature the campaign has closed
+ * - which leaves one direction to reason about.
+ */
+export function mayReadStats(
+  token: Token,
+  isDM: boolean,
+  userId: string,
+  campaignAllowsStats: boolean,
+): boolean {
+  if (isDM) return true;
+  if (token.ownerUserId === userId) return true;
+  return campaignAllowsStats && !token.statsHidden;
 }
 
 /* ------------------------------------------------------------ permissions */
@@ -358,6 +416,9 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
   // between audiences, only which tokens each viewer is sent.
   const effects = await effectsViewFor(campaignId, all.map((token) => token.id));
   const blinded = blindedTokenIds(effects.byToken);
+  // Once for the whole push, like the effects above: it is the same answer for
+  // every socket in the room.
+  const allowsStats = await campaignAllowsStats(campaignId);
 
   // Per-socket, because both "hidden unless you own it" and line of sight
   // differ between players.
@@ -368,7 +429,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
     if (isDM) {
       socket.emit('scene:state', {
         scene: wireScene,
-        tokens: filterTokensFor(all, true, userId, effects),
+        tokens: filterTokensFor(all, true, userId, effects, allowsStats),
         vision: null,
         doors,
         notes,
@@ -380,7 +441,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
 
     const view = await computePlayerView(scene, sceneWalls, all, userId, blinded);
     // Two filters in sequence: hidden tokens first, then line of sight.
-    const permitted = filterTokensFor(all, false, userId, effects);
+    const permitted = filterTokensFor(all, false, userId, effects, allowsStats);
     const sighted = view
       ? visibleTokens(
           all.filter((t) => permitted.some((p) => p.id === t.id)),
@@ -391,7 +452,7 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
 
     socket.emit('scene:state', {
       scene: wireScene,
-      tokens: filterTokensFor(sighted, false, userId, effects),
+      tokens: filterTokensFor(sighted, false, userId, effects, allowsStats),
       vision: view?.vision ?? null,
       doors: playerDoors,
       // A pin the DM has not revealed is absent, like a hidden token.
@@ -420,12 +481,13 @@ async function broadcastToken(
   // nothing regardless of which token moved.
   const effects = await effectsViewFor(campaignId, all.length > 0 ? all.map((t) => t.id) : [token.id]);
   const blinded = blindedTokenIds(effects.byToken);
+  const allowsStats = await campaignAllowsStats(campaignId);
 
   for (const socket of await io.in(campaignRoom(campaignId)).fetchSockets()) {
     const userId = socket.data.user.id;
     const isDM = socket.data.rooms.get(campaignId) === 'dm';
 
-    let visible = filterTokensFor([token], isDM, userId, effects);
+    let visible = filterTokensFor([token], isDM, userId, effects, allowsStats);
 
     // Out of sight is as good as hidden: a moving enemy behind a wall must not
     // stream its position to a player who cannot see it.
@@ -565,6 +627,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       walls: cachedWalls,
       tokens: cachedTokens,
       effects: cachedEffects,
+      allowsStats: cachedAllowsStats,
     } = await dragState(token.sceneId, ctx.campaignId);
     const live = cachedTokens.map((t) =>
       t.id === input.tokenId ? { ...t, x: input.x, y: input.y } : t,
@@ -581,7 +644,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
         viewerId,
         blindedTokenIds(cachedEffects.byToken),
       );
-      const permitted = filterTokensFor(live, false, viewerId, cachedEffects);
+      const permitted = filterTokensFor(live, false, viewerId, cachedEffects, cachedAllowsStats);
       const sighted = visibleTokens(
         live.filter((t) => permitted.some((p) => p.id === t.id)),
         polygons,
@@ -597,7 +660,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
       s.emit('vision:update', {
         polygons,
-        tokens: filterTokensFor(sighted, false, viewerId, cachedEffects),
+        tokens: filterTokensFor(sighted, false, viewerId, cachedEffects, cachedAllowsStats),
       });
     }
   });
@@ -730,6 +793,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       ac: ac ?? null,
       hidden: input.hidden,
       locked: input.locked,
+      statsHidden: input.statsHidden,
       createdAt: Date.now(),
     };
 
@@ -770,6 +834,10 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       'hidden', 'locked', 'ownerUserId', 'actorId', 'actorLinked', 'layer', 'w', 'h',
       'x', 'y', 'visionRange', 'darkvisionRange', 'lightBright', 'lightDim', 'lightColor',
       'disposition',
+      // What a player may know about a creature is the DM's call, for the same
+      // reason `disposition` is: a player able to set this could simply share
+      // the boss with themselves.
+      'statsHidden',
     ];
     const touchesDmField = dmOnly.some((key) => key in input);
 

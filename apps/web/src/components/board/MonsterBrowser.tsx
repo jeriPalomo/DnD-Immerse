@@ -243,8 +243,12 @@ export function MonsterBrowser({
   );
 }
 
-/** The parts of a stat block a DM checks before dropping the monster in. */
-function StatBlock({ monster }: { monster: Record<string, any> }) {
+/**
+ * The parts of a stat block a DM checks before dropping the monster in - and,
+ * exported, the same block a player reads about a creature they are fighting.
+ * One renderer, so the two can never describe a goblin differently.
+ */
+export function StatBlock({ monster }: { monster: Record<string, any> }) {
   const data = (monster.data ?? {}) as Record<string, any>;
   const abilities = [
     ['STR', monster.str], ['DEX', monster.dex], ['CON', monster.con],

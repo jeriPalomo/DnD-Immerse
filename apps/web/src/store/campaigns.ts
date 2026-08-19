@@ -15,6 +15,8 @@ export interface Campaign {
   createdAt: number;
   role: 'dm' | 'player';
   ruleset?: '2014' | '2024';
+  /** Whether players may read stat blocks for creatures they do not control. */
+  playersSeeEnemyStats?: boolean;
 }
 
 export interface Member {

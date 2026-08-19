@@ -338,7 +338,7 @@ describe('NPCs stay off the player roster', () => {
     const created = await api<{ actor: { id: string } }>(
       'POST',
       '/api/actors',
-      { name: 'Ancient Red Dragon', type: 'npc' },
+      { name: 'Ancient Red Dragon', type: 'npc', campaignId },
       dm.cookie,
     );
     await api(
@@ -373,7 +373,7 @@ describe('group rolls', () => {
 
     // An NPC in the same campaign, which must not appear in any result.
     const npc = await api<{ actor: { id: string } }>(
-      'POST', '/api/actors', { name: 'Tavern Keeper', type: 'npc' }, dm.cookie,
+      'POST', '/api/actors', { name: 'Tavern Keeper', type: 'npc', campaignId }, dm.cookie,
     );
     await api('POST', `/api/actors/${npc.actor.id}/campaigns/${campaignId}`, {}, dm.cookie);
   });
@@ -565,5 +565,52 @@ describe('a socket acts in the campaign it last joined', () => {
     });
 
     expect(backAgain).toBe(campaignId);
+  });
+});
+
+/**
+ * Campaign content is the DM's.
+ *
+ * `POST /api/actors` accepted `type: 'npc'` from anyone for the life of the
+ * project - the one creation path left open to players, while tokens, scenes
+ * and `from-monster` were all gated. Nothing in the UI offered it, which is
+ * exactly why it went unnoticed: the check has to be on the server, because
+ * the absence of a button is not a permission.
+ */
+describe('only a DM creates campaign content', () => {
+  it('refuses an NPC from a player', async () => {
+    await expect(
+      api('POST', '/api/actors', { name: 'Smuggled NPC', type: 'npc', campaignId }, alice.cookie),
+    ).rejects.toThrow(/Only the DM/i);
+  });
+
+  it('refuses an NPC that names no campaign, so there is nothing to authorise against', async () => {
+    await expect(
+      api('POST', '/api/actors', { name: 'Homeless NPC', type: 'npc' }, alice.cookie),
+    ).rejects.toThrow(/needs a campaign/i);
+  });
+
+  it('refuses an NPC in a campaign the player does not run', async () => {
+    const theirs = await api<{ campaign: { id: string } }>(
+      'POST', '/api/campaigns', { name: "Alice's own game" }, alice.cookie,
+    );
+
+    // Alice is a DM - of her own campaign. That must not carry over.
+    await expect(
+      api('POST', '/api/actors', { name: 'Trespasser', type: 'npc', campaignId }, alice.cookie),
+    ).rejects.toThrow(/Only the DM/i);
+
+    // ...and she can still make one in the game she does run.
+    const mine = await api<{ actor: { id: string; type: string } }>(
+      'POST', '/api/actors', { name: 'Her NPC', type: 'npc', campaignId: theirs.campaign.id }, alice.cookie,
+    );
+    expect(mine.actor.type).toBe('npc');
+  });
+
+  it('still lets a player create their own character', async () => {
+    const created = await api<{ actor: { type: string } }>(
+      'POST', '/api/actors', { name: 'Alice Second', type: 'character' }, alice.cookie,
+    );
+    expect(created.actor.type).toBe('character');
   });
 });
