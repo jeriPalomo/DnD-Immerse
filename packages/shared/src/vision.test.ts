@@ -111,18 +111,40 @@ describe('computeVisibility', () => {
         wall((i % 40) * 3, Math.floor(i / 40) * 3, (i % 40) * 3 + 2, Math.floor(i / 40) * 3),
       );
 
-    const time = (walls: VisionWall[]) => {
-      for (let i = 0; i < 20; i++) computeVisibility({ x: 5, y: 5 }, walls, 12);
+    const smallWalls = build(100);
+    const largeWalls = build(1200);
+
+    const batch = (walls: VisionWall[]) => {
       const started = performance.now();
       for (let i = 0; i < 50; i++) computeVisibility({ x: 5, y: 5 }, walls, 12);
       return (performance.now() - started) / 50;
     };
 
-    const small = time(build(100));
-    const large = time(build(1200));
+    for (let i = 0; i < 20; i++) {
+      computeVisibility({ x: 5, y: 5 }, smallWalls, 12);
+      computeVisibility({ x: 5, y: 5 }, largeWalls, 12);
+    }
+
+    // The fastest batch, not the average, and the two interleaved.
+    //
+    // This is a timing assertion on a machine that may be doing anything else,
+    // and noise only ever *adds* time - so the minimum is the honest estimate
+    // of what the code costs and the mean is an estimate of how busy the box
+    // was. Measuring small fully and then large fully also lets one load spike
+    // land entirely on one of them; alternating spreads that across both.
+    // Averaging 50 runs was not enough on its own: under load this failed at
+    // 2.25ms against a 2ms floor.
+    let small = Infinity;
+    let large = Infinity;
+    for (let round = 0; round < 7; round++) {
+      small = Math.min(small, batch(smallWalls));
+      large = Math.min(large, batch(largeWalls));
+    }
 
     // Flat rather than quadratic: a twelvefold dungeon must not cost
-    // twelvefold, let alone a hundredfold.
+    // twelvefold, let alone a hundredfold. The floor keeps a sub-millisecond
+    // `small` from making the ratio meaningless; an uncalled sweep at 1200
+    // walls lands far above it either way.
     expect(large).toBeLessThan(Math.max(small * 4, 2));
   });
 });

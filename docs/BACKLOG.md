@@ -25,6 +25,29 @@ audio system rather than extending it.
 
 ---
 
+## The intermittent test failure — 2026-08-19
+
+Chased deliberately rather than waited for. Six clean runs proved nothing, so
+the machine was loaded with twelve busy cores and it fell over on the second
+run: not a socket test as suspected, but the vision benchmark — `expected
+2.2505 to be less than 2`.
+
+The invariant it guards is real and worth keeping: radius culling makes the
+sweep's cost flat rather than quadratic in the wall count. What was wrong was
+the measurement. It averaged 50 runs and compared against a hard 2 ms floor,
+and an average is inflated by every scheduler preemption, so on a busy box the
+test was reporting how loaded the machine was.
+
+It now takes the **fastest** of seven batches rather than the mean — noise only
+ever adds time, so the minimum is the honest estimate — and alternates the small
+and large dungeons so one load spike cannot land entirely on one of them.
+
+Checked in both directions, which is the part that matters for a benchmark:
+five loaded runs pass, and with culling temporarily removed it still fails at
+103 ms against a 3 ms bound. A timing test that cannot fail is worse than none.
+
+---
+
 ## Permissions sweep, and the player's own sheet — 2026-08-19
 
 **Swept every REST route against its guard.** All six route files carry a
