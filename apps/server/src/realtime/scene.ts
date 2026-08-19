@@ -14,9 +14,15 @@ import {
   SECRET_DOOR,
   drawingCreateSchema,
   encodeFog,
+  encodeTerrain,
+  footprintBlocked,
   movementBlocked,
   nextTokenName,
+  paintTerrain,
+  paintedCells,
   revealAll,
+  terrainForGrid,
+  terrainMatchesGrid,
   movementQuerySchema,
   pingSchema,
   reachableSquares,
@@ -52,6 +58,7 @@ import {
   campaignMembers,
   campaigns,
   fogExploration,
+  sceneTerrain,
   drawings as drawingsTable,
   mapNotes,
   scenes,
@@ -71,6 +78,7 @@ import { getMembership } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
 import type { IOServer, SocketData } from './index.js';
 import type { Scene, Token, Wall } from '../db/schema.js';
+import type { TerrainBrush, TerrainMap } from '@dnd/shared';
 
 type SceneSocket = Socket<ClientToServerEvents, ServerToClientEvents, object, SocketData>;
 
@@ -287,6 +295,24 @@ function mayControl(token: Token, isDM: boolean, userId: string): boolean {
   return token.ownerUserId === userId;
 }
 
+/**
+ * The ground the DM has painted on a scene, at the grid it is on now.
+ *
+ * Dropped rather than reinterpreted when the grid has moved, the same rule fog
+ * follows: the bits are indexed by width, so reading them at another width
+ * paints a lake diagonally across the map.
+ */
+async function terrainOf(scene: Scene): Promise<TerrainMap> {
+  const { gridWidth, gridHeight } = gridExtent(scene);
+  const rows = await db
+    .select()
+    .from(sceneTerrain)
+    .where(eq(sceneTerrain.sceneId, scene.id))
+    .limit(1);
+
+  return terrainForGrid(rows[0], gridWidth, gridHeight);
+}
+
 async function sceneOf(sceneId: string): Promise<Scene | null> {
   const rows = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1);
   return rows[0] ?? null;
@@ -428,6 +454,16 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
 
   // Per-socket, because both "hidden unless you own it" and line of sight
   // differ between players.
+  // Once for the room, like the effects above: the painted ground is the same
+  // for everyone who may see it at all.
+  const { gridWidth, gridHeight } = gridExtent(scene);
+  const storedTerrain = await db
+    .select()
+    .from(sceneTerrain)
+    .where(eq(sceneTerrain.sceneId, scene.id))
+    .limit(1);
+  const terrain = terrainForGrid(storedTerrain[0], gridWidth, gridHeight);
+
   for (const socket of await io.in(campaignRoom(campaignId)).fetchSockets()) {
     const userId = socket.data.user.id;
     const isDM = socket.data.rooms.get(campaignId) === 'dm';
@@ -441,6 +477,18 @@ export async function broadcastSceneState(io: IOServer, campaignId: string): Pro
         notes,
         drawings,
         walls: sceneWalls.map(toWireWall),
+      });
+
+      // Painted ground rides alongside, to the DM alone. Sent here as well as
+      // on each stroke so opening a scene shows what is already painted.
+      socket.emit('terrain:state', {
+        sceneId: scene.id,
+        terrain: {
+          ...paintedCells(terrain),
+          // The panel says so rather than the map quietly drawing nothing: this
+          // is the DM's hand work, not something re-earned by walking.
+          matchesGrid: terrainMatchesGrid(storedTerrain[0], gridWidth, gridHeight),
+        },
       });
       continue;
     }
@@ -581,6 +629,52 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
    * in a full scene push - a change that alters sight pushes the whole scene,
    * never one token.
    */
+  /**
+   * Paints ground, and tells the DM room what it now looks like.
+   *
+   * A pillar is four wall segments and drawing it that way is fine; a lake or a
+   * cave's ragged edge is not, which is what this is for.
+   *
+   * The painted map goes to the DM room alone. It is a map of the dungeon in
+   * the same way wall geometry is, and players feel it the same way they feel
+   * walls - through a movement overlay and a refused drag, both computed on the
+   * server.
+   */
+  socket.on('terrain:paint', async ({ sceneId, brush, cells }) => {
+    const ctx = await context();
+    if (!ctx || !ctx.isDM) {
+      socket.emit('error', { message: 'Only the DM can shape the ground' });
+      return;
+    }
+
+    const scene = await sceneOf(sceneId);
+    if (!scene || scene.campaignId !== ctx.campaignId) return;
+
+    const { gridWidth, gridHeight } = gridExtent(scene);
+    const painted = paintTerrain(await terrainOf(scene), cells, brush as TerrainBrush);
+    const { blockedBitmap, difficultBitmap } = encodeTerrain(painted);
+
+    await db
+      .insert(sceneTerrain)
+      .values({
+        sceneId: scene.id,
+        gridWidth,
+        gridHeight,
+        blockedBitmap,
+        difficultBitmap,
+        updatedAt: Date.now(),
+      })
+      .onConflictDoUpdate({
+        target: sceneTerrain.sceneId,
+        set: { gridWidth, gridHeight, blockedBitmap, difficultBitmap, updatedAt: Date.now() },
+      });
+
+    io.to(campaignDmRoom(ctx.campaignId)).emit('terrain:state', {
+      sceneId: scene.id,
+      terrain: { ...paintedCells(painted), matchesGrid: true },
+    });
+  });
+
   socket.on('fog:reveal', async ({ sceneId }) => {
     const ctx = await context();
     if (!ctx || !ctx.isDM) {
@@ -776,6 +870,12 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       const sceneWalls = await wallsOf(token.sceneId);
       const from = tokenCenter(token);
       const to = tokenCenter({ x: snapped.x, y: snapped.y, w, h });
+
+      if (scene && footprintBlocked(await terrainOf(scene), snapped.x, snapped.y, w, h)) {
+        socket.emit('error', { message: 'There is no footing there' });
+        await broadcastToken(io, ctx.campaignId, token);
+        return;
+      }
 
       if (movementBlocked(from, to, sceneWalls)) {
         socket.emit('error', { message: 'A wall blocks the way' });
@@ -1253,6 +1353,8 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     // `token:commit` rejects anyway.
     const blockers = ctx.isDM ? sceneTokens : visible;
 
+    const terrain = await terrainOf(scene);
+
     const rangeFor = async (token: Token) =>
       reachableSquares({
         origin: { x: token.x, y: token.y, w: token.w, h: token.h },
@@ -1261,6 +1363,10 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
         walls: sceneWalls,
         occupied: blockers.filter((t) => t.id !== token.id),
         bounds,
+        // The overlay stops where the ground does. Players are never sent the
+        // terrain itself - they are sent the squares it leaves them, exactly as
+        // they are sent a vision polygon rather than the walls behind it.
+        terrain,
       });
 
     let squares: [number, number][] = [];

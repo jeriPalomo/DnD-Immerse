@@ -16,6 +16,7 @@ import type Konva from 'konva';
 import type { WireScene, WireToken } from '@dnd/shared';
 import { DoorLayer, FogLayer, NoteLayer, WallLayer } from './FogLayer.js';
 import { DrawingLayer } from './DrawingLayer.js';
+import { TerrainLayer } from './TerrainLayer.js';
 import { MovementLayer } from './MovementLayer.js';
 import { TemplateLayer } from './TemplateLayer.js';
 import { LightLayer, WeatherLayer } from './AtmosphereLayer.js';
@@ -75,7 +76,7 @@ export function BattleMap({
     scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool, templates, notes,
     drawings, encounter, activeActorId, moveRange, threatRange, showThreat, queryMovement, toggleThreat,
     select, target, moveToken, commitToken, pingMap, createWall, deleteWall, updateWall, toggleDoor, clearTemplate,
-    placeNote, toggleNote, removeNote, addDrawing, eraseDrawing,
+    placeNote, toggleNote, removeNote, addDrawing, eraseDrawing, terrain, paintTerrain,
   } = useTable();
 
   // Whose turn it is, so the board can say so without anyone reading the
@@ -99,6 +100,33 @@ export function BattleMap({
   const pinging = useRef(false);
   const myColor = isDM ? DM_COLOR : actorColor(activeActorId ?? user?.id ?? '');
   const drawingMode = wallTool === 'draw' || wallTool === 'arrow';
+  /** Painting ground is a drag over squares, so it suspends panning too. */
+  const groundBrush =
+    wallTool === 'blocked' ? 'blocked' : wallTool === 'difficult' ? 'difficult' : wallTool === 'erase-ground' ? 'clear' : null;
+
+  const painting = useRef(false);
+  /**
+   * Squares touched by the current run, flushed on release.
+   *
+   * Buffered in a ref rather than sent per mousemove: a drag across a lake is
+   * hundreds of moves, and one stroke should be one write and one broadcast.
+   * A ref rather than state for the same reason the drawing stroke uses
+   * updaters - mouse moves outrun React, and a closed-over array loses most of
+   * them.
+   */
+  const paintBuffer = useRef(new Map<string, [number, number]>());
+
+  /** One entry per grid cell touched, deduplicated as the pointer wanders. */
+  function paintSquare(point: { x: number; y: number }) {
+    const cell: [number, number] = [Math.floor(point.x), Math.floor(point.y)];
+    paintBuffer.current.set(`${cell[0]}:${cell[1]}`, cell);
+  }
+
+  function flushPaint() {
+    const cells = [...paintBuffer.current.values()];
+    paintBuffer.current.clear();
+    if (scene && groundBrush && cells.length > 0) paintTerrain(scene.id, groundBrush, cells);
+  }
 
   const observerRef = useRef<ResizeObserver | null>(null);
   // Zero until the container is measured; fitting against a placeholder size
@@ -283,13 +311,15 @@ export function BattleMap({
         x={view.x}
         y={view.y}
         // Panning is suspended while drawing, or the map slides under the pen.
-        draggable={!drawingMode}
+        draggable={!drawingMode && !groundBrush}
         // A ping is decided at mousedown, by which time Konva has already armed
         // a stage drag - and a dragging stage swallows the mousemoves the
         // stroke is made of, so the line came out as a stub near the release
         // point. Cancelling the drag here is what makes alt-drag draw at all.
         onDragStart={(e) => {
-          if (pinging.current) e.target.stopDrag();
+          // Same reason as the ping stroke: a dragging stage swallows the
+          // mousemoves a painted run is made of.
+          if (pinging.current || painting.current) e.target.stopDrag();
         }}
         onWheel={onWheel}
         onMouseDown={(e) => {
@@ -299,6 +329,14 @@ export function BattleMap({
             if (point) {
               pinging.current = true;
               setPingStroke([point.x, point.y]);
+            }
+            return;
+          }
+          if (groundBrush && isDM) {
+            const point = pointerGrid(e);
+            if (point) {
+              painting.current = true;
+              paintSquare(point);
             }
             return;
           }
@@ -314,6 +352,11 @@ export function BattleMap({
           if (pingStroke) {
             const point = pointerGrid(e);
             if (point) setPingStroke((current) => (current ? [...current, point.x, point.y] : current));
+            return;
+          }
+          if (painting.current) {
+            const point = pointerGrid(e);
+            if (point) paintSquare(point);
             return;
           }
           if (!drawingMode || !stroke) return;
@@ -333,6 +376,11 @@ export function BattleMap({
             }
             pinging.current = false;
             setPingStroke(null);
+            return;
+          }
+          if (painting.current) {
+            painting.current = false;
+            flushPaint();
             return;
           }
           if (!drawingMode || !stroke) return;
@@ -465,6 +513,14 @@ export function BattleMap({
 
         {/* Under the tokens too, and under the fog - which draws above them -
             so a player's range is covered wherever their sight is. */}
+        {/* DM only, and above the map but under the tokens: it describes the
+            ground, not what is standing on it. */}
+        {isDM && (
+          <Layer listening={false}>
+            <TerrainLayer grid={grid} blocked={terrain.blocked} difficult={terrain.difficult} />
+          </Layer>
+        )}
+
         <Layer listening={false}>
           <MovementLayer
             grid={grid}

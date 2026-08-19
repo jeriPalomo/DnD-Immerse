@@ -412,6 +412,29 @@ export const walls = sqliteTable(
  * grid square, base64-encoded. Unioning accumulated polygons would grow
  * without bound; a bitmap is fixed-size and merges with a bitwise OR.
  */
+/**
+ * Ground the DM has painted impassable or difficult, one row per scene.
+ *
+ * A table rather than columns on `scenes` on purpose: scene rows are projected
+ * to players by `toWireScene`, and terrain is a map of the dungeon in the same
+ * way wall geometry is. Keeping it out of the row that gets projected makes
+ * shipping it to a player by accident much harder than remembering not to.
+ *
+ * The grid it was painted at is stored with it for the reason fog stores it:
+ * bits are indexed `y * width + x`, so read at another width every row shifts
+ * and a lake lands diagonally across the map.
+ */
+export const sceneTerrain = sqliteTable('scene_terrain', {
+  sceneId: text('scene_id')
+    .primaryKey()
+    .references(() => scenes.id, { onDelete: 'cascade' }),
+  gridWidth: integer('grid_width').notNull().default(0),
+  gridHeight: integer('grid_height').notNull().default(0),
+  blockedBitmap: text('blocked_bitmap').notNull().default(''),
+  difficultBitmap: text('difficult_bitmap').notNull().default(''),
+  updatedAt: epoch('updated_at'),
+});
+
 export const fogExploration = sqliteTable(
   'fog_exploration',
   {

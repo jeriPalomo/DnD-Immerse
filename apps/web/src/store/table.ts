@@ -39,7 +39,9 @@ interface TableState {
   /** Only ever populated for the DM; players never receive wall geometry. */
   walls: WireWall[];
   /** DM wall-drawing mode. */
-  wallTool: 'off' | 'wall' | 'door' | 'secret' | 'note' | 'draw' | 'arrow';
+  wallTool: 'off' | 'wall' | 'door' | 'secret' | 'note' | 'draw' | 'arrow' | 'blocked' | 'difficult' | 'erase-ground';
+  /** Painted ground. DM-only: a player is never sent this. */
+  terrain: { blocked: [number, number][]; difficult: [number, number][]; matchesGrid: boolean };
   encounter: WireEncounter | null;
   templates: WireTemplate[];
   /**
@@ -82,6 +84,7 @@ interface TableState {
   /** DM-only fog controls; the server refuses anyone else. */
   revealFog: (sceneId: string) => void;
   resetFog: (sceneId: string) => void;
+  paintTerrain: (sceneId: string, brush: 'blocked' | 'difficult' | 'clear', cells: [number, number][]) => void;
   createToken: (payload: Record<string, unknown>) => void;
   moveToken: (tokenId: string, x: number, y: number) => void;
   commitToken: (tokenId: string, x: number, y: number) => void;
@@ -89,7 +92,9 @@ interface TableState {
   deleteToken: (tokenId: string) => void;
   /** `points` carries a dragged stroke, in grid units; empty for a plain dot. */
   pingMap: (x: number, y: number, points?: number[]) => void;
-  setWallTool: (tool: 'off' | 'wall' | 'door' | 'secret' | 'note' | 'draw' | 'arrow') => void;
+  setWallTool: (
+    tool: 'off' | 'wall' | 'door' | 'secret' | 'note' | 'draw' | 'arrow' | 'blocked' | 'difficult' | 'erase-ground',
+  ) => void;
   addDrawing: (kind: 'freehand' | 'arrow' | 'text', points: number[], color: string, text?: string) => void;
   eraseDrawing: (id: string | 'mine' | 'all') => void;
   placeNote: (x: number, y: number) => Promise<void>;
@@ -219,6 +224,7 @@ export const useTable = create<TableState>((set, get) => ({
   drawings: [],
   walls: [],
   wallTool: 'off',
+  terrain: { blocked: [], difficult: [], matchesGrid: true },
   encounter: null,
   lastDamage: null,
   journalVersion: 0,
@@ -317,6 +323,8 @@ export const useTable = create<TableState>((set, get) => ({
       }, 6000);
     });
     socket.on('wall:created', ({ wall }) => set({ walls: [...get().walls, wall] }));
+    // Only ever arrives on a DM socket; the server sends it to the DM room.
+    socket.on('terrain:state', ({ terrain }) => set({ terrain }));
     socket.on('wall:updated', ({ wall }) =>
       set({ walls: get().walls.map((w) => (w.id === wall.id ? wall : w)) }),
     );
@@ -396,6 +404,11 @@ export const useTable = create<TableState>((set, get) => ({
 
   resetFog(sceneId) {
     get().socket?.emit('fog:reset', { sceneId });
+  },
+
+  paintTerrain(sceneId, brush, cells) {
+    if (cells.length === 0) return;
+    get().socket?.emit('terrain:paint', { sceneId, brush, cells });
   },
 
   createToken(payload) {

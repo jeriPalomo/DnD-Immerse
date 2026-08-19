@@ -376,6 +376,27 @@ constants exist because `door: 2` sat as a bare integer described only in a
 comment, and went unread long enough that secret doors were being drawn, sent
 and clicked like any other.
 
+**Painted ground is a map of the dungeon, and never leaves the DM room.** A
+pillar is four wall segments and drawing it that way is fine; a lake or a
+cave's ragged edge is not. `scene_terrain` holds two bitmaps per scene —
+blocked and difficult — and is a table rather than columns on `scenes`
+deliberately: scene rows are projected to players by `toWireScene`, and keeping
+terrain out of the projected row is harder to get wrong than remembering not to
+include it. Players feel it exactly as they feel walls: a movement overlay that
+stops at it and a refused drag, both decided on the server. A square is never
+both blocked and difficult — painting one clears the other, or a ford would
+stay impassable underneath for reasons nothing on screen explains.
+
+**Difficult ground made the movement flood fill a weighted search.** It was a
+breadth-first search on the stated grounds that "every step costs the same, so
+the first time a square is reached is also the cheapest way to reach it", and
+that stops being true at two squares per step: a route through rubble may be
+beaten later by going round, and a plain queue records the dearer one and stops
+short. Costs are only 1 or 2, so a bucket per cost is enough. `footprintBlocked`
+is shared by the overlay and by `token:commit`, so what the overlay promises and
+what the server allows are one answer — and it tests the whole footprint,
+because half an ogre in the chasm is still in the chasm.
+
 **Walls block sight and movement independently.** `blocksSight` and
 `blocksMovement` are separate flags, so a railing can be seen over but not
 crossed and a curtain the reverse. Collision is enforced on `token:commit` for

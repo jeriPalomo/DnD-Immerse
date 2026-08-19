@@ -30,7 +30,7 @@ interface GridGuess {
 }
 
 export function SceneManager({ campaignId }: { campaignId: string }) {
-  const { scene, activateScene, revealFog, resetFog, wallTool, setWallTool, walls, eraseDrawing } =
+  const { scene, activateScene, revealFog, resetFog, wallTool, setWallTool, walls, eraseDrawing, terrain } =
     useTable();
   const [scenes, setScenes] = useState<SceneRow[]>([]);
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
@@ -340,6 +340,12 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
                   ['note', 'Pin'],
                   ['draw', 'Pen'],
                   ['arrow', 'Arrow'],
+                  // Ground, not architecture: a pillar is four wall segments
+                  // and that is fine, but a lake or a cave's ragged edge is not
+                  // worth tracing.
+                  ['blocked', 'Blocked'],
+                  ['difficult', 'Rough'],
+                  ['erase-ground', 'Clear'],
                 ] as const
               ).map(([value, label]) => (
                 <button
@@ -359,6 +365,22 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
               Click to place points; each click continues the run. Double-click to
               finish a run, alt-click a wall to delete it.
             </p>
+            <p className="mt-1 text-[10px] text-ink-600">
+              Blocked and Rough are painted by dragging over squares — nobody enters
+              blocked ground, and rough ground costs double to cross. Players never
+              see the paint; their movement range simply stops at it.
+            </p>
+
+            {!terrain.matchesGrid && (
+              // Said out loud rather than drawn wrong. The bits are indexed by
+              // width, so painted ground read at another grid lands diagonally
+              // across the map - and unlike fog, this is hand work nobody wants
+              // silently discarded.
+              <p className="mt-1.5 rounded border border-ember-500/40 bg-ember-500/10 px-1.5 py-1 text-[10px] text-ember-300">
+                Ground was painted at a different grid, so it is not shown. Calibrate
+                the grid first, then paint.
+              </p>
+            )}
           </div>
 
           <div className="flex gap-1">

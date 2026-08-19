@@ -441,7 +441,16 @@ export type InitiativeUpdatePayload = z.infer<typeof initiativeUpdateSchema>;
 
 /* ---------------------------------------------------------------- events */
 
+export interface TerrainCells {
+  blocked: [number, number][];
+  difficult: [number, number][];
+  /** False when it was painted at a different grid, so the panel can say so. */
+  matchesGrid: boolean;
+}
+
 export interface ServerToClientEvents {
+  /** DM room only. Players are never sent painted ground. */
+  'terrain:state': (payload: { sceneId: string; terrain: TerrainCells }) => void;
   'scene:state': (payload: {
     scene: WireScene | null;
     tokens: WireToken[];
@@ -519,6 +528,18 @@ export interface ClientToServerEvents {
   /** DM-only. Opens the whole scene to every player, or forgets it entirely. */
   'fog:reveal': (payload: { sceneId: string }) => void;
   'fog:reset': (payload: { sceneId: string }) => void;
+  /**
+   * DM-only. Paints ground impassable or difficult.
+   *
+   * The painted map itself never travels to a player - it is a map of the
+   * dungeon, like wall geometry. They feel it through the movement overlay and
+   * through a refused drag, both answered on the server.
+   */
+  'terrain:paint': (payload: {
+    sceneId: string;
+    brush: 'blocked' | 'difficult' | 'clear';
+    cells: [number, number][];
+  }) => void;
 
   'token:move': (payload: TokenMovePayload) => void;
   'token:commit': (payload: TokenCommitPayload) => void;

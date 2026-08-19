@@ -25,6 +25,33 @@ audio system rather than extending it.
 
 ---
 
+## Painted ground — 2026-08-19
+
+Raised while thinking about exploration out of combat. Two of the three worries
+turned out to be answered already, and worth writing down: **movement is not
+turn-gated** (`token:commit` checks who owns a token, never whose turn it is,
+and enforces no distance out of combat), and **walls already stop players**
+there. What was missing was marking an *area* impassable without tracing
+segments around it.
+
+`scene_terrain` holds a blocked and a difficult bitmap per scene, painted by
+dragging with two new brushes. Blocked ground is never entered; difficult ground
+costs double, which turned the movement flood fill from breadth-first into a
+weighted search — the old comment said every step costs the same, and that
+stopped being true.
+
+Players are never sent the paint. It is a map of the dungeon like wall geometry,
+and the art already shows the chasm; they meet it as a movement overlay that
+stops and a drag that is refused.
+
+Verified end to end with `npm run playtest`: the DM painted a six-square band,
+the player's socket received **zero** terrain frames, and dragging onto
+`(4,2)` left the token at `(1,1)` with "There is no footing there". Terrain
+painted at another grid is reported in the Prep panel rather than drawn smeared
+— unlike fog this is hand work, and silently discarding it would be worse.
+
+---
+
 ## Playtesting as a player, and fog the DM owns — 2026-08-19
 
 **`npm run playtest`.** The player's side of the app is the half that cannot be

@@ -99,6 +99,13 @@
       "when": 1787109990536,
       "tag": "0013_brainy_karma",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1787165450655,
+      "tag": "0014_nifty_gunslinger",
+      "breakpoints": true
     }
   ]
 }
