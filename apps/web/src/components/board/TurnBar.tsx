@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useTable } from '../../store/table.js';
 import type { WireInitiativeEntry } from '@dnd/shared';
+import { FACE_GAP_PX, layoutTurnBar, stackOpacity } from './turnBarLayout.js';
 
 /** Fixed, because the board's height calculation has to subtract it. */
 export const TURN_BAR_HEIGHT_REM = 4.5;
@@ -8,16 +9,6 @@ export const TURN_BAR_HEIGHT_REM = 4.5;
 /** Beyond this fraction of the bar's width, a move is a wrap, not a shift. */
 const WRAP_FRACTION = 0.6;
 const SLIDE_MS = 320;
-
-/**
- * Space kept for the "+N" counter whether or not it has anything to say.
- *
- * Reserved rather than added when needed: if the counter appeared and
- * disappeared it would change the strip's width, which changes how many
- * portraits fit, which changes the counter - a measurement that argues with
- * itself and flickers.
- */
-const OVERFLOW_SLOT_REM = 3.25;
 
 /**
  * The turn order, as a strip you read left to right.
@@ -41,7 +32,6 @@ export function TurnBar() {
   const stripRef = useRef<HTMLDivElement | null>(null);
   const positions = useRef(new Map<string, number>());
   const observerRef = useRef<ResizeObserver | null>(null);
-  const [hiddenCount, setHiddenCount] = useState(0);
   /** Bumped by the ResizeObserver so the fit is recomputed on a resize. */
   const [stripWidth, setStripWidth] = useState(0);
 
@@ -128,41 +118,7 @@ export function TurnBar() {
     positions.current = next;
   }, [activeIndex, encounter?.round, count]);
 
-  /**
-   * Show only the creatures that fit whole.
-   *
-   * A dozen combatants overflow the bar, and a portrait sliced down the middle
-   * at the edge reads as a rendering fault. The ones past the edge are hidden
-   * outright and counted instead; because the order is rotated to the current
-   * turn, a hidden creature slides into view of its own accord as its turn
-   * approaches, which is the point of the bar.
-   *
-   * Measured rather than estimated, and done by touching the nodes rather than
-   * by re-rendering a shorter list: slicing the list would change the widths
-   * that decided the slice.
-   */
-  useLayoutEffect(() => {
-    const strip = stripRef.current;
-    if (!strip) return;
-
-    // Rects, not `offsetLeft`: offsets are measured against the nearest
-    // positioned ancestor, which is not this strip, so comparing them against
-    // its width compares two different coordinate spaces - and reports that
-    // everything fits however narrow the window gets.
-    const edge = strip.getBoundingClientRect().right;
-    let hidden = 0;
-
-    for (const node of Array.from(strip.children) as HTMLElement[]) {
-      // A round divider is not a creature; it rides with whatever follows it.
-      const isEntry = Boolean(node.dataset.entryId);
-      const fits = node.getBoundingClientRect().right <= edge + 1;
-
-      node.style.visibility = fits ? '' : 'hidden';
-      if (isEntry && !fits) hidden++;
-    }
-
-    setHiddenCount(hidden);
-  }, [activeIndex, encounter?.round, count, stripWidth]);
+  const { openCount, stackStep } = layoutTurnBar(count, stripWidth);
 
   if (!encounter?.isActive || count === 0) return null;
 
@@ -202,9 +158,21 @@ export function TurnBar() {
                 index === 0
                   ? 'size-12 border-ember-400 shadow-[0_0_0_3px_rgba(249,115,22,0.25)]'
                   : nextRound
-                    ? 'size-9 border-ink-800 opacity-40'
-                    : 'size-9 border-ink-700 opacity-80'
+                    ? 'size-9 border-ink-800'
+                    : 'size-9 border-ink-700'
               }`}
+              style={
+                index >= openCount
+                  ? {
+                      // Clumped at the end and fading, still in turn order. The
+                      // negative margin eats the flex gap as well as the
+                      // overlap, so the fan starts flush against the open row.
+                      marginLeft: `-${Math.round(FACE_GAP_PX + (36 - stackStep))}px`,
+                      opacity: stackOpacity(index - openCount, count - openCount),
+                      zIndex: Math.max(0, count - index),
+                    }
+                  : { opacity: nextRound ? 0.4 : 0.85 }
+              }
             >
               {entry.imageUrl ? (
                 <img src={entry.imageUrl} alt="" loading="lazy" className="size-full object-cover" />
@@ -218,19 +186,6 @@ export function TurnBar() {
         ))}
       </div>
 
-      {/* Always present, so its arrival cannot change how many portraits fit. */}
-      <div
-        className="shrink-0 text-center text-ink-500"
-        style={{ width: `${OVERFLOW_SLOT_REM}rem` }}
-        title={hiddenCount > 0 ? `${hiddenCount} more later in the order` : undefined}
-      >
-        {hiddenCount > 0 && (
-          <>
-            <div className="font-mono text-sm leading-none text-ink-400">+{hiddenCount}</div>
-            <div className="text-[8px] tracking-wider uppercase">later</div>
-          </>
-        )}
-      </div>
     </div>
   );
 }
