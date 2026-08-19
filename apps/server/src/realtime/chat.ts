@@ -235,6 +235,20 @@ function buildCard(item: Item, actor: Actor, targetTokenId: string | null = null
 
     if (s.attackRoll) actions.push('attack');
     if (s.damageDice) actions.push('damage');
+  } else if (item.type === 'consumable') {
+    // A potion used to post a card with a name and nothing to press. It gets
+    // buttons only where a DM has filled in the dice: the SRD keeps a potion's
+    // numbers inside its prose, and reading mechanics out of prose is the one
+    // thing this codebase refuses to do.
+    if (s.damageDice) actions.push('damage');
+    if (s.healingDice) actions.push('heal');
+    subtitle = [
+      s.consumableType,
+      s.healingDice ? `heals ${s.healingDice}` : '',
+      [s.damageDice, s.damageType].filter(Boolean).join(' '),
+    ]
+      .filter(Boolean)
+      .join(' · ');
   } else {
     subtitle = item.type;
   }
@@ -559,6 +573,14 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
                 versatile: input.action === 'versatile',
               });
         label = `${item.name} — ${input.action === 'critical' ? 'critical damage' : 'damage'}`;
+        break;
+
+      case 'heal':
+        // Rolled and posted, never applied - exactly as damage behaves. Whose
+        // hit points move stays the decision it already was, so this needs no
+        // exception to "healing is the DM's".
+        expression = String(s.healingDice ?? '');
+        label = `${item.name} — healing`;
         break;
 
       case 'save': {

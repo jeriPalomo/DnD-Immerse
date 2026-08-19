@@ -329,7 +329,7 @@ function Message({
   onAction: (
     itemId: string,
     actorId: string,
-    action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile',
+    action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile' | 'heal',
     mode?: RollMode,
     targetTokenId?: string | null,
   ) => void;
@@ -442,6 +442,7 @@ const ACTION_LABELS: Record<string, string> = {
   critical: 'Crit',
   versatile: 'Two-handed',
   save: 'Save',
+  heal: 'Heal',
 };
 
 function ItemCard({
@@ -452,7 +453,7 @@ function ItemCard({
   onAction: (
     itemId: string,
     actorId: string,
-    action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile',
+    action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile' | 'heal',
     mode?: RollMode,
     targetTokenId?: string | null,
   ) => void;

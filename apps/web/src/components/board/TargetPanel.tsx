@@ -67,7 +67,16 @@ export function evaluateOptions({
   const distance = tokenDistanceInFeet(self, target, 'standard', scene.feetPerSquare);
 
   return items
-    .filter((item) => item.type === 'weapon' || item.type === 'spell')
+    // Consumables join weapons and spells now that they carry dice and can
+    // post a card with a button on it. One with nothing filled in is left out:
+    // it would be a name you can press that does nothing, which is the whole
+    // problem this was meant to fix.
+    .filter((item) => {
+      if (item.type === 'weapon' || item.type === 'spell') return true;
+      if (item.type !== 'consumable') return false;
+      const s = item.system as Record<string, unknown>;
+      return Boolean(s.healingDice || s.damageDice);
+    })
     .map((item) => {
       const { reach, selfOnly, long } = reachOf(item);
       const level = (item.system.level as number | undefined) ?? 0;

@@ -247,6 +247,20 @@ export const consumableSystemSchema = z.object({
   ...physicalFields,
   consumableType: z.enum(['potion', 'scroll', 'ammunition', 'food', 'other']).default('other'),
   uses: usesSchema.nullable().default(null),
+  /**
+   * What drinking or throwing it actually does.
+   *
+   * A potion used to carry a type, a use count and prose, so the card it posted
+   * had a name and no button - the decorative-item problem. These are empty by
+   * default and stay empty for anything imported, because the SRD publishes a
+   * potion's dice only inside its description and reading mechanics out of
+   * prose is wrong in both directions.
+   */
+  healingDice: z.string().max(30).default(''),
+  damageDice: z.string().max(30).default(''),
+  damageType: z.string().max(30).default(''),
+  /** Touch for a draught, a thrown band for a flask of acid. */
+  range: rangeSchema.default({ type: 'touch', value: 5, long: null }),
   description: z.string().max(8000).default(''),
 });
 

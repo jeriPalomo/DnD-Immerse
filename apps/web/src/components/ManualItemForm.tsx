@@ -520,6 +520,33 @@ function ConsumableFields({ system, set }: { system: Blob; set: Setter }) {
 
   return (
     <>
+      {/* Without these a potion posts a card with a name and nothing to press.
+          The SRD keeps a potion's numbers in its prose, so for anything beyond
+          the four curated healing potions this is where they come from. */}
+      <Row>
+        <Field label="Healing">
+          <Input
+            placeholder="2d4+2"
+            value={(system.healingDice as string) ?? ''}
+            onChange={(e) => set('healingDice', e.target.value)}
+          />
+        </Field>
+        <Field label="Damage">
+          <Input
+            placeholder="2d6"
+            value={(system.damageDice as string) ?? ''}
+            onChange={(e) => set('damageDice', e.target.value)}
+          />
+        </Field>
+        <Field label="Damage type">
+          <Input
+            placeholder="fire"
+            value={(system.damageType as string) ?? ''}
+            onChange={(e) => set('damageType', e.target.value)}
+          />
+        </Field>
+      </Row>
+
       <Row>
         <Field label="Sort">
           <Select value={(system.consumableType as string) ?? 'other'} onChange={(v) => set('consumableType', v)}>

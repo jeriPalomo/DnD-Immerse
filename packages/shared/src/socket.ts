@@ -119,7 +119,7 @@ export interface WireCard {
   subtitle: string;
   description: string;
   /** Buttons the viewer may press, already filtered by what the item supports. */
-  actions: ('attack' | 'damage' | 'critical' | 'save' | 'versatile')[];
+  actions: ('attack' | 'damage' | 'critical' | 'save' | 'versatile' | 'heal')[];
   saveAbility: string | null;
   saveDC: number | null;
   /** The token this was aimed at when it was posted, if any. */

@@ -518,3 +518,68 @@ export function auditSpellConditions(spells: CompendiumSpell[]): SpellConditionA
 
   return audit;
 }
+
+/* -------------------------------------------------------------- potions */
+
+/**
+ * What the SRD's healing potions restore, keyed by compendium id.
+ *
+ * Curated, because the compendium publishes these numbers only inside the
+ * item's description and parsing prose for mechanics is the mistake this
+ * codebase keeps refusing to make.
+ *
+ * Keyed by the SRD index rather than the display name, because the name is not
+ * unique: 5.1 carries two items called "Potion of Healing" - the common 2d4+2
+ * flask, and a generic entry whose text just points at the rarity table. Keying
+ * by name matched whichever happened to be loaded last and would have stamped
+ * one potion's dice onto the other. The generic entry is deliberately absent:
+ * it has no fixed dice to state.
+ *
+ * `auditPotionHealing` checks the table against the compendium on every import
+ * - an entry matching no real item can never fire and cannot be verified, so it
+ * is a bug in the table rather than a gap to live with. Everything else stays
+ * descriptive until a DM types its dice in by hand, the same bargain
+ * `SPELL_CONDITIONS` strikes.
+ */
+export const POTION_HEALING: Record<string, string> = {
+  'potion-of-healing-common': '2d4+2',
+  'potion-of-healing-greater': '4d4+4',
+  'potion-of-healing-superior': '8d4+8',
+  'potion-of-healing-supreme': '10d4+20',
+};
+
+export interface PotionAudit {
+  /** Entries that matched a compendium item, and were applied. */
+  matched: string[];
+  /** Entries matching nothing in the compendium - a bug in the table. */
+  missing: string[];
+  /**
+   * Matched items whose own text does not mention hit points. A smell test,
+   * not a parser: it cannot prove the dice are right, but a healing potion
+   * whose description never says "hit points" is worth a second look. The 2024
+   * dataset letter-spaces its prose ("H i t   P o i n t"), which is exactly the
+   * sort of thing this is meant to surface rather than silently accept.
+   */
+  suspicious: string[];
+}
+
+/** Checks the curated table against the data, never against itself. */
+export function auditPotionHealing(
+  items: { id: string; name: string; description: string }[],
+): PotionAudit {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const audit: PotionAudit = { matched: [], missing: [], suspicious: [] };
+
+  for (const id of Object.keys(POTION_HEALING)) {
+    const item = byId.get(id);
+    if (!item) {
+      audit.missing.push(id);
+      continue;
+    }
+
+    audit.matched.push(id);
+    if (!/hit\s*point/i.test(item.description ?? '')) audit.suspicious.push(id);
+  }
+
+  return audit;
+}

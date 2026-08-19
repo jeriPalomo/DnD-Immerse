@@ -137,7 +137,7 @@ interface TableState {
   cardAction: (
     itemId: string,
     actorId: string,
-    action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile',
+    action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile' | 'heal',
     mode?: RollMode,
     targetTokenId?: string | null,
   ) => void;

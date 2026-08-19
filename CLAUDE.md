@@ -286,6 +286,22 @@ and "Rings" — so `categoryFilter` maps seven browsable shelves onto them, and
 matches at word starts. A bare `%ring%` files every piece of *adventuring* gear
 in the magic ring drawer.
 
+**A potion is a consumable, and consumables carry dice.** Everything imported
+arrived as `weapon` or `equipment`, so a potion could never hold the healing an
+item card needs - `buildCard` offers those buttons only to a consumable - and
+posting one produced a card with a name and nothing to press. All forty potions
+in 5.1 declare their own category, so they import as consumables now.
+`POTION_HEALING` is curated and keyed by **compendium id, never by name**: 5.1
+carries two items called "Potion of Healing", the common 2d4+2 flask and a
+generic entry that only points at the rarity table, and keying by name stamped
+one potion's dice onto the other. `auditPotionHealing` runs inside
+`srd:import`, and its smell test earned its keep immediately by catching that
+the 2024 dataset letter-spaces its prose ("H i t   P o i n t").
+
+**A heal rolls and posts; it never applies.** Exactly as damage already
+behaves, so "healing stays the DM's" needs no exception - whose hit points move
+is still a separate click.
+
 **A hand-entered item fills the same `system` blob an imported one does.** The
 manual form's fields are the ones the attack table and target panel read, not a
 name and a description; anything left blank falls back to the Zod schema's

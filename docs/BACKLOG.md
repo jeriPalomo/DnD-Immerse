@@ -25,6 +25,33 @@ audio system rather than extending it.
 
 ---
 
+## Consumables that do something — 2026-08-19
+
+A potion carried a type, a use count and prose, so the card it posted had a name
+and no button. `consumableSystemSchema` now holds healing dice, damage dice, a
+damage type and a range; `buildCard` offers Heal and Damage where those are
+filled in; and `cardAction` rolls a heal the way it rolls damage - **posting the
+result, never applying it**, which is what keeps "healing is the DM's" true
+without a special case.
+
+Two things went wrong on the way, both caught by verifying rather than
+assuming. Potions imported as `equipment`, so the dice were written and then
+silently dropped: all forty declare themselves as potions, and they are
+consumables now. And the curated table was keyed by name, which 5.1 breaks -
+there are two items called "Potion of Healing", the common 2d4+2 flask and a
+generic pointer at the rarity table. Keyed by compendium id instead, and the
+generic entry is deliberately absent since it has no fixed dice to state.
+
+The audit earned its keep immediately: it flagged that the 2024 dataset
+letter-spaces its descriptions ("H i t   P o i n t"), which no `hit point`
+check would ever match.
+
+Verified end to end: a Potion of Healing added from the compendium reaches the
+sheet as a consumable with `2d4+2`, appears in the reach list, and rolls
+`2d4+2: [3, 2]+2 = 7` in the battle log while the character stays on 27/27.
+
+---
+
 ## The turn bar is faces only — 2026-08-19
 
 Clarified after seeing it: the bar should show tokens, not names, and mark who

@@ -238,7 +238,7 @@ export const cardRequestSchema = z.object({
 export const cardActionSchema = z.object({
   itemId: z.string(),
   actorId: z.string(),
-  action: z.enum(['attack', 'damage', 'critical', 'save', 'versatile']),
+  action: z.enum(['attack', 'damage', 'critical', 'save', 'versatile', 'heal']),
   mode: z.enum(['normal', 'advantage', 'disadvantage']).default('normal'),
   /**
    * Who the spell is aimed at. A spell save is rolled by the TARGET, so without

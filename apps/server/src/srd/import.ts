@@ -11,7 +11,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import { auditSpellConditions, parseRange, type AbilityKey, type ItemSystem } from '@dnd/shared';
+import {
+  POTION_HEALING,
+  auditPotionHealing,
+  auditSpellConditions,
+  parseRange,
+  type AbilityKey,
+  type ItemSystem,
+} from '@dnd/shared';
 import { db } from '../db/index.js';
 import { srdItems, srdMonsters, srdSpells } from '../db/schema.js';
 import { paths } from '../env.js';
@@ -275,6 +282,11 @@ function toEquipmentSystem(item: Json): { itemType: string; system: ItemSystem }
 
   const isWeapon = categories.some((c) => c === 'weapon' || c === 'weapons');
   const isArmor = categories.some((c) => c === 'armor' || c === 'armour' || c === 'shields');
+  // A potion is a consumable, not a piece of equipment. Everything imported
+  // used to arrive as `weapon` or `equipment`, so a potion could never carry
+  // the healing an item card needs - `buildCard` only offers those buttons to
+  // a consumable. All forty in 5.1 say so themselves.
+  const isPotion = categories.some((c) => c === 'potion' || c === 'potions');
   const category = isWeapon ? 'weapon' : isArmor ? 'armor' : '';
   const weight = item.weight ?? 0;
   const cost = item.cost ? `${item.cost.quantity} ${item.cost.unit}` : '';
@@ -333,6 +345,23 @@ function toEquipmentSystem(item: Json): { itemType: string; system: ItemSystem }
         dexCap: item.armor_class?.dex_bonus === false ? 0 : (item.armor_class?.max_bonus ?? null),
         strengthRequirement: item.str_minimum ?? 0,
         stealthDisadvantage: Boolean(item.stealth_disadvantage),
+      } as ItemSystem,
+    };
+  }
+
+  if (isPotion) {
+    return {
+      itemType: 'consumable',
+      system: {
+        ...shared,
+        consumableType: 'potion',
+        uses: null,
+        // Filled from the curated table by the caller where one exists; the
+        // other thirty-six stay descriptive rather than guessed at.
+        healingDice: '',
+        damageDice: '',
+        damageType: '',
+        range: { type: 'touch', value: 5, long: null },
       } as ItemSystem,
     };
   }
@@ -430,6 +459,16 @@ export async function importSrd(): Promise<void> {
 
   const toItemRow = (e: Json, ruleset: '2014' | '2024') => {
     const { itemType, system } = toEquipmentSystem(e);
+
+    // The healing potions, from the curated table. The SRD states their dice
+    // only in prose, so this is the one place those numbers come from - and
+    // `auditPotionHealing` below checks the table against the data rather than
+    // against itself.
+    const healing = POTION_HEALING[String(e.index ?? '')];
+    if (healing && itemType === 'consumable') {
+      (system as Record<string, unknown>).healingDice = healing;
+    }
+
     return {
       // 2024 reuses many indexes, so namespace them to avoid collisions.
       id: ruleset === '2024' ? `2024-${e.index}` : e.index,
@@ -482,6 +521,7 @@ export async function importSrd(): Promise<void> {
   console.log('  2024 spells are not published in the SRD dataset; 2024 campaigns use the 2014 list');
 
   reportSpellConditions(spellRows);
+  reportPotionHealing(itemRows);
 }
 
 /**
@@ -496,6 +536,27 @@ export async function importSrd(): Promise<void> {
  * A mismatch is the loud one. It means the table and the dataset disagree about
  * which save a spell forces, which makes every casting of it quietly wrong.
  */
+/**
+ * The curated potion table, checked against the compendium.
+ *
+ * Same rule as the spell conditions above: an entry that matches no real item
+ * can never fire and cannot be verified by anything this project has, so it is
+ * a bug in the table rather than a gap to live with.
+ */
+function reportPotionHealing(items: { id: string; name: string; description: string }[]): void {
+  const audit = auditPotionHealing(items);
+
+  console.log(
+    `  potion healing: ${audit.matched.length}/${Object.keys(POTION_HEALING).length} matched the compendium`,
+  );
+  if (audit.missing.length > 0) {
+    console.log(`    NOT IN THE COMPENDIUM (fix the table): ${audit.missing.join(', ')}`);
+  }
+  if (audit.suspicious.length > 0) {
+    console.log(`    text never mentions hit points, worth a look: ${audit.suspicious.join(', ')}`);
+  }
+}
+
 function reportSpellConditions(
   spells: { name: string; duration: string; concentration: boolean; description: string; system: unknown }[],
 ): void {
