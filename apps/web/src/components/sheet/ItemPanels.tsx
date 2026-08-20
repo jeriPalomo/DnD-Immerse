@@ -45,17 +45,26 @@ export function SpellPanel({
                 return (
                   <li key={spell.id}>
                     <div className="flex items-center gap-2 px-3 py-2">
-                      {level > 0 && (
-                        <button
-                          type="button"
-                          disabled={!editable}
-                          onClick={() => onTogglePrepared(spell.id, !s.prepared)}
-                          title={s.prepared ? 'Prepared' : 'Not prepared'}
-                          className={`size-3 shrink-0 rounded-full border transition-colors ${
-                            s.prepared ? 'border-ember-400 bg-ember-400' : 'border-ink-500'
-                          }`}
-                        />
-                      )}
+                      {/* Drawn rather than offered when it cannot be pressed;
+                          see the inventory's equipped mark. */}
+                      {level > 0 &&
+                        (editable ? (
+                          <button
+                            type="button"
+                            onClick={() => onTogglePrepared(spell.id, !s.prepared)}
+                            title={s.prepared ? 'Prepared' : 'Not prepared'}
+                            className={`size-3 shrink-0 rounded-full border transition-colors ${
+                              s.prepared ? 'border-ember-400 bg-ember-400' : 'border-ink-500'
+                            }`}
+                          />
+                        ) : (
+                          <span
+                            title={s.prepared ? 'Prepared' : 'Not prepared'}
+                            className={`size-3 shrink-0 rounded-full ${
+                              s.prepared ? 'bg-ember-400' : 'bg-ink-700'
+                            }`}
+                          />
+                        ))}
                       <button
                         onClick={() => setExpanded(isOpen ? null : spell.id)}
                         className="min-w-0 flex-1 text-left"
@@ -153,15 +162,27 @@ export function InventoryPanel({
       <ul className="divide-y divide-ink-800 rounded-lg border border-ink-700 bg-ink-850">
         {items.map((item) => (
           <li key={item.id} className="flex items-center gap-2 px-3 py-2">
-            <button
-              type="button"
-              disabled={!editable}
-              onClick={() => onToggleEquipped(item.id, !item.system.equipped)}
-              title={item.system.equipped ? 'Equipped' : 'Stowed'}
-              className={`size-3 shrink-0 rounded-sm border transition-colors ${
-                item.system.equipped ? 'border-emerald-400 bg-emerald-500' : 'border-ink-500'
-              }`}
-            />
+            {/* A dead checkbox is not information. Read-only - the drawer at
+                the table, or somebody else's sheet - draws the state instead,
+                so "equipped" reads as a fact rather than as a control that
+                will not respond. */}
+            {editable ? (
+              <button
+                type="button"
+                onClick={() => onToggleEquipped(item.id, !item.system.equipped)}
+                title={item.system.equipped ? 'Equipped' : 'Stowed'}
+                className={`size-3 shrink-0 rounded-sm border transition-colors ${
+                  item.system.equipped ? 'border-emerald-400 bg-emerald-500' : 'border-ink-500'
+                }`}
+              />
+            ) : (
+              <span
+                title={item.system.equipped ? 'Equipped' : 'Stowed'}
+                className={`size-3 shrink-0 rounded-sm ${
+                  item.system.equipped ? 'bg-emerald-500' : 'bg-ink-700'
+                }`}
+              />
+            )}
             <span className="min-w-0 flex-1 truncate text-sm text-ink-100">
               {item.name}
               {(item.system.quantity ?? 1) > 1 && (

@@ -744,6 +744,24 @@ the HUD while the server offered it a full 30 ft. Its attack list comes from the
 stat block route, which is already permission-checked and already knows how to
 answer for a stamped monster, a hand-written NPC or a bare token.
 
+**An explanation lives on the control, not under it.** The map panel carried
+eight standing paragraphs describing checkboxes and buttons that were right
+beside them — a wall of grey to read past every time it opened, with the reader
+left to work out which sentence went with which control. They are `title`
+attributes now: the same words, on hover. The board keeps only its *transient*
+hint, which says what the tool you have just picked does.
+
+**A control that cannot be pressed is drawn, not disabled.** The read-only sheet
+rendered its equipped and prepared toggles as `disabled` checkboxes, so a player
+opening their own sheet at the table met a column of dead boxes. Read-only draws
+the state instead, and "equipped" reads as a fact rather than as a control that
+will not answer.
+
+**The `?` dialog holds both references.** Keyboard on one tab, status effects on
+the other. What a condition does is the same kind of thing as what a key does —
+something you look up mid-turn and then close — and it used to be a collapsed
+section sitting between the DM and the fight.
+
 **A player reads their own sheet without leaving the table.** `MySheetDrawer`
 is read-only on purpose: editing mid-combat is what the sheet page is for, and
 a drawer that can write hit points is one that can lose an edit when a damage

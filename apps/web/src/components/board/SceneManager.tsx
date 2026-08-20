@@ -275,19 +275,12 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
 
       {tab === 'vision' && scene && (
         <div className="space-y-3">
-          <label className="flex items-center gap-2 text-xs text-ink-300">
-            <input
-              type="checkbox"
-              checked={scene.visionEnabled}
-              onChange={(e) => void patchScene(scene.id, { visionEnabled: e.target.checked })}
-              className="accent-ember-500"
-            />
-            Dynamic vision
-          </label>
-          <p className="text-[11px] text-ink-500">
-            With vision on, each player sees only what their tokens can see. Walls
-            are computed on the server, so players never receive the geometry.
-          </p>
+          <Setting
+            checked={scene.visionEnabled}
+            onChange={(on) => void patchScene(scene.id, { visionEnabled: on })}
+            label="Dynamic vision"
+            hint="Each player sees only what their tokens can see. Computed on the server, so players never receive the wall geometry."
+          />
 
           {/* Fog the DM owns. Exploration is otherwise written only by walking,
               so there was no way to open a door dramatically and no way to
@@ -295,7 +288,12 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
           <div className="rounded-lg border border-ink-800 p-2">
             <div className="mb-1.5 text-[10px] tracking-wider text-ink-500 uppercase">Fog</div>
             <div className="flex gap-1.5">
-              <Button size="sm" variant="secondary" onClick={() => revealFog(scene.id)}>
+              <Button
+                size="sm"
+                variant="secondary"
+                title="Opens the whole scene to everyone, as if they had walked it"
+                onClick={() => revealFog(scene.id)}
+              >
                 Reveal all
               </Button>
               <Button
@@ -315,26 +313,14 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
                 Reset
               </Button>
             </div>
-            <p className="mt-1.5 text-[11px] text-ink-500">
-              Reveal opens the whole scene to everyone; reset puts it back to darkness
-              and they explore again by walking.
-            </p>
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-ink-300">
-            <input
-              type="checkbox"
-              checked={scene.playerDrawing}
-              onChange={(e) => void patchScene(scene.id, { playerDrawing: e.target.checked })}
-              className="accent-ember-500"
-            />
-            Let players draw and ping
-          </label>
-          <p className="text-[11px] text-ink-500">
-            Off, only you can mark the map — useful while you are describing
-            something, or during a puzzle. Enforced on the server, so it holds
-            whatever the players' clients think.
-          </p>
+          <Setting
+            checked={scene.playerDrawing}
+            onChange={(on) => void patchScene(scene.id, { playerDrawing: on })}
+            label="Let players draw and ping"
+            hint="Off, only you can mark the map — useful while you are describing something, or during a puzzle. Enforced on the server."
+          />
 
           <div>
             <div className="mb-1.5 flex items-center justify-between text-[11px] text-ink-400">
@@ -445,15 +431,12 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
             </button>
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-ink-300">
-            <input
-              type="checkbox"
-              checked={scene.globalIllumination}
-              onChange={(e) => void patchScene(scene.id, { globalIllumination: e.target.checked })}
-              className="accent-ember-500"
-            />
-            Daylight (ignore token light radius)
-          </label>
+          <Setting
+            checked={scene.globalIllumination}
+            onChange={(on) => void patchScene(scene.id, { globalIllumination: on })}
+            label="Daylight (ignore token light radius)"
+            hint="Lights the whole scene, so a torch radius stops mattering. Walls still block sight."
+          />
 
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
@@ -492,7 +475,10 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
           </div>
 
           {scene.globalIllumination && (
-            <label className="block">
+            <label
+              className="block"
+              title="Dims sight toward what each token can supply for itself — dusk and fog, without going fully dark"
+            >
               <div className="mb-1 flex justify-between text-[11px] text-ink-400">
                 <span>Gloom</span>
                 <span className="font-mono text-ink-200">{Math.round(scene.darkness * 100)}%</span>
@@ -510,10 +496,6 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
                 onTouchEnd={() => void patchScene(scene.id, { darkness: localDarkness })}
                 className="w-full accent-arcane-500"
               />
-              <p className="mt-1 text-[10px] text-ink-600">
-                Dims sight toward what each token can supply for itself — dusk and fog,
-                without going fully dark.
-              </p>
             </label>
           )}
         </div>
@@ -737,6 +719,38 @@ function GridCalibration({
         Show grid
       </label>
     </div>
+  );
+}
+
+/**
+ * A checkbox whose explanation lives on hover rather than under it.
+ *
+ * The panel carried eight standing paragraphs explaining controls that were
+ * right beside them, which is a wall of grey text to read past every time you
+ * open it - and the reader had to work out which sentence went with which
+ * control. The words are the same; they are just not always on screen.
+ */
+function Setting({
+  checked,
+  onChange,
+  label,
+  hint,
+}: {
+  checked: boolean;
+  onChange: (on: boolean) => void;
+  label: string;
+  hint: string;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-ink-300" title={hint}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="accent-ember-500"
+      />
+      {label}
+    </label>
   );
 }
 

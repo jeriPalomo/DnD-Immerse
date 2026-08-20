@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import { ConditionsReference } from './ConditionsReference.js';
+
 const SHORTCUTS: [string, string][] = [
   ['Esc', 'Clear selection and target'],
   ['Del', 'Delete the selected token (DM)'],
@@ -13,23 +16,46 @@ const SHORTCUTS: [string, string][] = [
 ];
 
 /**
- * The shortcut list.
+ * The help dialog: what the keys do, and what the conditions do.
  *
  * Shortcuts nobody can discover are folklore, so this is the affordance that
- * makes the rest real — and the hint under the board points at it.
+ * makes the rest real - and the hint under the board points at it. The
+ * conditions reference joins it because it is the same kind of thing: something
+ * you look up mid-turn and then close. It used to be a collapsed section in the
+ * combat panel, where it sat between the DM and the fight.
  */
 export function ShortcutHelp({ onClose }: { onClose: () => void }) {
+  const [tab, setTab] = useState<'keys' | 'conditions'>('keys');
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-xl border border-ink-700 bg-ink-900 p-5 shadow-2xl"
+        className="w-full max-w-md rounded-xl border border-ink-700 bg-ink-900 p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-lg text-ink-100">Keyboard</h2>
+          <div className="flex gap-1">
+            {(
+              [
+                ['keys', 'Keyboard'],
+                ['conditions', 'Status effects'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                aria-selected={tab === id}
+                role="tab"
+                className={`rounded-lg px-2 py-1 text-sm transition-colors ${
+                  tab === id ? 'bg-ink-800 text-ink-100' : 'text-ink-500 hover:text-ink-300'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button
             onClick={onClose}
             className="rounded px-2 py-1 text-ink-400 hover:bg-ink-800 hover:text-ink-100"
@@ -39,6 +65,12 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
+        {tab === 'conditions' ? (
+          <div className="max-h-[60vh] overflow-y-auto">
+            <ConditionsReference />
+          </div>
+        ) : (
+          <>
         <dl className="space-y-1.5">
           {SHORTCUTS.map(([key, what]) => (
             <div key={key} className="flex items-baseline gap-3">
@@ -55,6 +87,8 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
         <p className="mt-3 border-t border-ink-800 pt-2 text-[11px] text-ink-600">
           Shortcuts pause while you are typing, so chat behaves normally.
         </p>
+          </>
+        )}
       </div>
     </div>
   );
