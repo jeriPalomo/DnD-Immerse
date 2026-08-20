@@ -35,6 +35,19 @@ function params(query: string): URLSearchParams {
  * server's default of 60 with no way to reach the rest, which reads as "the
  * bestiary only has monsters up to C".
  */
+type Difficulty = 'off' | 'easy' | 'medium' | 'hard' | 'deadly';
+
+/** One recommendation: a creature, and how many of it this party can take. */
+interface Suggestion {
+  id: string;
+  name: string;
+  type: string;
+  challengeRating: string;
+  imageUrl: string | null;
+  count: number;
+  adjustedXp: number;
+}
+
 export function MonsterBrowser({
   campaignId,
   onAdded,
@@ -52,6 +65,19 @@ export function MonsterBrowser({
   const [adding, setAdding] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, any> | null>(null);
+
+  /**
+   * Suggestions for this party, at a difficulty the DM names.
+   *
+   * `off` is the plain bestiary. The rest ask the server, which knows the
+   * campaign's characters and their levels - the browser has no business
+   * asserting who is at the table, and a default party of four level ones would
+   * be a confident recommendation about a table that does not exist.
+   */
+  const [difficulty, setDifficulty] = useState<Difficulty>('off');
+  const [suggested, setSuggested] = useState<Suggestion[] | null>(null);
+  const [party, setParty] = useState<{ name: string; level: number }[]>([]);
+  const [suggesting, setSuggesting] = useState(false);
 
   // Fetch the full stat block only when a row is opened; the list carries
   // enough to choose by, and 334 stat blocks is a lot to send up front.
@@ -99,6 +125,37 @@ export function MonsterBrowser({
     };
   }, [query]);
 
+  useEffect(() => {
+    if (difficulty === 'off') {
+      setSuggested(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSuggesting(true);
+
+    void api
+      .get<{
+        party: { name: string; level: number }[];
+        suggestions: Suggestion[];
+      }>(`/api/campaigns/${campaignId}/encounter-suggestions?difficulty=${difficulty}`)
+      .then((res) => {
+        if (cancelled) return;
+        setParty(res.party);
+        setSuggested(res.suggestions);
+      })
+      .catch(() => {
+        if (!cancelled) setSuggested([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSuggesting(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [difficulty, campaignId]);
+
   /** Appends rather than replacing, so the scroll position holds. */
   async function loadMore() {
     setLoadingMore(true);
@@ -138,17 +195,101 @@ export function MonsterBrowser({
           </button>
         </div>
 
-        <div className="border-b border-ink-800 p-3">
+        <div className="space-y-2 border-b border-ink-800 p-3">
           <Input
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search monsters…"
+            disabled={difficulty !== 'off'}
           />
+
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] text-ink-400" htmlFor="recommend">
+              Recommend enemies
+            </label>
+            <select
+              id="recommend"
+              value={difficulty}
+              onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+              title="Sized against the levels of the characters in this campaign, using the handbook's thresholds"
+              className="rounded border border-ink-600 bg-ink-850 px-2 py-1 text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
+            >
+              {(
+                [
+                  ['off', 'Browse everything'],
+                  ['easy', 'Easy'],
+                  ['medium', 'Average'],
+                  ['hard', 'Hard'],
+                  ['deadly', 'Deadly'],
+                ] as const
+              ).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+
+            {difficulty !== 'off' && party.length > 0 && (
+              <span className="truncate text-[11px] text-ink-600">
+                for {party.length} character{party.length === 1 ? '' : 's'}, level{' '}
+                {party.map((p) => p.level).join(', ')}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {loading ? (
+          {difficulty !== 'off' ? (
+            suggesting ? (
+              <Spinner />
+            ) : !suggested || suggested.length === 0 ? (
+              <p className="p-8 text-center text-sm text-ink-500">
+                {party.length === 0
+                  ? 'No characters are assigned to this campaign yet, so there is no party to size a fight against.'
+                  : 'Nothing in the bestiary lands on that difficulty for this party.'}
+              </p>
+            ) : (
+              <ul className="divide-y divide-ink-800">
+                {suggested.map((row) => (
+                  <li key={row.id} className="hover:bg-ink-850">
+                    <div className="flex items-center gap-3 px-4 py-2.5">
+                      <div className="size-10 shrink-0 overflow-hidden rounded border border-ink-700 bg-ink-800">
+                        {row.imageUrl ? (
+                          <img src={row.imageUrl} alt="" loading="lazy" className="size-full object-cover" />
+                        ) : (
+                          <div className="flex size-full items-center justify-center font-display text-ink-500">
+                            {row.name.slice(0, 1)}
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm text-ink-100">
+                          {row.name}
+                          {/* The count is the answer, not the question: "Goblin
+                              x7" is useful where "Goblin, medium" is a riddle. */}
+                          {row.count > 1 && (
+                            <span className="ml-1.5 font-display text-ember-400">×{row.count}</span>
+                          )}
+                        </div>
+                        <div className="truncate text-[11px] text-ink-500">
+                          CR {row.challengeRating} · {row.type} · {row.adjustedXp} XP adjusted
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={adding === row.id}
+                        onClick={() => void add(row.id)}
+                      >
+                        Add
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )
+          ) : loading ? (
             <Spinner />
           ) : monsters.length === 0 ? (
             // An empty list with an empty search is not a failed search - it is

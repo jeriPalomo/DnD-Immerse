@@ -583,3 +583,148 @@ export function auditPotionHealing(
 
   return audit;
 }
+
+/* ------------------------------------------------- building an encounter */
+
+/**
+ * What one character of each level can take, in XP, before an encounter stops
+ * being a warm-up.
+ *
+ * Straight from the Dungeon Master's Guide's table. Indexed by level, so index
+ * 0 is unused and level 5 is `ENCOUNTER_THRESHOLDS[5]`. A party's threshold is
+ * the sum over its characters - four level 3s and a level 1 is a real party and
+ * averaging their levels would describe neither.
+ */
+export const ENCOUNTER_THRESHOLDS: readonly {
+  easy: number;
+  medium: number;
+  hard: number;
+  deadly: number;
+}[] = [
+  { easy: 0, medium: 0, hard: 0, deadly: 0 },
+  { easy: 25, medium: 50, hard: 75, deadly: 100 },
+  { easy: 50, medium: 100, hard: 150, deadly: 200 },
+  { easy: 75, medium: 150, hard: 225, deadly: 400 },
+  { easy: 125, medium: 250, hard: 375, deadly: 500 },
+  { easy: 250, medium: 500, hard: 750, deadly: 1100 },
+  { easy: 300, medium: 600, hard: 900, deadly: 1400 },
+  { easy: 350, medium: 750, hard: 1100, deadly: 1700 },
+  { easy: 450, medium: 900, hard: 1400, deadly: 2100 },
+  { easy: 550, medium: 1100, hard: 1600, deadly: 2400 },
+  { easy: 600, medium: 1200, hard: 1900, deadly: 2800 },
+  { easy: 800, medium: 1600, hard: 2400, deadly: 3600 },
+  { easy: 1000, medium: 2000, hard: 3000, deadly: 4500 },
+  { easy: 1100, medium: 2200, hard: 3400, deadly: 5100 },
+  { easy: 1250, medium: 2500, hard: 3800, deadly: 5700 },
+  { easy: 1400, medium: 2800, hard: 4300, deadly: 6400 },
+  { easy: 1600, medium: 3200, hard: 4800, deadly: 7200 },
+  { easy: 2000, medium: 3900, hard: 5900, deadly: 8800 },
+  { easy: 2100, medium: 4200, hard: 6300, deadly: 9500 },
+  { easy: 2400, medium: 4900, hard: 7300, deadly: 10900 },
+  { easy: 2800, medium: 5700, hard: 8500, deadly: 12700 },
+];
+
+export interface PartyThresholds {
+  easy: number;
+  medium: number;
+  hard: number;
+  deadly: number;
+}
+
+/**
+ * The party's thresholds, summed over the characters actually at the table.
+ *
+ * Levels outside 1-20 are clamped rather than dropped: a sheet with a nonsense
+ * level should shift the answer, not silently shrink the party.
+ */
+export function partyThresholds(levels: readonly number[]): PartyThresholds {
+  const total: PartyThresholds = { easy: 0, medium: 0, hard: 0, deadly: 0 };
+
+  for (const raw of levels) {
+    const level = Math.max(1, Math.min(20, Math.round(raw) || 1));
+    const row = ENCOUNTER_THRESHOLDS[level];
+    total.easy += row.easy;
+    total.medium += row.medium;
+    total.hard += row.hard;
+    total.deadly += row.deadly;
+  }
+
+  return total;
+}
+
+/**
+ * The DMG's multiplier for fighting several things at once.
+ *
+ * Six goblins are worth far more trouble than six times one goblin, and this is
+ * the handbook's way of saying so. Applied to the monsters' XP before it is
+ * compared with a threshold - never to the threshold itself, which is a common
+ * way to get this backwards.
+ */
+export function encounterMultiplier(monsterCount: number): number {
+  if (monsterCount <= 0) return 0;
+  if (monsterCount === 1) return 1;
+  if (monsterCount === 2) return 1.5;
+  if (monsterCount <= 6) return 2;
+  if (monsterCount <= 10) return 2.5;
+  if (monsterCount <= 14) return 3;
+  return 4;
+}
+
+/**
+ * How hard a fight is, in the four words the handbook uses.
+ *
+ * `trivial` is below even the easy threshold - not a DMG term, but a real
+ * answer: a single rat against four level 10s is not an "easy encounter", it is
+ * scenery, and saying "easy" would suggest it is worth rolling for.
+ */
+export type EncounterDifficulty = 'trivial' | 'easy' | 'medium' | 'hard' | 'deadly';
+
+export function encounterDifficulty(
+  monsterXp: readonly number[],
+  thresholds: PartyThresholds,
+): { difficulty: EncounterDifficulty; adjustedXp: number } {
+  const raw = monsterXp.reduce((sum, xp) => sum + xp, 0);
+  const adjustedXp = Math.round(raw * encounterMultiplier(monsterXp.length));
+
+  const difficulty: EncounterDifficulty =
+    adjustedXp >= thresholds.deadly
+      ? 'deadly'
+      : adjustedXp >= thresholds.hard
+        ? 'hard'
+        : adjustedXp >= thresholds.medium
+          ? 'medium'
+          : adjustedXp >= thresholds.easy
+            ? 'easy'
+            : 'trivial';
+
+  return { difficulty, adjustedXp };
+}
+
+/**
+ * How many of a creature the party can take before the fight tips over.
+ *
+ * Answers the question a DM actually has in front of the bestiary - "how many
+ * of these?" - rather than "is one of these hard", which is nearly always no.
+ * Counts up rather than dividing, because the multiplier changes as the number
+ * does and dividing by a multiplier that depends on the answer is circular.
+ *
+ * Returns the largest number that is still no harder than `ceiling`, and 0 when
+ * even one is already worse than that.
+ */
+export function howManyFit(
+  monsterXp: number,
+  thresholds: PartyThresholds,
+  ceiling: EncounterDifficulty,
+  max = 12,
+): number {
+  const order: EncounterDifficulty[] = ['trivial', 'easy', 'medium', 'hard', 'deadly'];
+  const limit = order.indexOf(ceiling);
+
+  let fits = 0;
+  for (let count = 1; count <= max; count++) {
+    const { difficulty } = encounterDifficulty(Array(count).fill(monsterXp), thresholds);
+    if (order.indexOf(difficulty) > limit) break;
+    fits = count;
+  }
+  return fits;
+}

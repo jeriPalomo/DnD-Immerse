@@ -244,6 +244,19 @@ conditions decorative. Before adding a feature, check that the last one is
 actually reachable: `grep` the export and see whether anything outside its own
 module and tests uses it.
 
+**Encounter difficulty is the handbook's arithmetic, and the party is read from
+the campaign.** `ENCOUNTER_THRESHOLDS` is the DMG table, summed over the
+characters actually assigned — four level 3s and a level 1 is a real party and an
+average describes neither half of it. `encounterMultiplier` is applied to the
+**monsters'** XP, never to the threshold, which is the classic way to get this
+backwards and run a table over. `howManyFit` counts upward rather than dividing,
+because the multiplier changes as the count does and dividing by a multiplier
+chosen from the answer is circular — the step from ×2.5 to ×3 at eleven monsters
+is only visible by walking through it. A creature is only offered at a difficulty
+if some number of it actually **lands** there: a rat fits under "hard" a thousand
+at a time, and offering it would bury every real answer under vermin. With no
+characters assigned the route says so rather than assuming a party.
+
 **Class and species facts live in `rules5e.ts`, never in the UI.** `CLASSES`
 carries hit die, casting ability, the two saving throws and the caster
 progression; `SPECIES_BONUSES` carries ability increases. Every one is unit

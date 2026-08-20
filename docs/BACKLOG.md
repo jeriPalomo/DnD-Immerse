@@ -25,6 +25,29 @@ audio system rather than extending it.
 
 ---
 
+## Recommending enemies for the party — 2026-08-20
+
+Asked for during the panel work: a dropdown in the bestiary that suggests
+creatures matching the party's level, sorted into Easy / Average / Hard.
+
+Built on the DMG's own arithmetic, in `rules5e.ts` with the rest of the 5e
+facts: the threshold table by level, summed over the characters actually
+assigned to the campaign, and the multiplier for fighting several things at
+once. The party is read on the server rather than sent by the browser - it is
+the campaign's characters and their levels, which the server already knows.
+
+The count is the answer, not the question. "Goblin x7" is what a DM wants in
+front of 337 monsters; "Goblin, medium" is a riddle. Creatures are only listed
+at a difficulty they actually land on, or a rat would appear under Hard a
+thousand at a time and bury everything real.
+
+Checked against the handbook's numbers rather than against itself. Two of my own
+expectations were wrong and the code was right: seven goblins are 875 adjusted
+against a medium threshold of 600, still medium, because x2 becomes x2.5 exactly
+there.
+
+---
+
 ## The DM's panel, from the same punch list — 2026-08-20
 
 - **Run → Combat, Prep → Map, and Journal is its own tab.** The journal was a

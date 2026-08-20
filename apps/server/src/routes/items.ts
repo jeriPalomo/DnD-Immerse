@@ -1,9 +1,24 @@
 import { and, asc, desc, eq, like, or, sql, type SQL } from 'drizzle-orm';
-import { itemCategorySchema, itemTypeSchema, parseItemSystem } from '@dnd/shared';
+import {
+  encounterDifficulty,
+  howManyFit,
+  itemCategorySchema,
+  itemTypeSchema,
+  parseItemSystem,
+  partyThresholds,
+} from '@dnd/shared';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
-import { items, srdItems, srdMonsters, srdSpells } from '../db/schema.js';
+import {
+  actorCampaigns,
+  actors,
+  campaignMembers,
+  items,
+  srdItems,
+  srdMonsters,
+  srdSpells,
+} from '../db/schema.js';
 import { HttpError, assertUser, requireAuth } from '../auth/guards.js';
 import { requireActorRead, requireActorWrite } from '../lib/access.js';
 import { newId } from '../lib/id.js';
@@ -334,6 +349,105 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       .offset(query.offset);
 
     return { monsters: rows, more: rows.length === query.limit };
+  });
+
+  /**
+   * What to throw at this party, from the bestiary, at a difficulty you name.
+   *
+   * The question a DM has in front of a list of 337 monsters is never "is one
+   * ogre hard" - it is "what fits tonight", and answering it by hand means the
+   * DMG's threshold table, its multiplier table, and arithmetic per creature.
+   *
+   * The party is read from the campaign rather than taken from the client: it
+   * is the campaign's characters and their levels, which the server already
+   * knows and a browser has no business asserting. DM-only, because the
+   * bestiary is prep - and because the suggestion names creatures the players
+   * have not met.
+   *
+   * `count` is the answer, not the question. A creature is offered at a
+   * difficulty if *some* number of them lands there, and the number is what
+   * gets shown: "Goblin x7" is useful where "Goblin, medium" is a riddle.
+   */
+  app.get('/api/campaigns/:campaignId/encounter-suggestions', async (request) => {
+    const user = assertUser(request);
+    const { campaignId } = request.params as { campaignId: string };
+
+    const membership = await db
+      .select({ role: campaignMembers.role })
+      .from(campaignMembers)
+      .where(
+        and(eq(campaignMembers.campaignId, campaignId), eq(campaignMembers.userId, user.id)),
+      )
+      .limit(1);
+
+    if (membership[0]?.role !== 'dm') {
+      throw new HttpError(403, 'Only the DM can build encounters');
+    }
+
+    const query = z
+      .object({
+        difficulty: z.enum(['easy', 'medium', 'hard', 'deadly']).default('medium'),
+        limit: z.coerce.number().int().min(1).max(60).default(24),
+      })
+      .parse(request.query);
+
+    const party = await db
+      .select({ level: actors.level, name: actors.name })
+      .from(actorCampaigns)
+      .innerJoin(actors, eq(actorCampaigns.actorId, actors.id))
+      .where(and(eq(actorCampaigns.campaignId, campaignId), eq(actors.type, 'character')));
+
+    if (party.length === 0) {
+      // Said rather than guessed at. A default party of four level ones would
+      // be a confident recommendation about a table that does not exist.
+      return { party: [], thresholds: null, suggestions: [] };
+    }
+
+    const thresholds = partyThresholds(party.map((row) => row.level));
+
+    const rows = await db
+      .select({
+        id: srdMonsters.id,
+        name: srdMonsters.name,
+        type: srdMonsters.type,
+        challengeRating: srdMonsters.challengeRating,
+        xp: srdMonsters.xp,
+        hitPoints: srdMonsters.hitPoints,
+        armorClass: srdMonsters.armorClass,
+        tokenSize: srdMonsters.tokenSize,
+        imageUrl: srdMonsters.imageUrl,
+      })
+      .from(srdMonsters)
+      .where(sql`${srdMonsters.xp} > 0`)
+      .orderBy(desc(srdMonsters.xp));
+
+    const suggestions = rows
+      .map((monster) => {
+        const count = howManyFit(monster.xp, thresholds, query.difficulty);
+        if (count === 0) return null;
+
+        // Only creatures that actually LAND on the difficulty asked for. A rat
+        // fits under "hard" a thousand at a time, and offering it would bury
+        // every real answer under vermin.
+        const { difficulty, adjustedXp } = encounterDifficulty(
+          Array(count).fill(monster.xp),
+          thresholds,
+        );
+        if (difficulty !== query.difficulty) return null;
+
+        return { ...monster, count, adjustedXp };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+      // Fewest creatures first: one thing worth fighting reads better than
+      // twelve of something, and the DM can scroll for a horde.
+      .sort((a, b) => a.count - b.count || b.xp - a.xp)
+      .slice(0, query.limit);
+
+    return {
+      party: party.map((row) => ({ name: row.name, level: row.level })),
+      thresholds,
+      suggestions,
+    };
   });
 
   app.get('/api/compendium/monsters/:id', async (request) => {
