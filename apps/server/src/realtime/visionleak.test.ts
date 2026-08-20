@@ -915,11 +915,13 @@ describe('a malformed brush is refused, not thrown', () => {
 
 describe('a turn buys a fixed amount of movement', () => {
   /**
-   * Out of combat nothing is counted: players have free rein of the scene, and
-   * the overlay is advice. Once a fight is running the overlay becomes a
-   * promise - the squares it draws are the squares the server will accept -
-   * which is the only reading of it that is any use when a round is being
-   * counted.
+   * Measured from where the creature stood when its turn began, never counted
+   * down as it goes. A creature may shuffle about inside its reach all turn and
+   * is only ever held to where it *ends* - so walking back the way it came is
+   * free, which counting down cannot express and which is what made a token
+   * feel stuck after one move.
+   *
+   * Out of combat nothing is counted at all; players keep free rein.
    *
    * Alice's token has no sheet behind it, so it moves at the default 30 ft:
    * six squares at five feet each.
@@ -944,6 +946,12 @@ describe('a turn buys a fixed amount of movement', () => {
     aliceSocket.emit('movement:query', { tokenId: myTokenId, threat: false });
     const got = await reply;
     return { left: got?.leftFeet ?? null, max: got?.maxFeet ?? null };
+  };
+
+  const reach = async (): Promise<[number, number][]> => {
+    const reply = next<{ squares: [number, number][] }>(aliceSocket, 'movement:range');
+    aliceSocket.emit('movement:query', { tokenId: myTokenId, threat: false });
+    return (await reply)?.squares ?? [];
   };
 
   const trackerNow = async () =>
@@ -1005,47 +1013,78 @@ describe('a turn buys a fixed amount of movement', () => {
     expect(await budget()).toEqual({ left: 30, max: 30 });
   });
 
-  it('allows a move inside the budget and charges what it cost', async () => {
+  it('allows a move inside the reach and charges the distance from the start', async () => {
     // Four squares east of (30,30) is 20 ft of the 30 available.
     const { moved } = await playerMoveTo(34, 30);
     expect(moved?.token.x).toBe(34);
     expect((await budget()).left).toBe(10);
   });
 
-  it('refuses the second move once the budget is spent', async () => {
-    // Ten feet left, and this asks for twenty.
-    const { failure } = await playerMoveTo(38, 30);
-    expect(failure?.message).toMatch(/further than|no movement left/i);
+  it('keeps drawing the same reach, around where the turn began', async () => {
+    // The circle does not follow the creature. Six squares east of the ORIGIN
+    // is still offered after moving four of them, and the origin itself is
+    // still in reach - both are what "measured from the start" means.
+    const squares = await reach();
+    const has = (x: number, y: number) => squares.some(([sx, sy]) => sx === x && sy === y);
 
-    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
-    expect(player.tokens.find((t) => t.id === myTokenId)?.x).toBe(34);
+    expect(has(36, 30)).toBe(true);
+    expect(has(30, 30)).toBe(true);
+    expect(has(37, 30)).toBe(false);
   });
 
-  it('allows what is left of it', async () => {
-    const { moved } = await playerMoveTo(36, 30);
-    expect(moved?.token.x).toBe(36);
+  it('lets a creature walk back the way it came, for free', async () => {
+    // The case that made a token feel stuck. Counting down, this second move
+    // costs another 20 ft against 10 remaining and is refused; measured from
+    // the origin it is a move to the origin, which costs nothing at all.
+    const { moved } = await playerMoveTo(30, 30);
+    expect(moved?.token.x).toBe(30);
+    expect((await budget()).left).toBe(30);
+  });
+
+  it('refuses a move beyond the reach, wherever the creature is standing', async () => {
+    const { failure } = await playerMoveTo(37, 30);
+    expect(failure?.message).toMatch(/further than/i);
+
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    expect(player.tokens.find((t) => t.id === myTokenId)?.x).toBe(30);
+  });
+
+  it('refuses a second move that would end beyond it, even in two hops', async () => {
+    // Four squares east, then four more: the second lands eight from the
+    // origin, which is two further than the turn is worth.
+    const first = await playerMoveTo(34, 30);
+    expect(first.moved?.token.x).toBe(34);
+
+    const second = await playerMoveTo(38, 30);
+    expect(second.failure?.message).toMatch(/further than/i);
+  });
+
+  it('doubles the reach for a Dash, and takes it back', async () => {
+    aliceSocket.emit('movement:dash', { tokenId: myTokenId, on: true });
+    await new Promise((r) => setTimeout(r, 400));
+    expect(await budget()).toEqual({ left: 40, max: 60 });
+
+    // Twelve squares from the origin is exactly a dashed turn.
+    const { moved } = await playerMoveTo(42, 30);
+    expect(moved?.token.x).toBe(42);
+
+    aliceSocket.emit('movement:dash', { tokenId: myTokenId, on: false });
+    await new Promise((r) => setTimeout(r, 400));
     expect((await budget()).left).toBe(0);
   });
 
-  it('draws an overlay that empties as the budget does', async () => {
-    const reply = next<{ squares: [number, number][] }>(aliceSocket, 'movement:range');
-    aliceSocket.emit('movement:query', { tokenId: myTokenId, threat: false });
-
-    // Standing still is always legal, so its own square is what remains.
-    expect((await reply)?.squares).toEqual([[36, 30]]);
-  });
-
-  it('gives the movement back when the turn changes', async () => {
+  it('re-anchors where the creature stands when the turn changes', async () => {
     dmSocket.emit('turn:next', {});
     await new Promise((r) => setTimeout(r, 500));
 
+    // A full turn again, measured from (42,30) rather than from (30,30).
     expect(await budget()).toEqual({ left: 30, max: 30 });
   });
 
   it('refuses a player moving a creature whose turn it is not', async () => {
-    // The turn moved on to the Lurker above, so Alice may not act - a budget
-    // that refilled on someone else's turn would be no budget at all.
-    const { failure } = await playerMoveTo(41, 30);
+    // The turn moved on to the Lurker above, so Alice may not act - a reach
+    // that refreshed on someone else's turn would be no limit at all.
+    const { failure } = await playerMoveTo(43, 30);
     expect(failure?.message).toMatch(/not their turn/i);
   });
 
@@ -1063,8 +1102,8 @@ describe('a turn buys a fixed amount of movement', () => {
     // No budget at all out of combat, and a long drag is allowed again.
     expect(await budget()).toEqual({ left: null, max: null });
 
-    const { moved } = await playerMoveTo(45, 30);
-    expect(moved?.token.x).toBe(45);
+    const { moved } = await playerMoveTo(60, 30);
+    expect(moved?.token.x).toBe(60);
   });
 });
 

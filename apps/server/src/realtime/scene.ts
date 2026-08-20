@@ -31,6 +31,7 @@ import {
   reachableSquares,
   routeExists,
   costToFeet,
+  movementDashSchema,
   unionOfReach,
   snapTokenPosition,
   tokenCenter,
@@ -362,15 +363,25 @@ async function turnStateFor(
 }
 
 /**
- * What a creature has left of its turn, in feet.
+ * Where a creature's turn began.
  *
- * Speed is folded through conditions first, so a creature that was restrained
- * after moving is held to the speed it has now. Clamped at zero: the DM is
- * never refused a move, so a monster dragged across the map can have spent more
- * than it had.
+ * Falls back to where it stands, which covers a token added to the order in the
+ * middle of a fight: it has no origin stamped yet, and the square it is on is
+ * the honest answer rather than a null that has to be handled everywhere.
  */
-function movementLeft(token: Token, speedFeet: number): number {
-  return Math.max(0, speedFeet - token.movedFeet);
+function turnOriginOf(token: Token): { x: number; y: number } {
+  return { x: token.turnOriginX ?? token.x, y: token.turnOriginY ?? token.y };
+}
+
+/**
+ * What a turn is worth, in feet.
+ *
+ * Speed is folded through conditions first, so a creature restrained halfway
+ * through its turn is held to the speed it has now rather than the one it set
+ * off with.
+ */
+function turnBudgetFeet(token: Token, speedFeet: number): number {
+  return speedFeet + token.extraMoveFeet;
 }
 
 async function sceneOf(sceneId: string): Promise<Scene | null> {
@@ -985,20 +996,25 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       return;
     }
 
-    let spend = 0;
-
-    if (turn && scene) {
-      const { walls: turnWalls, tokens: sceneTokens, effects: turnEffects } = await dragState(
+    if (turn && scene && !ctx.isDM) {
+      const { walls: turnWalls, effects: turnEffects } = await dragState(
         token.sceneId,
         ctx.campaignId,
       );
       const { gridWidth, gridHeight } = gridExtent(scene);
       const speed = await speedOf(token, conditionsOf(turnEffects.byToken.get(token.id)));
-      const left = movementLeft(token, speed);
+      const budget = turnBudgetFeet(token, speed);
+      const from = turnOriginOf(token);
 
+      // Measured from where the turn began, never from where the creature
+      // happens to be standing now. Counting down as it goes says a creature
+      // that has walked its thirty feet may not step back the way it came,
+      // which is both wrong and the thing that made a token feel stuck: the
+      // overlay correctly shrank to a single square and there was nothing on
+      // screen to say why.
       const affordable = reachableCosts({
-        origin: { x: token.x, y: token.y, w, h },
-        speedFeet: left,
+        origin: { x: from.x, y: from.y, w, h },
+        speedFeet: budget,
         feetPerSquare: scene.feetPerSquare,
         walls: turnWalls,
         // Creatures do not block a *drop* - `token:commit` has never refused a
@@ -1009,26 +1025,13 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
         terrain: await terrainOf(scene),
       });
 
-      const landed = affordable.get(`${snapped.x}:${snapped.y}`);
-
-      if (!landed && !ctx.isDM) {
+      if (!affordable.has(`${snapped.x}:${snapped.y}`)) {
         socket.emit('error', {
-          message:
-            left > 0
-              ? `That is further than ${token.name || 'this creature'} can move this turn — ${Math.round(left)} ft left`
-              : `${token.name || 'This creature'} has no movement left this turn`,
+          message: `That is further than ${token.name || 'this creature'} can move this turn — ${Math.round(budget)} ft from where it started`,
         });
         await broadcastToken(io, ctx.campaignId, token);
         return;
       }
-
-      // The DM is never refused, so a monster dragged past what it had spends
-      // everything it had rather than a price this search cannot name.
-      spend = landed ? costToFeet(landed.cost, scene.feetPerSquare) : left;
-
-      // Unused tokens are ignored deliberately: this is about the creature
-      // being moved, and reading the rest would be a query per drop.
-      void sceneTokens;
     }
 
     await db
@@ -1039,7 +1042,16 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
         w,
         h,
         rotation: input.rotation ?? token.rotation,
-        ...(turn ? { movedFeet: token.movedFeet + spend } : {}),
+        // The DM repositioning a creature is authoritative, so the move becomes
+        // the new anchor - otherwise being placed somewhere leaves the creature
+        // measured from a square it was never on. A player's move never moves
+        // the anchor; that is the whole point of it.
+        ...(turn && ctx.isDM ? { turnOriginX: snapped.x, turnOriginY: snapped.y } : {}),
+        // A creature that joined the order mid-fight has no anchor yet, and
+        // where it stood before this move is the honest one.
+        ...(turn && !ctx.isDM && token.turnOriginX === null
+          ? { turnOriginX: token.x, turnOriginY: token.y }
+          : {}),
       })
       .where(eq(tokens.id, input.tokenId));
 
@@ -1463,6 +1475,46 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
    * players are never sent wall geometry, so a client cannot know what stops a
    * step.
    */
+  /**
+   * Doubles this turn's movement, because the app has no action economy.
+   *
+   * Nothing here can know a creature took the Dash action, and a budget with no
+   * way to say so makes a legal turn impossible. Whoever controls the creature
+   * may set it on that creature's own turn; the DM may set it whenever, the way
+   * the DM may do everything else here.
+   */
+  socket.on('movement:dash', async (payload) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const input = movementDashSchema.parse(payload);
+    const token = await tokenIn(input.tokenId, ctx.campaignId);
+    if (!token || !mayControl(token, ctx.isDM, user.id)) {
+      socket.emit('error', { message: 'You cannot move that token' });
+      return;
+    }
+
+    const turn = await turnStateFor(token, ctx.campaignId);
+    if (!turn || (!ctx.isDM && !turn.isActing)) {
+      socket.emit('error', { message: 'A Dash is something you take on your own turn' });
+      return;
+    }
+
+    const { effects } = await dragState(token.sceneId, ctx.campaignId);
+    const speed = await speedOf(token, conditionsOf(effects.byToken.get(token.id)));
+
+    await db
+      .update(tokens)
+      .set({ extraMoveFeet: input.on ? speed : 0 })
+      .where(eq(tokens.id, token.id));
+
+    invalidateDragCache(token.sceneId);
+
+    // The range on every screen is now wrong in one direction or the other, so
+    // push the scene and let the clients ask again - what a door opening does.
+    await broadcastSceneState(io, ctx.campaignId);
+  });
+
   socket.on('movement:query', async (payload) => {
     const ctx = await context();
     if (!ctx) return;
@@ -1522,23 +1574,29 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     const terrain = await terrainOf(scene);
 
     /**
-     * What a creature may still spend.
+     * What a creature may spend, and the square it is measured from.
      *
-     * A full turn's speed out of combat, where nothing is counted, and what is
-     * left of the turn once a fight is running - so the overlay shrinks as a
-     * creature walks and the squares it draws stay the squares `token:commit`
-     * will accept.
+     * A full turn's speed out of combat, where nothing is counted at all. Once a
+     * fight is running it is the same budget measured from where the turn began,
+     * so the circle stays put all turn and the squares it draws stay the squares
+     * `token:commit` will accept.
      */
-    const budgetFor = async (token: Token): Promise<{ left: number; max: number }> => {
-      const max = await speedOf(token, conditionsOf(effects.byToken.get(token.id)));
+    const budgetFor = async (
+      token: Token,
+    ): Promise<{ budget: number; from: { x: number; y: number }; inTurn: boolean }> => {
+      const speed = await speedOf(token, conditionsOf(effects.byToken.get(token.id)));
       const turn = await turnStateFor(token, ctx.campaignId);
-      return { left: turn ? movementLeft(token, max) : max, max };
+      if (!turn) return { budget: speed, from: { x: token.x, y: token.y }, inTurn: false };
+      return { budget: turnBudgetFeet(token, speed), from: turnOriginOf(token), inTurn: true };
     };
 
-    const rangeFor = async (token: Token) =>
-      reachableSquares({
-        origin: { x: token.x, y: token.y, w: token.w, h: token.h },
-        speedFeet: (await budgetFor(token)).left,
+    const rangeFor = async (token: Token) => {
+      const { budget, from } = await budgetFor(token);
+      return reachableSquares({
+        // From the turn's starting square once a fight is running, so the range
+        // is the same circle all turn and a creature can move about inside it.
+        origin: { x: from.x, y: from.y, w: token.w, h: token.h },
+        speedFeet: budget,
         feetPerSquare: scene.feetPerSquare,
         walls: sceneWalls,
         occupied: blockers.filter((t) => t.id !== token.id),
@@ -1548,6 +1606,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
         // they are sent a vision polygon rather than the walls behind it.
         terrain,
       });
+    };
 
     let squares: [number, number][] = [];
 
@@ -1594,15 +1653,39 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     // A threat union is several creatures at once, so a single budget would be
     // a number about nobody.
     const asked = input.threat || !input.tokenId ? null : visible.find((t) => t.id === input.tokenId);
-    const inFight = asked ? await turnStateFor(asked, ctx.campaignId) : null;
-    const budget = asked && inFight ? await budgetFor(asked) : null;
+    const state = asked ? await budgetFor(asked) : null;
+
+    // Spent movement is derived, never stored: it is what the square the
+    // creature is standing on cost to reach from the origin, straight out of
+    // the map the overlay was drawn from. Storing a running total would be a
+    // second answer to the same question, and walking back toward the origin
+    // could not give it back.
+    let leftFeet: number | null = null;
+    let maxFeet: number | null = null;
+
+    if (asked && state?.inTurn) {
+      const costs = reachableCosts({
+        origin: { x: state.from.x, y: state.from.y, w: asked.w, h: asked.h },
+        speedFeet: state.budget,
+        feetPerSquare: scene.feetPerSquare,
+        walls: sceneWalls,
+        occupied: [],
+        bounds,
+        terrain,
+      });
+      const here = costs.get(`${Math.round(asked.x)}:${Math.round(asked.y)}`);
+      const spent = here ? costToFeet(here.cost, scene.feetPerSquare) : state.budget;
+      maxFeet = state.budget;
+      leftFeet = Math.max(0, state.budget - spent);
+    }
 
     socket.emit('movement:range', {
       tokenId: input.tokenId,
       threat: input.threat,
       squares,
-      leftFeet: budget ? budget.left : null,
-      maxFeet: budget ? budget.max : null,
+      leftFeet,
+      maxFeet,
+      dashed: Boolean(asked && asked.extraMoveFeet > 0),
     });
   });
 

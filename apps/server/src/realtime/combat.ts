@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
   advanceTurn,
   applyDamage,
@@ -59,23 +59,36 @@ async function activeEncounter(campaignId: string) {
 }
 
 /**
- * Gives every creature on a scene its turn's movement back.
+ * Anchors every creature on a scene where it now stands.
  *
- * Called whenever the turn changes and whenever a fight starts or ends, so
- * `movedFeet` means nothing outside the turn it was spent in.
- * The whole scene rather than the initiative order: a token added to the board
- * mid-fight has no entry yet, and one removed from the order should not carry a
- * spent budget into the next encounter.
+ * A turn's reach is measured from where the creature began it, so starting a
+ * turn is a matter of moving the anchor rather than zeroing a counter. Called
+ * whenever the turn changes and when a fight starts; `releaseMovement` clears
+ * it when one ends.
  *
- * Rewinding a turn hands the creature a fresh budget rather than the one it had
- * - what it spent is gone, and being generous is the right direction to be
- * wrong in when the DM is correcting something.
+ * The whole scene rather than the initiative order: a token dropped on the board
+ * mid-fight has no entry yet, and one taken out of the order should not carry an
+ * anchor into the next encounter.
+ *
+ * Rewinding a turn re-anchors wherever the creature is now rather than restoring
+ * where it was - being generous is the right direction to be wrong in while the
+ * DM is correcting something.
  */
 async function refillMovement(sceneId: string | null): Promise<void> {
   if (!sceneId) return;
   await db
     .update(tokens)
-    .set({ movedFeet: 0 })
+    .set({ turnOriginX: sql`${tokens.x}`, turnOriginY: sql`${tokens.y}`, extraMoveFeet: 0 })
+    .where(eq(tokens.sceneId, sceneId));
+  invalidateDragCache(sceneId);
+}
+
+/** Nothing is anchored out of combat, because nothing is counted out of it. */
+async function releaseMovement(sceneId: string | null): Promise<void> {
+  if (!sceneId) return;
+  await db
+    .update(tokens)
+    .set({ turnOriginX: null, turnOriginY: null, extraMoveFeet: 0 })
     .where(eq(tokens.sceneId, sceneId));
   invalidateDragCache(sceneId);
 }
@@ -275,9 +288,9 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       .set({ isActive: false })
       .where(eq(encounters.campaignId, ctx.campaignId));
 
-    // Nothing counts movement out of combat, and a budget left half spent would
-    // be waiting for whoever starts the next fight on this scene.
-    await refillMovement(ending?.sceneId ?? null);
+    // Nothing counts movement out of combat, and an anchor left behind would be
+    // waiting for whoever starts the next fight on this scene.
+    await releaseMovement(ending?.sceneId ?? null);
 
     await broadcastEncounter(io, ctx.campaignId);
   });

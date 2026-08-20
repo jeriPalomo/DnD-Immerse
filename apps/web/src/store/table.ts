@@ -102,6 +102,8 @@ interface TableState {
   revealFog: (sceneId: string) => void;
   resetFog: (sceneId: string) => void;
   paintTerrain: (sceneId: string, brush: TerrainBrush, cells: [number, number][]) => void;
+  /** Doubles this turn's movement; the app cannot know a creature Dashed. */
+  dash: (tokenId: string, on: boolean) => void;
   createToken: (payload: Record<string, unknown>) => void;
   moveToken: (tokenId: string, x: number, y: number) => void;
   commitToken: (tokenId: string, x: number, y: number) => void;
@@ -195,6 +197,7 @@ interface TableState {
     squares: [number, number][];
     leftFeet: number | null;
     maxFeet: number | null;
+    dashed: boolean;
   };
   threatRange: [number, number][];
   showThreat: boolean;
@@ -257,7 +260,7 @@ export const useTable = create<TableState>((set, get) => ({
   encounter: null,
   lastDamage: null,
   journalVersion: 0,
-  moveRange: { tokenId: null, squares: [], leftFeet: null, maxFeet: null },
+  moveRange: { tokenId: null, squares: [], leftFeet: null, maxFeet: null, dashed: false },
   threatRange: [],
   showThreat: getPref('board-threat', false),
   undoStack: [],
@@ -345,9 +348,9 @@ export const useTable = create<TableState>((set, get) => ({
     socket.on('journal:changed', () => set({ journalVersion: get().journalVersion + 1 }));
     socket.on('chat:cleared', () => set({ messages: [] }));
 
-    socket.on('movement:range', ({ tokenId, threat, squares, leftFeet, maxFeet }) => {
+    socket.on('movement:range', ({ tokenId, threat, squares, leftFeet, maxFeet, dashed }) => {
       if (threat) set({ threatRange: squares });
-      else set({ moveRange: { tokenId, squares, leftFeet, maxFeet } });
+      else set({ moveRange: { tokenId, squares, leftFeet, maxFeet, dashed } });
     });
     socket.on('handout:reveal', (reveal) => {
       set({ reveal });
@@ -683,6 +686,10 @@ export const useTable = create<TableState>((set, get) => ({
 
   queryMovement(tokenId) {
     get().socket?.emit('movement:query', { tokenId, threat: false });
+  },
+
+  dash(tokenId, on) {
+    get().socket?.emit('movement:dash', { tokenId, on });
   },
 
   toggleThreat() {

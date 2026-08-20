@@ -25,6 +25,32 @@ audio system rather than extending it.
 
 ---
 
+## Movement measured from where the turn began — 2026-08-20
+
+"I moved a token, and when I went to move it again — still my turn — it was
+stuck." It was: it had spent its thirty feet, the overlay had correctly shrunk to
+a single square, and nothing on screen said why.
+
+Counting movement down as it is spent is right by the handbook and wrong at a
+table. It says a creature that has walked its whole turn may not step back the
+way it came, and it punishes anyone who moves before they have finished thinking.
+
+The reach is now the same circle for the whole turn, drawn around the square the
+creature started on. Move about inside it as much as you like; only where you
+*end* is held to your speed, so walking back toward the start gives the movement
+back. `movedFeet` is gone entirely - what has been spent is derived from the cost
+of the square you are standing on, out of the very map the overlay was drawn
+from, so there is no running total to disagree with it.
+
+The Dash came back with it, at the DM's request, after it turned out to be a
+real action they had not met.
+
+The sharp test is two hops: four squares east, then four more, ends eight from
+the origin and is refused - against a version that measures from the creature's
+current position, that passes and the creature walks for ever.
+
+---
+
 ## Punch list from the first playtest: the confirm dialogs — 2026-08-20
 
 Two reports from playing the finished build: scenes would not delete, and the

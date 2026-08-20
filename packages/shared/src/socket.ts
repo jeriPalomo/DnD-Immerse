@@ -311,6 +311,19 @@ export const movementQuerySchema = z.object({
   threat: z.boolean().default(false),
 });
 
+/**
+ * Doubles this turn's movement for one creature.
+ *
+ * The app has no action economy, so it cannot know a creature took the Dash
+ * action - and enforcing a budget with no way to say so makes a legal turn
+ * impossible, which is a worse kind of wrong than not counting at all. A toggle
+ * rather than a counter: a mis-click has to be undoable.
+ */
+export const movementDashSchema = z.object({
+  tokenId: z.string(),
+  on: z.boolean(),
+});
+
 export const pingSchema = z.object({
   sceneId: z.string(),
   x: z.number(),
@@ -531,6 +544,8 @@ export interface ServerToClientEvents {
      */
     leftFeet: number | null;
     maxFeet: number | null;
+    /** Whether the Dash has already been taken, so the toggle reads true. */
+    dashed: boolean;
   }) => void;
 
   /**
@@ -581,6 +596,8 @@ export interface ClientToServerEvents {
   /** DM only. Deletes the campaign's log outright - chat and battle alike. */
   'chat:clear': (payload: Record<string, never>) => void;
   'movement:query': (payload: z.infer<typeof movementQuerySchema>) => void;
+  /** Doubles this turn's movement; see `movementDashSchema`. */
+  'movement:dash': (payload: z.infer<typeof movementDashSchema>) => void;
 
   'initiative:update': (payload: InitiativeUpdatePayload) => void;
   'encounter:start': (payload: { sceneId: string | null }) => void;

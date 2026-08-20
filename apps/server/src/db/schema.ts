@@ -377,14 +377,22 @@ export const tokens = sqliteTable(
     statsHidden: integer('stats_hidden', { mode: 'boolean' }).notNull().default(false),
 
     /**
-     * Movement spent on the current turn.
+     * Where this creature stood when its turn began, and any movement granted
+     * beyond its speed - a Dash, which the app has no action economy to infer.
      *
-     * Zeroed whenever the turn changes and whenever a fight starts or ends, so
-     * it means nothing outside combat and costs nothing to carry. In feet
-     * rather than squares because speed is in feet and a scene may not be five
-     * feet to the square.
+     * A turn's reach is measured from the origin rather than counted down as it
+     * is spent, so a creature can shuffle about freely and is only ever held to
+     * where it *ends*. Walking back toward the origin gives the movement back,
+     * which counting down cannot express.
+     *
+     * Null means "not in a turn", which is every token outside combat. Stamped
+     * whenever the turn changes and at the start of a fight, cleared at the end
+     * of one. `extraMoveFeet` is in feet rather than a flag so a grant of ten is
+     * expressible, and is cleared alongside it.
      */
-    movedFeet: real('moved_feet').notNull().default(0),
+    turnOriginX: real('turn_origin_x'),
+    turnOriginY: real('turn_origin_y'),
+    extraMoveFeet: real('extra_move_feet').notNull().default(0),
     createdAt: epoch('created_at'),
   },
   (t) => [index('tokens_scene_idx').on(t.sceneId)],

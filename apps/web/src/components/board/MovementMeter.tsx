@@ -3,7 +3,7 @@ import { useAuth } from '../../store/auth.js';
 import { useTable } from '../../store/table.js';
 
 /**
- * What the acting creature has left of its turn.
+ * What the acting creature has left of its turn, and the Dash.
  *
  * Lives in the turn bar because that is where the eye already is once a fight
  * is running - a movement budget in a side panel is a number nobody reads until
@@ -17,7 +17,7 @@ import { useTable } from '../../store/table.js';
  */
 export function MovementMeter({ isDM }: { isDM: boolean }) {
   const { user } = useAuth();
-  const { encounter, tokens, moveRange, queryMovement } = useTable();
+  const { encounter, tokens, moveRange, queryMovement, dash } = useTable();
 
   const active = encounter?.isActive ? (encounter.entries[encounter.activeIndex] ?? null) : null;
   const token = active?.tokenId ? (tokens.find((t) => t.id === active.tokenId) ?? null) : null;
@@ -59,6 +59,21 @@ export function MovementMeter({ isDM }: { isDM: boolean }) {
         />
       </div>
 
+      <button
+        onClick={() => dash(token.id, !moveRange.dashed)}
+        title={
+          moveRange.dashed
+            ? 'Take the Dash back'
+            : 'Dash — the action that spends your whole turn to move twice as far'
+        }
+        className={`rounded border px-1.5 py-1 text-[10px] transition-colors ${
+          moveRange.dashed
+            ? 'border-ember-400 bg-ember-500/20 text-ember-300'
+            : 'border-ink-700 text-ink-400 hover:text-ink-200'
+        }`}
+      >
+        Dash
+      </button>
     </div>
   );
 }

@@ -577,26 +577,30 @@ share. **The threat union is deliberately not gated**: it covers hostiles only,
 it is a union rather than one creature's answer, and offering it is the whole
 point of the overlay.
 
-**A turn's movement is counted only while a fight is running.** Out of combat
-nothing spends: players have free rein of the scene and the overlay is advice.
-Once an encounter is active the overlay becomes a promise — the squares it draws
-are the squares `token:commit` will accept — because that is the only reading of
-it worth anything when a round is being counted. `tokens.movedFeet` is charged
-the same `reachableCosts` price the overlay is drawn from, so the two cannot
-disagree about what a route through mud cost, and `refillMovement` zeroes it on
-every turn change and at both ends of a fight. **A player may only move the
-creature whose turn it is**, or the budget is refilled by waiting for someone
-else's turn and means nothing. **The DM is never refused** — placing things
-anywhere is the DM's, as it is for walls and painted ground — but a DM drag past
-what a creature had spends everything it had, because the search cannot price a
-square it could not reach.
+**A turn's reach is measured from where the creature began it, not counted down
+as it is spent.** Out of combat nothing is counted: players have free rein and
+the overlay is advice. Once a fight is running the overlay becomes a promise —
+the squares it draws are the squares `token:commit` will accept — and it is the
+*same* circle all turn, drawn around `turnOriginX/Y`. A creature may shuffle
+about inside its reach freely and is only ever held to where it **ends**, so
+walking back the way it came is free. Counting down said a creature that had
+walked its thirty feet could not step back, which is both wrong and what made a
+token feel stuck: the overlay correctly shrank to one square with nothing on
+screen to explain why. **Spent movement is derived, never stored** — it is what
+the square the creature stands on cost to reach from the origin, out of the same
+map the overlay came from. `refillMovement` re-anchors every token on the scene
+at each turn change and at the start of a fight; `releaseMovement` clears the
+anchor at the end of one. **A player may only move the creature whose turn it
+is**, or the reach refreshes by waiting for someone else's turn and means
+nothing. **The DM is never refused**, and a DM commit re-anchors the creature
+where it was put — otherwise it would stay measured from a square it was never
+on.
 
-**There is no way to grant a creature extra movement, deliberately.** The
-handbook's Dash was built and removed at the DM's request. It means a creature
-that legitimately moves twice its speed cannot be moved by its player — the DM
-drags it, which they may always do. If this is rebuilt, the column was
-`extraMoveFeet` in feet rather than a flag, so that a grant of ten is expressible
-too.
+**The Dash exists because the app has no action economy.** Nothing here can know
+a creature took the Dash action, and a budget with no way to say so makes a legal
+turn impossible — worse than not counting at all. `extraMoveFeet` is in feet
+rather than a flag so a DM grant of ten is expressible; the control is a toggle
+rather than a counter because a mis-click has to be undoable.
 
 **A remaining budget is stat block data.** Left plus spent is a creature's
 speed, so `movement:range` carries `leftFeet` only in the reply to the socket
