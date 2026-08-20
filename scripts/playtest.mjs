@@ -34,6 +34,12 @@ const WINDOW = { width: 960, height: 1040 };
  * somebody. Printing only `localhost` sends them nowhere. Tailscale hands out
  * 100.64.0.0/10, so those are listed first and named.
  */
+function shareable() {
+  return reachableUrls()
+    .map((entry) => `  ${entry.url}${entry.tailnet ? '   <- give your friend this one' : ''}`)
+    .join(String.fromCharCode(10));
+}
+
 function reachableUrls() {
   const found = [];
   for (const addresses of Object.values(os.networkInterfaces())) {
@@ -184,6 +190,7 @@ try {
   if (process.env.PLAYTEST_NO_BROWSER) {
     console.log(`
   Server up at ${BASE}, no windows opened (PLAYTEST_NO_BROWSER).
+${shareable()}
 `);
     stop(0);
   }
@@ -210,10 +217,7 @@ try {
   Every password is "${PASSWORD}".
 
   ${BASE}
-${reachableUrls()
-  .map((entry) => `  ${entry.url}${entry.tailnet ? '   <- share this one (tailnet)' : ''}`)
-  .join('
-')}
+${shareable()}
 
   Close the windows or press Ctrl-C to stop. Your real campaign in data/ was
   never opened.
