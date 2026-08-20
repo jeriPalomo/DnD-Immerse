@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useConfirm } from '../Confirm.js';
 import { useNavigate } from 'react-router-dom';
 import { Alert, Button, Field, Input, Textarea } from '../ui.js';
 import { AvatarUpload } from '../AvatarUpload.js';
@@ -26,6 +27,7 @@ export function CampaignSettings({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
+  const ask = useConfirm();
   const [code, setCode] = useState(campaign.inviteCode ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,13 +110,25 @@ export function CampaignSettings({
   }
 
   async function remove(userId: string, name: string) {
-    if (!confirm(`Remove ${name} from this campaign?`)) return;
+    const ok = await ask({
+      title: `Remove ${name}?`,
+      body: 'They lose access to this campaign. Their characters are theirs and stay.',
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (!ok) return;
     await api.delete(`/api/campaigns/${campaign.id}/members/${userId}`);
     onMembersChanged();
   }
 
   async function destroy() {
-    if (!confirm(`Delete "${campaign.name}"? Scenes, tokens and journal go with it.`)) return;
+    const ok = await ask({
+      title: `Delete "${campaign.name}"?`,
+      body: 'Scenes, tokens, walls and the journal go with it. This cannot be undone.',
+      confirmLabel: 'Delete campaign',
+      danger: true,
+    });
+    if (!ok) return;
     await api.delete(`/api/campaigns/${campaign.id}`);
     navigate('/campaigns');
   }

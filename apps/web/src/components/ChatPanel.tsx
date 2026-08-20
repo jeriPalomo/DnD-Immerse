@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useConfirm } from './Confirm.js';
 import {
   DICE_LIMITS,
   DIE_TYPES,
@@ -12,6 +13,7 @@ import { useAuth } from '../store/auth.js';
 import type { WireCard, WireChatMessage } from '@dnd/shared';
 
 export function ChatPanel({ isDM = false }: { isDM?: boolean }) {
+  const ask = useConfirm();
   const { messages, members, connected, send, roll, cardAction, clearChat, error } = useTable();
   const { tokens, targetTokenId, applyDamage } = useTable();
   const { user } = useAuth();
@@ -116,9 +118,12 @@ export function ChatPanel({ isDM = false }: { isDM?: boolean }) {
             onClick={() => {
               // One table holds both tabs, so say so - "clear chat" would read
               // as leaving the battle log alone.
-              if (confirm('Delete the whole log — chat and battle both? This cannot be undone.')) {
-                clearChat();
-              }
+              void ask({
+                title: 'Delete the whole log?',
+                body: 'Chat and battle both, for everyone at the table. This cannot be undone.',
+                confirmLabel: 'Delete log',
+                danger: true,
+              }).then((ok) => ok && clearChat());
             }}
             className="text-xs text-ink-600 hover:text-red-400"
           >
@@ -370,7 +375,11 @@ function Message({
       ) : message.kind === 'card' && message.cardData ? (
         <ItemCard card={message.cardData} onAction={onAction} />
       ) : (
-        <p className="text-ink-200">{message.body}</p>
+        // `whitespace-pre-line`, because some bodies are several lines and were
+        // arriving as one run-on sentence. A group roll is written as a line per
+        // character, and every one of those newlines was being collapsed:
+        // "Group WIS saving throw Thorin: 1d20+2: [7]+2 = 9 Elaria: ...".
+        <p className="whitespace-pre-line text-ink-200">{message.body}</p>
       )}
     </div>
   );

@@ -357,6 +357,15 @@ comes from the sender's character, but the `actorId` on the wire is a claim:
 Colours are computed from the id via `actorColor()`, never stored, so client and
 server agree without a round trip.
 
+**The app asks its own questions; `window.confirm` is not used.** After a page
+has raised a few of them, Edge and Chrome offer "prevent this page from creating
+additional dialogs", and from then on every `confirm()` returns **false** without
+showing anything — so every feature gated on one silently stops working. That is
+how deleting a scene and clearing the log both arrived as "the button does
+nothing" while both were correct: driven with the dialog accepted, the DELETE
+returned 200 and the row went. `useConfirm()` returns a promise and reads almost
+exactly as `confirm()` did, so there is no reason to reach for the browser's.
+
 **`loading` means "nothing to show yet", never "a request is in flight".** A
 refetch that flips it true swaps the page for a spinner, and unmounting a page
 throws away its scroll position — which is why every rest bounced the user to

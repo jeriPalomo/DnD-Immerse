@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Button, Spinner } from './components/ui.js';
+import { ConfirmProvider } from './components/Confirm.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { ProfileSettings } from './components/ProfileSettings.js';
 import AuthPage from './pages/AuthPage.js';
@@ -31,6 +32,9 @@ export default function App() {
   }
 
   return (
+    // Above the routes, so a page that asks a question keeps working while it
+    // navigates away from the thing it asked about.
+    <ConfirmProvider>
     <Routes>
       <Route path="/login" element={<AuthPage mode="login" />} />
       <Route path="/register" element={<AuthPage mode="register" />} />
@@ -96,6 +100,7 @@ export default function App() {
       />
       <Route path="*" element={<Navigate to="/campaigns" replace />} />
     </Routes>
+    </ConfirmProvider>
   );
 }
 

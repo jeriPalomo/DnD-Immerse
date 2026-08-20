@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useConfirm } from '../components/Confirm.js';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Alert, Badge, Button, Card, Spinner } from '../components/ui.js';
 import { useAuth } from '../store/auth.js';
@@ -13,6 +14,7 @@ type LastSessionState = {
 } | null;
 
 export default function CampaignDetail() {
+  const ask = useConfirm();
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -58,7 +60,13 @@ export default function CampaignDetail() {
   }, [load]);
 
   async function leave() {
-    if (!confirm('Leave this campaign?')) return;
+    const ok = await ask({
+      title: 'Leave this campaign?',
+      body: 'You will need the invite code to come back.',
+      confirmLabel: 'Leave',
+      danger: true,
+    });
+    if (!ok) return;
     await api.delete(`/api/campaigns/${id}/members/${user?.id}`);
     navigate('/campaigns');
   }

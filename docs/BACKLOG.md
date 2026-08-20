@@ -25,6 +25,29 @@ audio system rather than extending it.
 
 ---
 
+## Punch list from the first playtest: the confirm dialogs — 2026-08-20
+
+Two reports from playing the finished build: scenes would not delete, and the
+chat's Clear button did nothing.
+
+Both were driven in a real browser before anything was changed, and **both
+worked** — the dialog appeared, `DELETE /api/scenes/:id` returned 200, the row
+went, the log emptied. The code was right. What they have in common is
+`window.confirm`, and a browser that has been offered "prevent this page from
+creating additional dialogs" returns false from every one of them afterwards,
+showing nothing. Every feature behind one stops working at once, silently, and
+those two are the only features behind one.
+
+Replaced with an in-app dialog everywhere - six call sites, including deleting a
+campaign and resetting fog. It cannot be suppressed, it matches the app, Escape
+cancels it, and a test can drive it without a dialog handler.
+
+Also: multi-line chat bodies were rendered in a `<p>` with no
+`whitespace-pre-line`, so a group roll's line per character collapsed into one
+run-on sentence.
+
+---
+
 ## `npm run playtest` could not start npm — 2026-08-19
 
 It died on the first step with `building... failed` and not one word more.

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useConfirm } from '../Confirm.js';
 import { Button } from '../ui.js';
 import { api } from '../../lib/api.js';
 import { useTable } from '../../store/table.js';
@@ -30,6 +31,7 @@ interface GridGuess {
 }
 
 export function SceneManager({ campaignId }: { campaignId: string }) {
+  const ask = useConfirm();
   const { scene, activateScene, revealFog, resetFog, wallTool, setWallTool, walls, eraseDrawing, terrain } =
     useTable();
   const [scenes, setScenes] = useState<SceneRow[]>([]);
@@ -144,7 +146,13 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
    * confirm has to say more than "are you sure".
    */
   async function removeScene(sceneId: string, name: string) {
-    if (!confirm(`Delete "${name}"? Its map, tokens, walls and fog go with it.`)) return;
+    const ok = await ask({
+      title: `Delete "${name}"?`,
+      body: 'Its map, tokens, walls and fog go with it. This cannot be undone.',
+      confirmLabel: 'Delete scene',
+      danger: true,
+    });
+    if (!ok) return;
     await api.delete(`/api/scenes/${sceneId}`);
     if (activeSceneId === sceneId) setActiveSceneId(null);
     await load();
@@ -294,9 +302,12 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
                 onClick={() => {
                   // Every player's exploration at once, and nothing brings it
                   // back - unlike a deleted token, there is no undo for this.
-                  if (confirm('Forget what every player has explored on this scene?')) {
-                    resetFog(scene.id);
-                  }
+                  void ask({
+                    title: 'Put the scene back to darkness?',
+                    body: 'Everything every player has explored is forgotten, and they walk it again.',
+                    confirmLabel: 'Reset fog',
+                    danger: true,
+                  }).then((ok) => ok && resetFog(scene.id));
                 }}
               >
                 Reset
