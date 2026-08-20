@@ -25,6 +25,46 @@ audio system rather than extending it.
 
 ---
 
+## Five bugs from an audit — 2026-08-19
+
+Asked to fix all bugs, so this is an audit rather than a symptom. Each one is
+proved by reverting the fix and watching its test fail.
+
+**The threat overlay was empty on every ordinary scene.** `visibleTokens` reads
+an empty polygon list as "you see only your own tokens" — right for a blinded
+player, wrong for a scene with dynamic vision off, where there is no view at all
+and nothing is hidden. `movement:query` passed `view?.polygons ?? []`, so a
+player held only their own tokens: no enemies to union, and their own range
+routed through creatures rather than round them. `broadcastSceneState` already
+had it right. This is the same conflation that emptied the movement overlay
+yesterday, one function further along — worth remembering that finding one
+instance of a mistake is not the same as finding the mistake.
+
+**A closed stat block still gave up its speed.** `movement:query` answered for
+any visible token, and a reach is a speed drawn on the board. A player could
+read the speed of a creature the DM had closed by asking for its range instead.
+It now calls `mayReadStats`, the function the payload gate and the stat block
+route already share. The threat union stays open on purpose.
+
+**`terrain:paint` was cast, not parsed.** The brush indexes into the terrain map
+by name, so an unknown one threw inside `paintTerrain` instead of being refused
+at the edge; `cells` was an unbounded array of arbitrary numbers, and a
+fractional coordinate truncates into a *different* square's bit than the one
+asked for. The test that proves it paints 9999 squares of mud the DM never drew,
+and Erase cannot take them back.
+
+**Every board mount logged a Konva error.** The stage was rendered before its
+container had been measured, and Konva hands each layer's canvas to `drawImage`,
+which throws on a zero width. Harmless in itself and worth fixing anyway: an
+error you have learned to ignore is where the next one hides.
+
+**`sortOrder` was required in the initiative payload and read by nothing.** The
+server resequences from initiative with the dexterity tiebreaker, so the client
+was sending a placeholder to satisfy a type. Same shape as the `turns` /
+`startTurn` pair removed earlier.
+
+---
+
 ## Going round things, and two more kinds of ground — 2026-08-19
 
 Two asks: a blocked square should make movement route *around* it rather than

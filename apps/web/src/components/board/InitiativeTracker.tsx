@@ -41,9 +41,9 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
   /**
    * Writes a retyped initiative and lets the server resort the order.
    *
-   * Sent as a whole entry because the payload carries `sortOrder` too - the
-   * server re-sorts anyway, using dexterity to break ties, so the number sent
-   * here is a placeholder rather than a claim about position.
+   * Only the number: position is the server's, computed from initiative with
+   * the handbook's dexterity tiebreaker. The payload used to require a
+   * `sortOrder` as well, which was sent as a placeholder and never read.
    */
   function commitInitiative(entryId: string): void {
     if (!editing || editing.id !== entryId) return;
@@ -56,7 +56,7 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
     if (!entry || value === entry.initiative) return;
 
     setInitiative(encounter!.id, {
-      entries: [{ id: entryId, initiative: value, sortOrder: entry.sortOrder }],
+      entries: [{ id: entryId, initiative: value }],
     });
   }
 

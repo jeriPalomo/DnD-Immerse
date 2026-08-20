@@ -523,6 +523,13 @@ a ford either free or a marsh; `reachableSquares` converts its budget once, and
 every cost below that line is in the same unit. A 30 ft creature therefore gets
 six squares of floor, four of water, three of mud.
 
+**A Konva stage is not mounted until its container has been measured.** Konva
+draws each layer by handing its canvas to `drawImage`, and a canvas of zero
+width throws `InvalidStateError` — which it did on every board mount, because
+`size` starts at zero and the ResizeObserver fills it in a frame later. A
+console full of an error that has nothing to do with the bug you are chasing is
+how the next bug gets missed.
+
 **A tool that is not a wall must not lay wall points.** The board's click
 handler read `wallTool !== 'off'`, so every brush dropped a wall corner as well
 as doing its own job - a paint stroke ends in a click, and the stroke after it
@@ -536,6 +543,26 @@ which threw the entire range away. `visionEnabled` defaults to false, so on an
 ordinary scene a player selected their token and saw no overlay at all, and the
 feature looked like it had never been built. Nothing is hidden on such a scene,
 so there is nothing to clip and nothing to leak.
+
+**"No polygons" means blind, and only a scene with vision on can say it.**
+`visibleTokens` reads an empty polygon list as "sees nothing but its own
+tokens", which is right for a blinded player and wrong for a scene with dynamic
+vision switched off — where `computePlayerView` returns null and nothing is
+hidden from anyone. `movement:query` passed `view?.polygons ?? []` and so
+handed a player only their own tokens: the threat overlay had no enemies to
+union and came back empty on every ordinary scene, and a range routed straight
+through creatures it should have gone round. `broadcastSceneState` had it right
+already — `view ? visibleTokens(...) : permitted` — and the two now match. This
+is the same conflation that emptied the movement overlay, one function along.
+
+**A reach is a speed, so a closed stat block hides it.** `movement:query`
+answered for any token the asker could see, which let a player read the speed of
+a creature whose stat block the DM had closed by asking for its range instead —
+a second gate on the same data, disagreeing with the first. It calls
+`mayReadStats`, the function the payload gate and the stat block route already
+share. **The threat union is deliberately not gated**: it covers hostiles only,
+it is a union rather than one creature's answer, and offering it is the whole
+point of the overlay.
 
 **Reachability is computed on the server, for the same reason vision is.**
 Players never receive wall geometry, so a browser cannot know what stops a

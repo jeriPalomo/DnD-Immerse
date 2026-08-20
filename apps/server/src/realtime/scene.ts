@@ -23,6 +23,7 @@ import {
   pathBlocked,
   revealAll,
   terrainForGrid,
+  terrainPaintSchema,
   terrainMatchesGrid,
   movementQuerySchema,
   pingSchema,
@@ -80,7 +81,7 @@ import { getMembership } from '../auth/guards.js';
 import { newId } from '../lib/id.js';
 import type { IOServer, SocketData } from './index.js';
 import type { Scene, Token, Wall } from '../db/schema.js';
-import type { TerrainBrush, TerrainMap } from '@dnd/shared';
+import type { TerrainMap } from '@dnd/shared';
 
 type SceneSocket = Socket<ClientToServerEvents, ServerToClientEvents, object, SocketData>;
 
@@ -642,18 +643,25 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
    * walls - through a movement overlay and a refused drag, both computed on the
    * server.
    */
-  socket.on('terrain:paint', async ({ sceneId, brush, cells }) => {
+  socket.on('terrain:paint', async (payload) => {
     const ctx = await context();
     if (!ctx || !ctx.isDM) {
       socket.emit('error', { message: 'Only the DM can shape the ground' });
       return;
     }
 
+    // Parsed, not destructured and cast. `brush` is used as a key into the
+    // terrain map, so an unknown one threw inside `paintTerrain` rather than
+    // being refused here, and `cells` was an unbounded array of arbitrary
+    // numbers - fractional coordinates truncate into a different square's bit
+    // than the one asked for.
+    const { sceneId, brush, cells } = terrainPaintSchema.parse(payload);
+
     const scene = await sceneOf(sceneId);
     if (!scene || scene.campaignId !== ctx.campaignId) return;
 
     const { gridWidth, gridHeight } = gridExtent(scene);
-    const painted = paintTerrain(await terrainOf(scene), cells, brush as TerrainBrush);
+    const painted = paintTerrain(await terrainOf(scene), cells, brush);
     const bitmaps = encodeTerrain(painted);
 
     await db
@@ -1338,6 +1346,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       walls: sceneWalls,
       tokens: sceneTokens,
       effects,
+      allowsStats,
     } = await dragState(scene.id, ctx.campaignId);
     const { gridWidth, gridHeight } = gridExtent(scene);
     const bounds = { width: gridWidth, height: gridHeight };
@@ -1353,13 +1362,25 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
           user.id,
           blindedTokenIds(effects.byToken),
         );
+    // Two filters in sequence, exactly as `broadcastSceneState` does it: hidden
+    // tokens first, then line of sight - and the second only when there is a
+    // view to apply.
+    //
+    // `visibleTokens` reads an empty polygon list as "sees nothing but its own
+    // tokens", which is right for a blinded player and wrong for a scene with
+    // dynamic vision switched off, where `computePlayerView` returns null and
+    // nothing is hidden from anyone. Passing `[]` there left a player with only
+    // their own tokens in hand: the threat overlay had no enemies to union and
+    // came back empty on every ordinary scene, and their own range routed
+    // straight through creatures it should have gone around.
+    const permitted = sceneTokens.filter(
+      (t) => t.layer !== 'gm' && (!t.hidden || t.ownerUserId === user.id),
+    );
     const visible = ctx.isDM
       ? sceneTokens
-      : visibleTokens(
-          sceneTokens.filter((t) => t.layer !== 'gm' && (!t.hidden || t.ownerUserId === user.id)),
-          view?.polygons ?? [],
-          user.id,
-        );
+      : view
+        ? visibleTokens(permitted, view.polygons, user.id)
+        : permitted;
 
     // Occupancy is drawn from what this viewer can see, NOT from every token on
     // the scene. A hidden ambusher standing in a corridor would otherwise punch
@@ -1394,7 +1415,22 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       squares = unionOfReach(await Promise.all(enemies.map(rangeFor)));
     } else if (input.tokenId) {
       const token = visible.find((t) => t.id === input.tokenId);
-      if (token) squares = await rangeFor(token);
+
+      // A reach is a speed drawn on the board, and speed is stat block data -
+      // so this asks the same question the stat block route asks, through the
+      // same function. Without it a player could read the speed of a creature
+      // whose stats the DM had closed, by asking for its range instead: a
+      // second gate on the same data that disagreed with the first.
+      //
+      // The threat union above is deliberately not gated. It covers hostiles
+      // only, it is a union rather than one creature's answer, and offering it
+      // is the whole point of the overlay.
+      const allowed =
+        token &&
+        (mayControl(token, ctx.isDM, user.id) ||
+          mayReadStats(token, ctx.isDM, user.id, allowsStats));
+
+      if (token && allowed) squares = await rangeFor(token);
     }
 
     // Clipped to ground this player has already walked or seen. Without it a

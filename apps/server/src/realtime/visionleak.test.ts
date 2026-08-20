@@ -802,6 +802,117 @@ describe('painted ground costs what the brush says it costs', () => {
   });
 });
 
+describe('a reach is a speed, so a closed stat block hides it', () => {
+  /**
+   * `movement:query` answered for any token the asker could see, and a reach is
+   * a creature's speed drawn on the board. So a player could read the speed of
+   * a creature whose stat block the DM had closed simply by asking for its
+   * range instead - a second gate on the same data, disagreeing with the first.
+   *
+   * The threat union is deliberately not gated: it covers hostiles only, it is
+   * a union rather than one creature's answer, and offering it is the point of
+   * the overlay.
+   */
+  const rangeOfLurker = async (): Promise<[number, number][]> => {
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    const lurker = player.tokens.find((t) => t.name === 'Lurker');
+    expect(lurker).toBeTruthy();
+
+    const reply = next<{ squares: [number, number][] }>(aliceSocket, 'movement:range');
+    aliceSocket.emit('movement:query', { tokenId: lurker!.id, threat: false });
+    return (await reply)?.squares ?? [];
+  };
+
+  beforeAll(async () => {
+    await api('PATCH', `/api/scenes/${sceneId}`, { visionEnabled: false }, dm.cookie);
+    dmSocket.emit('token:update', { tokenId: myTokenId, conditions: [] } as never);
+    await new Promise((r) => setTimeout(r, 400));
+  });
+
+  afterAll(async () => {
+    dmSocket.emit('token:update', { tokenId: farTokenId, statsHidden: false } as never);
+    await new Promise((r) => setTimeout(r, 300));
+    await api('PATCH', `/api/scenes/${sceneId}`, { visionEnabled: true }, dm.cookie);
+    await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+  });
+
+  it('answers while the campaign leaves stat blocks open', async () => {
+    expect((await rangeOfLurker()).length).toBeGreaterThan(0);
+  });
+
+  it('says nothing once the DM closes that one creature', async () => {
+    dmSocket.emit('token:update', { tokenId: farTokenId, statsHidden: true } as never);
+    await new Promise((r) => setTimeout(r, 400));
+
+    expect(await rangeOfLurker()).toHaveLength(0);
+  });
+
+  it('unions hostile reach on a scene with dynamic vision off', async () => {
+    // `visibleTokens` reads no polygons as "you see only your own tokens",
+    // which is right for a blinded player and wrong for a scene with vision
+    // switched off - and `visionEnabled` defaults to false. The threat overlay
+    // had no enemies to union and came back empty on every ordinary scene.
+    const reply = next<{ squares: [number, number][] }>(aliceSocket, 'movement:range');
+    aliceSocket.emit('movement:query', { tokenId: null, threat: true });
+
+    expect(((await reply)?.squares ?? []).length).toBeGreaterThan(0);
+  });
+
+  it('still answers for a token the player owns', async () => {
+    // Yours is yours whatever the campaign setting says, or closing a boss
+    // would take away the overlay the player actually uses.
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    const mine = player.tokens.find((t) => t.name === 'Alice PC');
+
+    const reply = next<{ squares: [number, number][] }>(aliceSocket, 'movement:range');
+    aliceSocket.emit('movement:query', { tokenId: mine!.id, threat: false });
+
+    expect(((await reply)?.squares ?? []).length).toBeGreaterThan(0);
+  });
+});
+
+describe('a malformed brush is refused, not thrown', () => {
+  /**
+   * `terrain:paint` destructured its payload and cast the brush. The brush is a
+   * key into the terrain map, so an unknown one reached
+   * `markExplored(undefined, ...)` and threw inside the handler rather than
+   * being refused at its edge - and `cells` was an unbounded array of arbitrary
+   * numbers, where a fractional coordinate truncates into a different square's
+   * bit than the one asked for.
+   */
+  it('refuses a brush that is not a brush, and keeps serving', async () => {
+    const failure = next<{ message: string }>(dmSocket, 'error');
+    dmSocket.emit('terrain:paint', { sceneId, brush: 'lava', cells: [[1, 1]] } as never);
+    expect(await failure).toBeTruthy();
+
+    // The connection is still good and a real stroke still lands.
+    const painted = next<{ terrain: Record<string, unknown> }>(dmSocket, 'terrain:state');
+    dmSocket.emit('terrain:paint', { sceneId, brush: 'mud', cells: [[1, 1]] } as never);
+    expect((await painted)?.terrain.mud).toEqual([[1, 1]]);
+  });
+
+  it('refuses fractional squares rather than painting a different one', async () => {
+    const failure = next<{ message: string }>(dmSocket, 'error');
+    dmSocket.emit('terrain:paint', { sceneId, brush: 'mud', cells: [[2.5, 3.5]] } as never);
+    expect(await failure).toBeTruthy();
+  });
+
+  it('refuses a stroke larger than any grid', async () => {
+    const huge: [number, number][] = [];
+    for (let i = 0; i < 40001; i++) huge.push([i % 100, Math.floor(i / 100)]);
+
+    const failure = next<{ message: string }>(dmSocket, 'error');
+    dmSocket.emit('terrain:paint', { sceneId, brush: 'mud', cells: huge } as never);
+    expect(await failure).toBeTruthy();
+  });
+
+  it('leaves the ground it painted before the bad stroke alone', async () => {
+    const cleared = next<{ terrain: Record<string, unknown> }>(dmSocket, 'terrain:state');
+    dmSocket.emit('terrain:paint', { sceneId, brush: 'clear', cells: [[1, 1]] } as never);
+    expect((await cleared)?.terrain.mud).toEqual([]);
+  });
+});
+
 describe('a blinded token sees nothing', () => {
   /**
    * Blindness is enforced where vision is computed, not by dimming the canvas.

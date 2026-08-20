@@ -8,7 +8,8 @@ import {
   tokenQuantitySchema,
 } from './schemas.js';
 import type { ChatKind, MemberRole, RollResult, TokenLayer } from './schemas.js';
-import type { TerrainBrush, TerrainKind } from './terrain.js';
+import { TERRAIN_BRUSHES } from './terrain.js';
+import type { TerrainKind } from './terrain.js';
 
 /**
  * The socket contract, shared by client and server.
@@ -427,7 +428,6 @@ export const initiativeUpdateSchema = z.object({
       z.object({
         id: z.string(),
         initiative: z.number(),
-        sortOrder: z.number().int(),
       }),
     )
     .optional(),
@@ -439,6 +439,23 @@ export type TokenCreatePayload = z.infer<typeof tokenCreateSchema>;
 export type TokenUpdatePayload = z.infer<typeof tokenUpdateSchema>;
 export type PingPayload = z.infer<typeof pingSchema>;
 export type InitiativeUpdatePayload = z.infer<typeof initiativeUpdateSchema>;
+
+/**
+ * One stroke of the ground brush.
+ *
+ * Parsed rather than cast. `brush` indexes into the terrain map by name, so an
+ * unknown one reached `markExplored(undefined, ...)` and threw inside the
+ * handler; fractional coordinates would have truncated into a *different*
+ * square's bit than the one asked for. The cap is the largest grid the fog
+ * bitmaps use, so a whole scene can be painted in one stroke and no more.
+ */
+export const terrainPaintSchema = z.object({
+  sceneId: z.string(),
+  brush: z.enum(TERRAIN_BRUSHES),
+  cells: z.array(z.tuple([z.number().int(), z.number().int()])).max(40000),
+});
+
+export type TerrainPaintPayload = z.infer<typeof terrainPaintSchema>;
 
 /* ---------------------------------------------------------------- events */
 
@@ -538,11 +555,7 @@ export interface ClientToServerEvents {
    * dungeon, like wall geometry. They feel it through the movement overlay and
    * through a refused drag, both answered on the server.
    */
-  'terrain:paint': (payload: {
-    sceneId: string;
-    brush: TerrainBrush;
-    cells: [number, number][];
-  }) => void;
+  'terrain:paint': (payload: TerrainPaintPayload) => void;
 
   'token:move': (payload: TokenMovePayload) => void;
   'token:commit': (payload: TokenCommitPayload) => void;

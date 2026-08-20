@@ -168,7 +168,7 @@ interface TableState {
   setInitiative: (
     encounterId: string,
     patch: {
-      entries?: { id: string; initiative: number; sortOrder: number }[];
+      entries?: { id: string; initiative: number }[];
       round?: number;
       activeIndex?: number;
     },

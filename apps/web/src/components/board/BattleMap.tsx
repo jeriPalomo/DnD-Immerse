@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import {
+  COST_NORMAL,
   DISPOSITION_COLOR,
   DM_COLOR,
   TERRAIN_BRUSHES,
+  TERRAIN_COST,
+  TERRAIN_LABEL,
   TOKEN_MOVE_THROTTLE_MS,
   actorColor,
   gridToPixel,
@@ -64,12 +67,22 @@ function useImage(url: string | null): HTMLImageElement | null {
   return image;
 }
 
-/** What each brush is called on the board's status line. */
-const GROUND_HINT: Record<Exclude<TerrainBrush, 'clear'>, string> = {
-  blocked: 'ground nobody can enter',
-  mud: 'mud, at double cost',
-  water: 'shallow water, at half again',
-};
+/**
+ * What a brush is called on the board's status line, and what it costs.
+ *
+ * Both read from the shared tables rather than written out here, so the line
+ * cannot end up claiming a rate the movement search does not charge - the whole
+ * reason `TERRAIN_LABEL` sits beside `TERRAIN_COST` in the first place.
+ */
+function groundHint(brush: TerrainBrush): string {
+  if (brush === 'clear') return 'drag to wipe painted ground back to open floor';
+  if (brush === 'blocked') {
+    return `painting ${TERRAIN_LABEL.blocked.toLowerCase()} ground — drag over squares; players never see the paint`;
+  }
+
+  const times = TERRAIN_COST[brush] / COST_NORMAL;
+  return `painting ${TERRAIN_LABEL[brush].toLowerCase()}, at ${times}× cost — drag over squares; players never see the paint`;
+}
 
 export function BattleMap({
   isDM,
@@ -312,6 +325,12 @@ export function BattleMap({
         wallTool === 'off' ? '' : 'cursor-crosshair'
       }`}
     >
+      {/* Not before the container has been measured. Konva draws each layer by
+          handing its canvas to `drawImage`, and a canvas of zero width throws
+          InvalidStateError - which it did on every board mount, filling the
+          console with an error that has nothing to do with whatever you are
+          actually debugging. The observer fires on the same frame. */}
+      {size.width > 0 && size.height > 0 && (
       <Stage
         width={size.width}
         height={size.height}
@@ -636,6 +655,7 @@ export function BattleMap({
           />
         </Layer>
       </Stage>
+      )}
 
       {hovered && (
         <div
@@ -712,9 +732,7 @@ export function BattleMap({
                     // "drawing waters — click to place points", which describes
                     // the wall tool and nothing the brush actually does.
                     groundBrush
-                    ? groundBrush === 'clear'
-                      ? 'drag to wipe painted ground back to open floor'
-                      : `painting ${GROUND_HINT[groundBrush]} — drag over squares; players never see the paint`
+                    ? groundHint(groundBrush)
                     : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
               : isDM
                 ? 'scroll to zoom · drag to pan · alt-click a door to lock it · shift-click a token to target · ? for keys'
