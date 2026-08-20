@@ -1,6 +1,6 @@
 import type { Point, TokenRect } from './grid.js';
 import { movementBlocked, type VisionWall } from './vision.js';
-import { NORMAL_COST, isBlockedAt, stepCostAt, type TerrainMap } from './terrain.js';
+import { COST_NORMAL, isBlockedAt, stepCostAt, type TerrainMap } from './terrain.js';
 
 /**
  * Where a creature can actually get to.
@@ -30,7 +30,7 @@ export interface ReachableInput {
   occupied: TokenRect[];
   /** Map extent in squares. */
   bounds: { width: number; height: number };
-  /** Ground the DM has painted. Blocked squares are never entered; difficult ones cost double. */
+  /** Ground the DM has painted. Blocked squares are never entered; mud and water cost more. */
   terrain?: TerrainMap | null;
 }
 
@@ -76,8 +76,12 @@ export function reachableSquares(input: ReachableInput): [number, number][] {
 
   if (speedFeet <= 0 || feetPerSquare <= 0) return [start];
 
-  /** Every step costs the same, so this is a plain square budget. */
-  const budget = Math.floor(speedFeet / feetPerSquare);
+  /**
+   * In half squares, because shallow water costs one and a half of them. The
+   * budget is converted once, here, and every cost below is in the same unit -
+   * mixing the two is how a ford would end up free.
+   */
+  const budget = Math.floor(speedFeet / feetPerSquare) * COST_NORMAL;
   if (budget <= 0) return [start];
 
   /**
@@ -97,7 +101,7 @@ export function reachableSquares(input: ReachableInput): [number, number][] {
 
   /** What it costs to stand here: the dearest square the footprint covers. */
   const costOf = (x: number, y: number): number => {
-    let cost = NORMAL_COST;
+    let cost = COST_NORMAL;
     for (let dy = 0; dy < h; dy++) {
       for (let dx = 0; dx < w; dx++) cost = Math.max(cost, stepCostAt(terrain, x + dx, y + dy));
     }
@@ -116,7 +120,7 @@ export function reachableSquares(input: ReachableInput): [number, number][] {
    * through the rubble may be reachable later for less by going round, and a
    * plain queue would record the dearer route and stop short.
    *
-   * Costs are only 1 or 2 and the grid is at most a few thousand squares, so a
+   * Costs are 2, 3 or 4 and the grid is at most a few thousand squares, so a
    * bucket per cost is enough - no heap, and the buckets are walked in order.
    */
   const buckets: [number, number][][] = [];
@@ -198,5 +202,115 @@ export function footprintBlocked(
       if (isBlockedAt(terrain, Math.round(x) + dx, Math.round(y) + dy)) return true;
     }
   }
+  return false;
+}
+
+/**
+ * Whether there is any legal way from where a creature stands to where it was
+ * dropped, going round obstacles rather than through them.
+ *
+ * `token:commit` used to answer this with a straight line - one segment from
+ * centre to centre, tested against walls and painted ground. That is wrong in
+ * the obvious way: dragging a token round a corner, or along the shore of a
+ * lake, traces a line that clips the thing you were avoiding, and the move was
+ * refused even though the creature could plainly walk it. The overlay, which is
+ * a flood fill, had been drawing those squares as reachable the whole time, so
+ * the board offered a square and the server then bounced you off it.
+ *
+ * A route, not a budget: this asks "could you get there at all", never "how
+ * far is it". Out of combat nothing spends movement, and in combat the overlay
+ * is the honest picture of what a turn buys.
+ *
+ * Occupancy is deliberately ignored. A creature ringed by its own party would
+ * otherwise be unable to move at all, and 5e lets you pass through an ally's
+ * square freely; the destination overlapping someone is a separate question
+ * this has never asked.
+ *
+ * **Bounded, and refusing when it runs out.** A legal route the long way round
+ * a lake can be arbitrarily long, and this runs on every drop. The search stops
+ * at a few times the direct distance and at a fixed number of squares, which
+ * means a genuinely legal but enormous detour is refused - the player drags it
+ * in two hops, and the alternative is a handler that can be made to walk the
+ * whole map by dropping a token on the far side of a wall.
+ */
+export interface RouteInput {
+  origin: TokenRect;
+  /** Top-left of the destination footprint, in squares. */
+  destination: { x: number; y: number };
+  walls: VisionWall[];
+  bounds: { width: number; height: number };
+  terrain?: TerrainMap | null;
+}
+
+/** Beyond this many squares of path, a drop is refused rather than searched. */
+const MAX_ROUTE_STEPS = 60;
+/** And beyond this many squares visited, whatever the path length allows. */
+const MAX_ROUTE_EXPLORED = 2000;
+
+export function routeExists(input: RouteInput): boolean {
+  const { origin, destination, walls, bounds, terrain } = input;
+
+  const w = Math.max(1, Math.round(origin.w));
+  const h = Math.max(1, Math.round(origin.h));
+  const start: [number, number] = [Math.round(origin.x), Math.round(origin.y)];
+  const goal: [number, number] = [Math.round(destination.x), Math.round(destination.y)];
+
+  if (start[0] === goal[0] && start[1] === goal[1]) return true;
+  if (goal[0] < 0 || goal[1] < 0 || goal[0] + w > bounds.width || goal[1] + h > bounds.height) {
+    return false;
+  }
+  // Standing there is impossible however you got there, so do not search.
+  if (footprintBlocked(terrain, goal[0], goal[1], w, h)) return false;
+
+  const direct = Math.max(Math.abs(goal[0] - start[0]), Math.abs(goal[1] - start[1]));
+  const maxSteps = Math.min(MAX_ROUTE_STEPS, direct * 3 + 8);
+
+  /**
+   * Only the walls that could possibly be crossed, for the reason the vision
+   * sweep culls: `movementBlocked` walks every wall on every step, so an
+   * unculled 300-wall scene turns a 2000-square search into 5 million segment
+   * tests. The box is the whole region the search can reach, so nothing that
+   * could be crossed is dropped.
+   */
+  const pad = maxSteps + Math.max(w, h) + 1;
+  const minX = Math.min(start[0], goal[0]) - pad;
+  const maxX = Math.max(start[0], goal[0]) + w + pad;
+  const minY = Math.min(start[1], goal[1]) - pad;
+  const maxY = Math.max(start[1], goal[1]) + h + pad;
+  const near = walls.filter(
+    (wall) =>
+      Math.max(wall.x1, wall.x2) >= minX &&
+      Math.min(wall.x1, wall.x2) <= maxX &&
+      Math.max(wall.y1, wall.y2) >= minY &&
+      Math.min(wall.y1, wall.y2) <= maxY,
+  );
+
+  const key = (x: number, y: number) => `${x}:${y}`;
+  const seen = new Set<string>([key(start[0], start[1])]);
+  let frontier: [number, number][] = [start];
+
+  for (let step = 0; step < maxSteps && frontier.length > 0; step++) {
+    const next: [number, number][] = [];
+
+    for (const [cx, cy] of frontier) {
+      for (const [dx, dy] of NEIGHBOURS) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx + w > bounds.width || ny + h > bounds.height) continue;
+        if (seen.has(key(nx, ny))) continue;
+        if (footprintBlocked(terrain, nx, ny, w, h)) continue;
+        if (movementBlocked(centreOf(cx, cy, w, h), centreOf(nx, ny, w, h), near)) continue;
+
+        if (nx === goal[0] && ny === goal[1]) return true;
+
+        seen.add(key(nx, ny));
+        if (seen.size > MAX_ROUTE_EXPLORED) return false;
+        next.push([nx, ny]);
+      }
+    }
+
+    frontier = next;
+  }
+
   return false;
 }

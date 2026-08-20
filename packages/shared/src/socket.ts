@@ -8,6 +8,7 @@ import {
   tokenQuantitySchema,
 } from './schemas.js';
 import type { ChatKind, MemberRole, RollResult, TokenLayer } from './schemas.js';
+import type { TerrainBrush, TerrainKind } from './terrain.js';
 
 /**
  * The socket contract, shared by client and server.
@@ -441,12 +442,14 @@ export type InitiativeUpdatePayload = z.infer<typeof initiativeUpdateSchema>;
 
 /* ---------------------------------------------------------------- events */
 
-export interface TerrainCells {
-  blocked: [number, number][];
-  difficult: [number, number][];
+/**
+ * One list of squares per painted kind. Keyed off `TerrainKind` rather than
+ * spelled out, so adding a brush is a change in one file rather than four.
+ */
+export type TerrainCells = Record<TerrainKind, [number, number][]> & {
   /** False when it was painted at a different grid, so the panel can say so. */
   matchesGrid: boolean;
-}
+};
 
 export interface ServerToClientEvents {
   /** DM room only. Players are never sent painted ground. */
@@ -537,7 +540,7 @@ export interface ClientToServerEvents {
    */
   'terrain:paint': (payload: {
     sceneId: string;
-    brush: 'blocked' | 'difficult' | 'clear';
+    brush: TerrainBrush;
     cells: [number, number][];
   }) => void;
 

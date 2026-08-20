@@ -328,7 +328,11 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
               <span>Wall tool</span>
               <span className="text-ink-600">{walls.length} walls</span>
             </div>
-            <div className="flex gap-1.5">
+            {/* Two rows, split the way the tools are used: architecture you
+                click out as runs of points, and ground you drag over. Eleven
+                buttons in one row of a 320px column came out 29px wide and ran
+                off the end of the panel. */}
+            <div className="flex flex-wrap gap-1.5">
               {(
                 [
                   ['off', 'Off'],
@@ -340,35 +344,47 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
                   ['note', 'Pin'],
                   ['draw', 'Pen'],
                   ['arrow', 'Arrow'],
-                  // Ground, not architecture: a pillar is four wall segments
-                  // and that is fine, but a lake or a cave's ragged edge is not
-                  // worth tracing.
-                  ['blocked', 'Blocked'],
-                  ['difficult', 'Rough'],
-                  ['erase-ground', 'Clear'],
                 ] as const
               ).map(([value, label]) => (
-                <button
+                <ToolButton
                   key={value}
+                  label={label}
+                  active={wallTool === value}
                   onClick={() => setWallTool(value)}
-                  className={`flex-1 rounded border px-2 py-1 text-xs transition-colors ${
-                    wallTool === value
-                      ? 'border-arcane-400 bg-arcane-500/20 text-arcane-400'
-                      : 'border-ink-700 text-ink-400 hover:text-ink-200'
-                  }`}
-                >
-                  {label}
-                </button>
+                />
               ))}
             </div>
             <p className="mt-1.5 text-[10px] text-ink-600">
               Click to place points; each click continues the run. Double-click to
               finish a run, alt-click a wall to delete it.
             </p>
-            <p className="mt-1 text-[10px] text-ink-600">
-              Blocked and Rough are painted by dragging over squares — nobody enters
-              blocked ground, and rough ground costs double to cross. Players never
-              see the paint; their movement range simply stops at it.
+
+            <div className="mt-2.5 mb-1.5 text-[11px] text-ink-400">Ground</div>
+            <div className="flex flex-wrap gap-1.5">
+              {(
+                [
+                  // Ground, not architecture: a pillar is four wall segments
+                  // and that is fine, but a lake or a cave's ragged edge is not
+                  // worth tracing.
+                  ['blocked', 'Block'],
+                  ['mud', 'Mud'],
+                  ['water', 'Water'],
+                  ['clear', 'Erase'],
+                ] as const
+              ).map(([value, label]) => (
+                <ToolButton
+                  key={value}
+                  label={label}
+                  active={wallTool === value}
+                  onClick={() => setWallTool(value)}
+                />
+              ))}
+            </div>
+            <p className="mt-1.5 text-[10px] text-ink-600">
+              Painted by dragging over squares. Nobody enters a blocked square; mud
+              costs double to cross and shallow water half again, so a 30 ft creature
+              gets 3 squares through mud or 4 through a ford. Players never see the
+              paint — their movement range simply shortens over it.
             </p>
 
             {!terrain.matchesGrid && (
@@ -690,5 +706,32 @@ function GridCalibration({
         Show grid
       </label>
     </div>
+  );
+}
+
+/** One board tool. Extracted when the row was split in two, not before. */
+function ToolButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      // `basis` with a floor rather than a bare `flex-1`: seven buttons in a
+      // 320px column squeezed "Arrow" off the end of the panel, and a button
+      // whose label is clipped is a button nobody presses.
+      className={`min-w-12 flex-1 rounded border px-2 py-1 text-xs transition-colors ${
+        active
+          ? 'border-arcane-400 bg-arcane-500/20 text-arcane-400'
+          : 'border-ink-700 text-ink-400 hover:text-ink-200'
+      }`}
+    >
+      {label}
+    </button>
   );
 }

@@ -14,6 +14,15 @@ const base = {
 const has = (cells: [number, number][], x: number, y: number) =>
   cells.some(([cx, cy]) => cx === x && cy === y);
 
+/** A full-height band, so there is no way round it to measure instead. */
+const band = (from: number, to: number): [number, number][] => {
+  const cells: [number, number][] = [];
+  for (let x = from; x <= to; x++) {
+    for (let y = 0; y < 20; y++) cells.push([x, y]);
+  }
+  return cells;
+};
+
 describe('movement over painted terrain', () => {
   it('reaches six squares on open ground', () => {
     const cells = reachableSquares(base);
@@ -35,27 +44,48 @@ describe('movement over painted terrain', () => {
     expect(has(cells, 7, 5)).toBe(true);
   });
 
-  it('halves how far you get across difficult ground', () => {
+  it('halves how far you get across mud', () => {
     // A band with no way round it. Painting a single row instead lets the
     // creature detour along clean ground and step in once, which is genuinely
     // cheaper and reaches further - correct behaviour, and not what this test
     // is trying to measure.
-    const difficult: [number, number][] = [];
-    for (let x = 6; x <= 15; x++) {
-      for (let y = 0; y < 20; y++) difficult.push([x, y]);
-    }
-    const terrain = paintTerrain(createTerrain(20, 20), difficult, 'difficult');
+    const terrain = paintTerrain(createTerrain(20, 20), band(6, 15), 'mud');
 
-    // Six squares of budget, two per square: three squares into the rubble.
+    // Six squares of budget, two per square: three squares into the bog.
     const cells = reachableSquares({ ...base, terrain });
     expect(has(cells, 8, 5)).toBe(true);
     expect(has(cells, 9, 5)).toBe(false);
   });
 
+  it('costs a ford half again, so four squares of it rather than three', () => {
+    // The house rule the half-square unit exists for. Rounded to whole squares
+    // this would be either six squares, like a dry floor, or three, like a bog.
+    const terrain = paintTerrain(createTerrain(20, 20), band(6, 15), 'water');
+
+    const cells = reachableSquares({ ...base, terrain });
+    expect(has(cells, 9, 5)).toBe(true);
+    expect(has(cells, 10, 5)).toBe(false);
+  });
+
+  it('is dearer through mud than through the same width of water', () => {
+    // Stated as a comparison as well as as two numbers. The two brushes exist
+    // to differ, and a copy-paste that gave them one cost would still pass the
+    // two tests above if the constants were wrong together.
+    const mud = reachableSquares({
+      ...base,
+      terrain: paintTerrain(createTerrain(20, 20), band(6, 15), 'mud'),
+    });
+    const water = reachableSquares({
+      ...base,
+      terrain: paintTerrain(createTerrain(20, 20), band(6, 15), 'water'),
+    });
+    expect(water.length).toBeGreaterThan(mud.length);
+  });
+
   it('takes the cheaper way round when rubble is dearer than a detour', () => {
     // A plain queue records the first arrival, which through the rubble is the
     // dear one, and then stops short of ground that is genuinely reachable.
-    const terrain = paintTerrain(createTerrain(20, 20), [[6, 5], [6, 4], [6, 6]], 'difficult');
+    const terrain = paintTerrain(createTerrain(20, 20), [[6, 5], [6, 4], [6, 6]], 'mud');
     const cells = reachableSquares({ ...base, terrain });
 
     // Round the top: 5,5 -> 5,3 -> 6,3 -> ... costs one per square.
@@ -78,7 +108,7 @@ describe('movement over painted terrain', () => {
   });
 
   it('still includes the square you are standing on', () => {
-    const terrain = paintTerrain(createTerrain(20, 20), [[5, 5]], 'difficult');
+    const terrain = paintTerrain(createTerrain(20, 20), [[5, 5]], 'mud');
     expect(has(reachableSquares({ ...base, terrain }), 5, 5)).toBe(true);
   });
 });

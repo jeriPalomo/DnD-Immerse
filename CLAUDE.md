@@ -494,6 +494,41 @@ to agree: `campaignMembers.role === 'dm'` (what `requireDM` reads) and
 creation and nothing reassigns either, so they cannot currently diverge — but
 anything that transfers a campaign has to write both.
 
+**A refused move asks whether there is a way round, not whether the straight
+line is clear.** `token:commit` tested one segment from centre to centre against
+walls and painted ground, so dragging a token round a corner or along the shore
+of a lake traced a line that clipped the thing being avoided and the move was
+refused - while the movement overlay, which is a flood fill, had been drawing
+those very squares as reachable. `routeExists` runs only when the straight line
+*is* blocked, so the common drop costs nothing, and it walks the grid the way
+the overlay does. It asks "could you get there at all", never "how far is it":
+out of combat nothing spends movement, and occupancy is ignored because a
+creature ringed by its own party would otherwise be unable to move. It is
+bounded - a few times the direct distance, and a fixed number of squares - so a
+legal but enormous detour is refused and dragged in two hops instead, because
+this runs on every drop and an unbounded search is a way to make one handler
+walk the whole map. Walls are culled to the searched region first, for the
+reason the vision sweep culls. **One refusal covers both**: telling a player
+"a wall" rather than "no footing" hands them the wall's position without their
+ever having seen it.
+
+**Ground is painted as a kind, and the cost is looked up from it.** `blocked`,
+`mud` (double, the handbook's difficult terrain) and `water` (half again, a
+house rule - a ford that cost the same as a bog would make the two brushes one
+brush). One bitmap per kind, never a cost per square: storing the number freezes
+it, the mistake `active_effects` avoids by naming a condition rather than
+copying its mechanics. **Movement is counted in half squares**, because one and
+a half is not expressible in whole ones and a search that rounded it would make
+a ford either free or a marsh; `reachableSquares` converts its budget once, and
+every cost below that line is in the same unit. A 30 ft creature therefore gets
+six squares of floor, four of water, three of mud.
+
+**A tool that is not a wall must not lay wall points.** The board's click
+handler read `wallTool !== 'off'`, so every brush dropped a wall corner as well
+as doing its own job - a paint stroke ends in a click, and the stroke after it
+joined the two into a real wall. Two walls appeared on a scene where nothing but
+ground had been painted. The wall branch names its three tools.
+
 **A movement range is clipped to explored ground only when there is a view to
 clip against.** `computePlayerView` returns null on a scene with dynamic vision
 off, and the clip filtered against `view?.vision.explored ?? []` - an empty set,

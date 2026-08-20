@@ -27,6 +27,7 @@ import {
   movementQuerySchema,
   pingSchema,
   reachableSquares,
+  routeExists,
   unionOfReach,
   snapTokenPosition,
   tokenCenter,
@@ -653,21 +654,14 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
     const { gridWidth, gridHeight } = gridExtent(scene);
     const painted = paintTerrain(await terrainOf(scene), cells, brush as TerrainBrush);
-    const { blockedBitmap, difficultBitmap } = encodeTerrain(painted);
+    const bitmaps = encodeTerrain(painted);
 
     await db
       .insert(sceneTerrain)
-      .values({
-        sceneId: scene.id,
-        gridWidth,
-        gridHeight,
-        blockedBitmap,
-        difficultBitmap,
-        updatedAt: Date.now(),
-      })
+      .values({ sceneId: scene.id, gridWidth, gridHeight, ...bitmaps, updatedAt: Date.now() })
       .onConflictDoUpdate({
         target: sceneTerrain.sceneId,
-        set: { gridWidth, gridHeight, blockedBitmap, difficultBitmap, updatedAt: Date.now() },
+        set: { gridWidth, gridHeight, ...bitmaps, updatedAt: Date.now() },
       });
 
     io.to(campaignDmRoom(ctx.campaignId)).emit('terrain:state', {
@@ -865,29 +859,42 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
         : { x: input.x, y: input.y };
     const snapped = snapTokenPosition(bounded, w, h);
 
-    // Walls stop players, not the DM - who needs to place things anywhere,
-    // including inside walls.
-    if (!ctx.isDM) {
+    // Walls and painted ground stop players, not the DM - who needs to place
+    // things anywhere, including inside a wall.
+    if (!ctx.isDM && scene) {
       const sceneWalls = await wallsOf(token.sceneId);
+      const ground = await terrainOf(scene);
       const from = tokenCenter(token);
       const to = tokenCenter({ x: snapped.x, y: snapped.y, w, h });
 
-      // Painted ground stops you standing on it AND crossing it. Testing only
-      // the destination let a player drag clean over a chasm and land on the
-      // far side - and the movement overlay, which is a flood fill, had already
-      // refused to route through it, so the two disagreed.
-      const ground = scene ? await terrainOf(scene) : null;
-      if (
-        ground &&
-        (footprintBlocked(ground, snapped.x, snapped.y, w, h) || pathBlocked(ground, from, to))
-      ) {
-        socket.emit('error', { message: 'There is no footing there' });
-        await broadcastToken(io, ctx.campaignId, token);
-        return;
-      }
+      // The cheap answer first, and it is the one nearly every drop gets: a
+      // clear straight line means there is obviously a way, with no search.
+      const straight =
+        !movementBlocked(from, to, sceneWalls) &&
+        !footprintBlocked(ground, snapped.x, snapped.y, w, h) &&
+        !pathBlocked(ground, from, to);
 
-      if (movementBlocked(from, to, sceneWalls)) {
-        socket.emit('error', { message: 'A wall blocks the way' });
+      // A blocked straight line is not a refusal, it is a question. Dragging a
+      // token round a corner or along the shore of a lake traces a segment that
+      // clips the thing being avoided, and testing that segment alone refused
+      // moves the creature could plainly walk - while the movement overlay, a
+      // flood fill, had been drawing those very squares as reachable. The board
+      // offered a square and the server then bounced you off it.
+      const { gridWidth, gridHeight } = gridExtent(scene);
+      if (
+        !straight &&
+        !routeExists({
+          origin: { x: token.x, y: token.y, w, h },
+          destination: { x: snapped.x, y: snapped.y },
+          walls: sceneWalls,
+          bounds: { width: gridWidth, height: gridHeight },
+          terrain: ground,
+        })
+      ) {
+        // One refusal for both, because the difference is the DM's to know: a
+        // player told "a wall" rather than "no footing" has learnt where the
+        // wall is without ever seeing it.
+        socket.emit('error', { message: 'There is no way through' });
         // Send the authoritative position back so the client snaps home.
         await broadcastToken(io, ctx.campaignId, token);
         return;

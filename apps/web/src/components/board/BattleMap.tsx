@@ -3,6 +3,7 @@ import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } fr
 import {
   DISPOSITION_COLOR,
   DM_COLOR,
+  TERRAIN_BRUSHES,
   TOKEN_MOVE_THROTTLE_MS,
   actorColor,
   gridToPixel,
@@ -13,7 +14,7 @@ import {
   tokenDistanceInFeet,
 } from '@dnd/shared';
 import type Konva from 'konva';
-import type { WireScene, WireToken } from '@dnd/shared';
+import type { TerrainBrush, WireScene, WireToken } from '@dnd/shared';
 import { DoorLayer, FogLayer, NoteLayer, WallLayer } from './FogLayer.js';
 import { DrawingLayer } from './DrawingLayer.js';
 import { TerrainLayer } from './TerrainLayer.js';
@@ -63,6 +64,13 @@ function useImage(url: string | null): HTMLImageElement | null {
   return image;
 }
 
+/** What each brush is called on the board's status line. */
+const GROUND_HINT: Record<Exclude<TerrainBrush, 'clear'>, string> = {
+  blocked: 'ground nobody can enter',
+  mud: 'mud, at double cost',
+  water: 'shallow water, at half again',
+};
+
 export function BattleMap({
   isDM,
   focused = false,
@@ -101,8 +109,9 @@ export function BattleMap({
   const myColor = isDM ? DM_COLOR : actorColor(activeActorId ?? user?.id ?? '');
   const drawingMode = wallTool === 'draw' || wallTool === 'arrow';
   /** Painting ground is a drag over squares, so it suspends panning too. */
-  const groundBrush =
-    wallTool === 'blocked' ? 'blocked' : wallTool === 'difficult' ? 'difficult' : wallTool === 'erase-ground' ? 'clear' : null;
+  const groundBrush: TerrainBrush | null = TERRAIN_BRUSHES.includes(wallTool as TerrainBrush)
+    ? (wallTool as TerrainBrush)
+    : null;
 
   const painting = useRef(false);
   /**
@@ -418,7 +427,12 @@ export function BattleMap({
             return;
           }
 
-          if (wallTool !== 'off' && isDM) {
+          // Named, not "anything but off". Every tool that is not a wall was
+          // laying wall points as well as doing its own job: a paint stroke ends
+          // in a click, so dragging mud across a lake quietly dropped a wall
+          // corner, and the stroke after it joined the two into a real wall.
+          // Two walls appeared on a scene where nothing but ground was painted.
+          if ((wallTool === 'wall' || wallTool === 'door' || wallTool === 'secret') && isDM) {
             // Walls snap to grid corners so they line up with the map's own
             // architecture rather than landing at arbitrary fractions.
             const snapped = { x: Math.round(point.x), y: Math.round(point.y) };
@@ -517,7 +531,7 @@ export function BattleMap({
             ground, not what is standing on it. */}
         {isDM && (
           <Layer listening={false}>
-            <TerrainLayer grid={grid} blocked={terrain.blocked} difficult={terrain.difficult} />
+            <TerrainLayer grid={grid} terrain={terrain} />
           </Layer>
         )}
 
@@ -693,7 +707,15 @@ export function BattleMap({
                 ? 'click to drop a pin — click a pin to reveal it, alt-click to delete'
                 : wallTool === 'secret'
                   ? 'drawing a secret passage — players are never sent it; alt-click a dotted seam to reveal it'
-                  : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
+                  : // Ground is painted by dragging over squares, not by placing
+                    // a run of points, so it needs its own line - this one read
+                    // "drawing waters — click to place points", which describes
+                    // the wall tool and nothing the brush actually does.
+                    groundBrush
+                    ? groundBrush === 'clear'
+                      ? 'drag to wipe painted ground back to open floor'
+                      : `painting ${GROUND_HINT[groundBrush]} — drag over squares; players never see the paint`
+                    : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
               : isDM
                 ? 'scroll to zoom · drag to pan · alt-click a door to lock it · shift-click a token to target · ? for keys'
                 : 'scroll to zoom · drag to pan · alt-click to ping, alt-drag to draw one · shift-click a token to target · ? for keys'}

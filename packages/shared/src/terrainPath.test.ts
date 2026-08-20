@@ -40,9 +40,10 @@ describe('crossing blocked ground', () => {
     expect(pathBlocked(spot, { x: 2.5, y: 20.5 }, { x: 38.5, y: 20.5 })).toBe(true);
   });
 
-  it('ignores rough ground, which costs but never blocks', () => {
-    const rough = paintTerrain(createTerrain(12, 12), [[4, 5], [5, 5]], 'difficult');
-    expect(pathBlocked(rough, { x: 1.5, y: 5.5 }, { x: 8.5, y: 5.5 })).toBe(false);
+  it('ignores ground that costs but never blocks', () => {
+    let soft = paintTerrain(createTerrain(12, 12), [[4, 5], [5, 5]], 'mud');
+    soft = paintTerrain(soft, [[6, 5]], 'water');
+    expect(pathBlocked(soft, { x: 1.5, y: 5.5 }, { x: 8.5, y: 5.5 })).toBe(false);
   });
 
   it('says no when there is no terrain at all, or no movement', () => {

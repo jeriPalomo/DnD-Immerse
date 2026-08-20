@@ -620,7 +620,9 @@ describe('walls stop movement', () => {
     // From inside the sealed room, straight out through the east wall.
     aliceSocket.emit('token:commit', { tokenId: aliceTokenId, x: 20, y: 8 });
 
-    expect((await failure)?.message).toMatch(/wall blocks/i);
+    // One refusal for walls and painted ground alike: naming the wall tells a
+    // player where it is without their ever having seen it.
+    expect((await failure)?.message).toMatch(/no way through/i);
 
     const corrected = await correction;
     // Still inside the room, at the position it started from.
@@ -657,6 +659,146 @@ describe('walls stop movement', () => {
     aliceSocket.emit('token:commit', { tokenId: aliceTokenId, x: 15, y: 5 });
 
     expect((await moved)?.token.x).toBe(15);
+  });
+
+  it('goes round a wall rather than refusing a drag whose straight line clips it', async () => {
+    // The door is open from the test above. From (5,5) inside the room out to
+    // (15,9), the segment between the two centres crosses the east wall well
+    // below the doorway - but the creature can plainly walk out through the
+    // door and turn south, which is what the person dragging the token means.
+    //
+    // The movement overlay, a flood fill, had been drawing that square as
+    // reachable the whole time. The board offered it and the server bounced
+    // you off it.
+    dmSocket.emit('token:commit', { tokenId: aliceTokenId, x: 5, y: 5 });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const moved = next<{ token: WireToken }>(dmSocket, 'token:updated');
+    aliceSocket.emit('token:commit', { tokenId: aliceTokenId, x: 15, y: 9 });
+
+    const landed = await moved;
+    expect(landed?.token.x).toBe(15);
+    expect(landed?.token.y).toBe(9);
+  });
+
+  it('still refuses when there is no way round at all', async () => {
+    // Shutting the door seals the room again, and the same drag is refused -
+    // the search is a second chance to find a route, never a way past a wall.
+    await waitForScene(
+      aliceSocket,
+      () => dmSocket.emit('wall:update', { wallId: doorId, doorState: 0 }),
+      (payload) => payload.doors.every((d) => d.doorState !== 1),
+    );
+
+    dmSocket.emit('token:commit', { tokenId: aliceTokenId, x: 5, y: 5 });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const failure = next<{ message: string }>(aliceSocket, 'error');
+    aliceSocket.emit('token:commit', { tokenId: aliceTokenId, x: 15, y: 9 });
+
+    expect((await failure)?.message).toMatch(/no way through/i);
+  });
+});
+
+describe('painted ground costs what the brush says it costs', () => {
+  /**
+   * The arithmetic end to end, through the socket, rather than trusting the
+   * unit tests and the wiring separately. A 30 ft creature gets six squares of
+   * open floor; mud is double, so three; shallow water is half again, so four.
+   *
+   * Vision is off for this block so the range is unclipped - what is under test
+   * is the cost of the ground, not what the player has explored.
+   */
+  const OPEN: [number, number] = [30, 30];
+
+  const rangeOf = async (): Promise<[number, number][]> => {
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    const mine = player.tokens.find((t) => t.name === 'Alice PC');
+    const reply = next<{ squares: [number, number][] }>(aliceSocket, 'movement:range');
+    aliceSocket.emit('movement:query', { tokenId: mine!.id, threat: false });
+    return (await reply)?.squares ?? [];
+  };
+
+  const reaches = (squares: [number, number][], x: number) =>
+    squares.some(([sx, sy]) => sx === x && sy === OPEN[1]);
+
+  /** A band too tall to walk round inside a 30 ft budget. */
+  const band = (): [number, number][] => {
+    const cells: [number, number][] = [];
+    for (let x = 31; x <= 40; x++) {
+      for (let y = 24; y <= 36; y++) cells.push([x, y]);
+    }
+    return cells;
+  };
+
+  const paint = async (brush: string) => {
+    dmSocket.emit('terrain:paint', { sceneId, brush, cells: band() } as never);
+    await new Promise((r) => setTimeout(r, 300));
+  };
+
+  beforeAll(async () => {
+    await api('PATCH', `/api/scenes/${sceneId}`, { visionEnabled: false }, dm.cookie);
+    dmSocket.emit('token:update', { tokenId: myTokenId, conditions: [] } as never);
+    await new Promise((r) => setTimeout(r, 200));
+    dmSocket.emit('token:commit', { tokenId: myTokenId, x: OPEN[0], y: OPEN[1] });
+    await new Promise((r) => setTimeout(r, 300));
+  });
+
+  afterAll(async () => {
+    await paint('clear');
+    await api('PATCH', `/api/scenes/${sceneId}`, { visionEnabled: true }, dm.cookie);
+    await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+  });
+
+  it('gives six squares on open floor', async () => {
+    const squares = await rangeOf();
+    expect(reaches(squares, 36)).toBe(true);
+    expect(reaches(squares, 37)).toBe(false);
+  });
+
+  it('gives three squares through mud', async () => {
+    await paint('mud');
+    const squares = await rangeOf();
+    expect(reaches(squares, 33)).toBe(true);
+    expect(reaches(squares, 34)).toBe(false);
+  });
+
+  it('gives four squares through shallow water', async () => {
+    // The house rule the half-square unit exists for. In whole squares this
+    // would round to either six, like a dry floor, or three, like a bog.
+    await paint('water');
+    const squares = await rangeOf();
+    expect(reaches(squares, 34)).toBe(true);
+    expect(reaches(squares, 35)).toBe(false);
+  });
+
+  it('gives none at all through blocked ground', async () => {
+    await paint('blocked');
+    const squares = await rangeOf();
+    expect(reaches(squares, 31)).toBe(false);
+    expect(reaches(squares, 30)).toBe(true);
+  });
+
+  it('goes back to six when the ground is cleared', async () => {
+    await paint('clear');
+    const squares = await rangeOf();
+    expect(reaches(squares, 36)).toBe(true);
+  });
+
+  it('sends the painted ground to the DM and to nobody else', async () => {
+    // A map of the dungeon, exactly like wall geometry. The player feels it
+    // through a shortened range and a refused drag, both decided here.
+    const toDm = next<{ terrain: Record<string, unknown> }>(dmSocket, 'terrain:state');
+    const toPlayer = next<{ terrain: unknown }>(aliceSocket, 'terrain:state', 800);
+
+    dmSocket.emit('terrain:paint', { sceneId, brush: 'mud', cells: band() } as never);
+
+    const seen = await toDm;
+    expect((seen?.terrain.mud as unknown[])?.length).toBe(band().length);
+    expect(await toPlayer).toBe(null);
+
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    expect(JSON.stringify(player)).not.toContain('mud');
   });
 });
 

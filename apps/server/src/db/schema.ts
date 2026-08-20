@@ -431,7 +431,10 @@ export const sceneTerrain = sqliteTable('scene_terrain', {
   gridWidth: integer('grid_width').notNull().default(0),
   gridHeight: integer('grid_height').notNull().default(0),
   blockedBitmap: text('blocked_bitmap').notNull().default(''),
-  difficultBitmap: text('difficult_bitmap').notNull().default(''),
+  /** Difficult terrain, at double cost - the handbook's one rate. */
+  mudBitmap: text('mud_bitmap').notNull().default(''),
+  /** A house rule at one and a half; see `TERRAIN_COST`. */
+  waterBitmap: text('water_bitmap').notNull().default(''),
   updatedAt: epoch('updated_at'),
 });
 

@@ -1,5 +1,5 @@
 import { Group, Rect } from 'react-konva';
-import { gridToPixel } from '@dnd/shared';
+import { gridToPixel, type TerrainCells } from '@dnd/shared';
 
 /**
  * The ground the DM has painted, drawn for the DM alone.
@@ -13,35 +13,48 @@ import { gridToPixel } from '@dnd/shared';
  * across half a battle map makes it unreadable for the sake of information only
  * one person needs.
  */
+
+/**
+ * Drawn cheapest first, so that where two washes meet the dearer ground is the
+ * one on top. Blocked is last and darkest because it is the one that stops a
+ * move outright rather than costing for it.
+ */
+const PAINT = [
+  { kind: 'water', fill: '#38bdf8', opacity: 0.14 },
+  { kind: 'mud', fill: '#a16207', opacity: 0.2 },
+] as const;
+
 export function TerrainLayer({
   grid,
-  blocked,
-  difficult,
+  terrain,
 }: {
   grid: Parameters<typeof gridToPixel>[1];
-  blocked: [number, number][];
-  difficult: [number, number][];
+  terrain: TerrainCells;
 }) {
-  if (blocked.length === 0 && difficult.length === 0) return null;
+  if (terrain.blocked.length === 0 && terrain.mud.length === 0 && terrain.water.length === 0) {
+    return null;
+  }
 
   return (
     <Group listening={false}>
-      {difficult.map(([x, y]) => {
-        const point = gridToPixel({ x, y }, grid);
-        return (
-          <Rect
-            key={`d${x}:${y}`}
-            x={point.x}
-            y={point.y}
-            width={grid.gridSize}
-            height={grid.gridSize}
-            fill="#f59e0b"
-            opacity={0.16}
-          />
-        );
-      })}
+      {PAINT.map(({ kind, fill, opacity }) =>
+        terrain[kind].map(([x, y]) => {
+          const point = gridToPixel({ x, y }, grid);
+          return (
+            <Rect
+              key={`${kind}${x}:${y}`}
+              x={point.x}
+              y={point.y}
+              width={grid.gridSize}
+              height={grid.gridSize}
+              fill={fill}
+              opacity={opacity}
+            />
+          );
+        }),
+      )}
 
-      {blocked.map(([x, y]) => {
+      {terrain.blocked.map(([x, y]) => {
         const point = gridToPixel({ x, y }, grid);
         return (
           <Rect

@@ -4,6 +4,8 @@ import { api } from '../lib/api.js';
 import { getPref, setPref } from '../lib/prefs.js';
 import type {
   ClientToServerEvents,
+  TerrainBrush,
+  TerrainCells,
   RollMode,
   ServerToClientEvents,
   WireChatMessage,
@@ -20,6 +22,21 @@ import type {
 } from '@dnd/shared';
 
 type TableSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+
+/**
+ * What clicking the board does. Named once: it was spelled out twice, in the
+ * field and in the setter, so adding a brush meant editing both and the two
+ * had already drifted by one entry.
+ */
+export type BoardTool =
+  | 'off'
+  | 'wall'
+  | 'door'
+  | 'secret'
+  | 'note'
+  | 'draw'
+  | 'arrow'
+  | TerrainBrush;
 
 interface TableState {
   socket: TableSocket | null;
@@ -39,9 +56,9 @@ interface TableState {
   /** Only ever populated for the DM; players never receive wall geometry. */
   walls: WireWall[];
   /** DM wall-drawing mode. */
-  wallTool: 'off' | 'wall' | 'door' | 'secret' | 'note' | 'draw' | 'arrow' | 'blocked' | 'difficult' | 'erase-ground';
+  wallTool: BoardTool;
   /** Painted ground. DM-only: a player is never sent this. */
-  terrain: { blocked: [number, number][]; difficult: [number, number][]; matchesGrid: boolean };
+  terrain: TerrainCells;
   encounter: WireEncounter | null;
   templates: WireTemplate[];
   /**
@@ -84,7 +101,7 @@ interface TableState {
   /** DM-only fog controls; the server refuses anyone else. */
   revealFog: (sceneId: string) => void;
   resetFog: (sceneId: string) => void;
-  paintTerrain: (sceneId: string, brush: 'blocked' | 'difficult' | 'clear', cells: [number, number][]) => void;
+  paintTerrain: (sceneId: string, brush: TerrainBrush, cells: [number, number][]) => void;
   createToken: (payload: Record<string, unknown>) => void;
   moveToken: (tokenId: string, x: number, y: number) => void;
   commitToken: (tokenId: string, x: number, y: number) => void;
@@ -92,9 +109,7 @@ interface TableState {
   deleteToken: (tokenId: string) => void;
   /** `points` carries a dragged stroke, in grid units; empty for a plain dot. */
   pingMap: (x: number, y: number, points?: number[]) => void;
-  setWallTool: (
-    tool: 'off' | 'wall' | 'door' | 'secret' | 'note' | 'draw' | 'arrow' | 'blocked' | 'difficult' | 'erase-ground',
-  ) => void;
+  setWallTool: (tool: BoardTool) => void;
   addDrawing: (kind: 'freehand' | 'arrow' | 'text', points: number[], color: string, text?: string) => void;
   eraseDrawing: (id: string | 'mine' | 'all') => void;
   placeNote: (x: number, y: number) => Promise<void>;
@@ -224,7 +239,7 @@ export const useTable = create<TableState>((set, get) => ({
   drawings: [],
   walls: [],
   wallTool: 'off',
-  terrain: { blocked: [], difficult: [], matchesGrid: true },
+  terrain: { blocked: [], mud: [], water: [], matchesGrid: true },
   encounter: null,
   lastDamage: null,
   journalVersion: 0,

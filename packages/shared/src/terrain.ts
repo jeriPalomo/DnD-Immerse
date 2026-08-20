@@ -2,7 +2,7 @@ import { createFog, decodeFog, encodeFog, isExplored, markExplored, type FogBitm
 
 /**
  * Ground the DM has painted: squares nobody may enter, and squares that cost
- * double to cross.
+ * more to cross than open floor.
  *
  * Built on the bitmaps in `fog.ts`, which are one bit per grid square and only
  * fog-shaped by name and history. A second implementation of the same thing
@@ -11,30 +11,85 @@ import { createFog, decodeFog, encodeFog, isExplored, markExplored, type FogBitm
  * A pillar is four wall segments and drawing it that way is fine. A lake, a
  * rubble field or a cave's ragged edge is not, which is what this is for.
  */
+
+/**
+ * What a painted square is. One bitmap each, rather than a cost per square,
+ * because the DM paints a *kind* of ground - a bog, a ford - and the cost is
+ * looked up from that. Storing the number instead would freeze it, the same
+ * mistake `active_effects` avoids by naming a condition rather than copying its
+ * mechanics: changing what mud costs would then apply only to mud painted
+ * afterwards.
+ */
+export const TERRAIN_KINDS = ['blocked', 'mud', 'water'] as const;
+export type TerrainKind = (typeof TERRAIN_KINDS)[number];
+
+/** The brushes, which are the kinds plus a rubber. */
+export const TERRAIN_BRUSHES = [...TERRAIN_KINDS, 'clear'] as const;
+export type TerrainBrush = (typeof TERRAIN_BRUSHES)[number];
+
+/**
+ * Movement is counted in HALF squares, so an ordinary square costs 2.
+ *
+ * That granularity exists for shallow water. The handbook has one rate only -
+ * difficult terrain, which costs double - and whole squares were enough while
+ * mud was the only painted ground. Water at one and a half is not expressible
+ * in them, and a search that rounded it would make a ford either free or a bog.
+ *
+ * Everything downstream is in these units: `reachableSquares` multiplies its
+ * square budget by `COST_NORMAL` before spending it.
+ */
+export const COST_NORMAL = 2;
+
+/**
+ * Mud is the handbook's difficult terrain, at double. Wading through a bog,
+ * deep snow or thick rubble is the case 5e writes the rule for.
+ *
+ * Shallow water at one and a half is a house rule, deliberately: 5e has no such
+ * rate, but a ford that costs the same as a marsh makes the two brushes one
+ * brush. Ankle-deep water slows you and is nothing like a bog, and the number
+ * says so.
+ */
+export const TERRAIN_COST: Record<Exclude<TerrainKind, 'blocked'>, number> = {
+  mud: 4,
+  water: 3,
+};
+
+/** For the panel, so the legend cannot drift from the arithmetic. */
+export const TERRAIN_LABEL: Record<TerrainKind, string> = {
+  blocked: 'Impassable',
+  mud: 'Mud',
+  water: 'Shallow water',
+};
+
 export interface TerrainMap {
   width: number;
   height: number;
   blocked: FogBitmap;
-  difficult: FogBitmap;
+  mud: FogBitmap;
+  water: FogBitmap;
 }
 
-export type TerrainBrush = 'blocked' | 'difficult' | 'clear';
-
-/** Difficult ground costs double, which is the whole of the 5e rule. */
-export const DIFFICULT_COST = 2;
-export const NORMAL_COST = 1;
+/** The stored row, named here so the decode and the schema cannot drift. */
+export interface StoredTerrain {
+  gridWidth: number;
+  gridHeight: number;
+  blockedBitmap: string;
+  mudBitmap: string;
+  waterBitmap: string;
+}
 
 export function createTerrain(width: number, height: number): TerrainMap {
   return {
     width,
     height,
     blocked: createFog(width, height),
-    difficult: createFog(width, height),
+    mud: createFog(width, height),
+    water: createFog(width, height),
   };
 }
 
 /**
- * A stored pair of bitmaps, but only if they still describe this grid.
+ * A stored set of bitmaps, but only if they still describe this grid.
  *
  * The same rule fog follows, for the same reason: bits are indexed by width, so
  * reading them at another width shifts every row and paints a lake diagonally
@@ -45,7 +100,7 @@ export function createTerrain(width: number, height: number): TerrainMap {
  * quietly dropping it - see `terrainMatchesGrid`.
  */
 export function terrainForGrid(
-  stored: { gridWidth: number; gridHeight: number; blockedBitmap: string; difficultBitmap: string } | null | undefined,
+  stored: StoredTerrain | null | undefined,
   width: number,
   height: number,
 ): TerrainMap {
@@ -55,7 +110,8 @@ export function terrainForGrid(
     width,
     height,
     blocked: decodeFog(stored!.blockedBitmap, width, height),
-    difficult: decodeFog(stored!.difficultBitmap, width, height),
+    mud: decodeFog(stored!.mudBitmap, width, height),
+    water: decodeFog(stored!.waterBitmap, width, height),
   };
 }
 
@@ -72,25 +128,36 @@ export function isBlockedAt(terrain: TerrainMap | null | undefined, x: number, y
   return Boolean(terrain && isExplored(terrain.blocked, x, y));
 }
 
-export function isDifficultAt(terrain: TerrainMap | null | undefined, x: number, y: number): boolean {
-  return Boolean(terrain && isExplored(terrain.difficult, x, y));
+/** What is painted on a square, or null for open floor. */
+export function terrainAt(
+  terrain: TerrainMap | null | undefined,
+  x: number,
+  y: number,
+): TerrainKind | null {
+  if (!terrain) return null;
+  for (const kind of TERRAIN_KINDS) {
+    if (isExplored(terrain[kind], x, y)) return kind;
+  }
+  return null;
 }
 
 /**
- * What entering a square costs, in squares.
+ * What entering a square costs, in half squares.
  *
  * Blocked ground has no cost because it is never entered - callers check
  * `isBlockedAt` first and skip it, the way they skip an occupied square.
  */
 export function stepCostAt(terrain: TerrainMap | null | undefined, x: number, y: number): number {
-  return isDifficultAt(terrain, x, y) ? DIFFICULT_COST : NORMAL_COST;
+  const kind = terrainAt(terrain, x, y);
+  if (!kind || kind === 'blocked') return COST_NORMAL;
+  return TERRAIN_COST[kind];
 }
 
 /**
  * Paints one stroke.
  *
- * A square is either blocked or difficult, never both: painting one clears the
- * other, so a lake that becomes a ford does not stay impassable underneath and
+ * A square carries one kind and no more: painting clears whatever was there
+ * first, so a lake that becomes a ford does not stay impassable underneath and
  * refuse every step for reasons nothing on screen explains.
  */
 export function paintTerrain(
@@ -99,13 +166,11 @@ export function paintTerrain(
   brush: TerrainBrush,
 ): TerrainMap {
   const next = createTerrain(terrain.width, terrain.height);
-  next.blocked.bits.set(terrain.blocked.bits);
-  next.difficult.bits.set(terrain.difficult.bits);
+  for (const kind of TERRAIN_KINDS) next[kind].bits.set(terrain[kind].bits);
 
   for (const [x, y] of cells) {
     clearAt(next, x, y);
-    if (brush === 'blocked') markExplored(next.blocked, x, y);
-    if (brush === 'difficult') markExplored(next.difficult, x, y);
+    if (brush !== 'clear') markExplored(next[brush], x, y);
   }
 
   return next;
@@ -113,7 +178,8 @@ export function paintTerrain(
 
 /** There is no "unset one bit" primitive, so a cleared square is rebuilt. */
 function clearAt(terrain: TerrainMap, x: number, y: number): void {
-  for (const map of [terrain.blocked, terrain.difficult]) {
+  for (const kind of TERRAIN_KINDS) {
+    const map = terrain[kind];
     if (!isExplored(map, x, y)) continue;
     const i = y * map.width + x;
     map.bits[i >> 3] &= ~(1 << (i & 7));
@@ -125,9 +191,12 @@ function clearAt(terrain: TerrainMap, x: number, y: number): void {
  *
  * The destination check alone was not enough: it stopped a player *standing* on
  * a chasm but not dragging clean across it in one motion and landing on the far
- * side. Walls have always been tested as a crossing, and painted ground is the
- * same promise - the movement overlay already refuses to route through it, so
- * without this the overlay said one thing and the server allowed another.
+ * side.
+ *
+ * This is the cheap first answer and not the final one. A straight line that
+ * clips the chasm does not mean there is no way there - `routeExists` then
+ * walks the grid to see whether the creature could have gone round, which is
+ * what a person dragging a token past a corner means by the gesture.
  *
  * Sampled along the segment rather than traced as a supercover line: the step
  * is a quarter of a square, far finer than the one-square obstacles it has to
@@ -164,24 +233,26 @@ export function pathBlocked(
   return false;
 }
 
-export function encodeTerrain(terrain: TerrainMap): { blockedBitmap: string; difficultBitmap: string } {
+export function encodeTerrain(
+  terrain: TerrainMap,
+): Pick<StoredTerrain, 'blockedBitmap' | 'mudBitmap' | 'waterBitmap'> {
   return {
     blockedBitmap: encodeFog(terrain.blocked),
-    difficultBitmap: encodeFog(terrain.difficult),
+    mudBitmap: encodeFog(terrain.mud),
+    waterBitmap: encodeFog(terrain.water),
   };
 }
 
 /** The painted squares, for the DM's overlay. Players are never sent these. */
-export function paintedCells(terrain: TerrainMap): { blocked: [number, number][]; difficult: [number, number][] } {
-  const blocked: [number, number][] = [];
-  const difficult: [number, number][] = [];
+export function paintedCells(terrain: TerrainMap): Record<TerrainKind, [number, number][]> {
+  const out: Record<TerrainKind, [number, number][]> = { blocked: [], mud: [], water: [] };
 
   for (let y = 0; y < terrain.height; y++) {
     for (let x = 0; x < terrain.width; x++) {
-      if (isExplored(terrain.blocked, x, y)) blocked.push([x, y]);
-      else if (isExplored(terrain.difficult, x, y)) difficult.push([x, y]);
+      const kind = terrainAt(terrain, x, y);
+      if (kind) out[kind].push([x, y]);
     }
   }
 
-  return { blocked, difficult };
+  return out;
 }

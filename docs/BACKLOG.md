@@ -25,6 +25,46 @@ audio system rather than extending it.
 
 ---
 
+## Going round things, and two more kinds of ground — 2026-08-19
+
+Two asks: a blocked square should make movement route *around* it rather than
+refuse, and difficult ground needed more than one rate.
+
+**Routing.** `token:commit` tested a single straight segment, so a drag round a
+corner or along a shoreline was refused even though the overlay had drawn the
+destination as reachable — the board offered a square and the server bounced you
+off it. `routeExists` now walks the grid when, and only when, the straight line
+is blocked, so an ordinary drop still costs nothing. It answers "is there a way"
+rather than "how far": occupancy is ignored (a creature ringed by its party
+could otherwise never move) and cost is ignored (out of combat nothing spends).
+Bounded at a few times the direct distance and 2000 squares, because it runs on
+every drop; walls are culled to the searched box first. Walls had this problem
+first and for longer, and they are fixed by the same change.
+
+The refusal is now one message for walls and ground alike. "A wall blocks the
+way" told a player where a wall was without their ever having seen it.
+
+**Kinds of ground.** The single Rough brush became mud (double, the handbook's
+rate) and shallow water (half again, a house rule). That needed the movement
+search to count in half squares — one and a half is not expressible in whole
+ones, and rounding makes a ford either free or a bog. A 30 ft creature gets six
+squares of floor, four of water, three of mud; verified end to end through the
+socket, not only in the unit tests.
+
+`difficult_bitmap` is renamed to `mud_bitmap` in migration 0015 rather than
+dropped, so anything already painted keeps its cost.
+
+**Found while checking the paint in a browser:** every board tool that was not a
+wall had been laying wall points as well, because the click handler read
+`wallTool !== 'off'`. A paint stroke ends in a click, so dragging mud dropped a
+wall corner and the next stroke joined them into a wall. Two walls appeared on a
+scene where nothing but ground was painted. Also split the eleven tool buttons
+into two rows — at 29px each they ran off the end of the panel — and gave the
+brushes their own status line, which had been reading "drawing waters — click to
+place points".
+
+---
+
 ## The movement overlay was invisible to players — 2026-08-19
 
 Found by checking whether rough terrain really shrinks a player's range, rather
