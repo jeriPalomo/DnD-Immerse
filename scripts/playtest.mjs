@@ -26,24 +26,51 @@ const PASSWORD = 'demo-password';
 /** Left of the screen is the DM; the player sits to the right. */
 const WINDOW = { width: 960, height: 1040 };
 
-function run(label, command, args, env = {}) {
+/**
+ * Runs one of this project's npm scripts.
+ *
+ * Through npm's own JavaScript entry point, under the node already running,
+ * rather than by spawning `npm`. On Windows npm is a `.cmd` shim, and since the
+ * 2024 argument-injection fix node refuses to spawn one without a shell: it
+ * fails with EINVAL, sets no exit status and writes nothing to either stream.
+ * That is how this arrived as `building... failed` and not one word more.
+ *
+ * Spawning it with `shell: true` would work and hand the arguments to cmd to
+ * re-parse, which is the thing that fix exists to prevent. `npm_execpath` is
+ * set by npm itself, which is how this script is always started; the shell is
+ * the fallback for someone running the file directly.
+ */
+function runScript(label, script, env = {}) {
+  const cli = process.env.npm_execpath;
+  const [command, args] = cli
+    ? [process.execPath, [cli, 'run', script]]
+    : [process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', script]];
+
   process.stdout.write(`  ${label}... `);
-  // `npm.cmd` directly rather than `shell: true`: passing args through a shell
-  // means they are concatenated rather than escaped, which node now warns
-  // about, and there is no reason to hand these to cmd at all.
   const result = spawnSync(command, args, {
     cwd: ROOT,
     env: { ...process.env, ...env },
     stdio: 'pipe',
+    // Only ever reached without `npm_execpath`, where there is no other way to
+    // start a `.cmd`. The arguments here are fixed literals from this file.
+    shell: !cli && process.platform === 'win32',
   });
 
-  if (result.status !== 0) {
-    console.log('failed\n');
-    process.stdout.write(String(result.stdout ?? ''));
-    process.stderr.write(String(result.stderr ?? ''));
-    process.exit(1);
+  if (result.status === 0) {
+    console.log('ok');
+    return;
   }
-  console.log('ok');
+
+  // Say something, whatever went wrong. A spawn that never starts leaves both
+  // streams empty and `status` null, so printing only the streams prints
+  // nothing at all - which is worse than an ugly error, because it looks like
+  // the build failed silently rather than like npm was never run.
+  console.log('failed');
+  if (result.error) console.log(`  ${result.error.message}`);
+  else console.log(`  \`npm run ${script}\` exited with ${result.status}`);
+  process.stdout.write(String(result.stdout ?? ''));
+  process.stderr.write(String(result.stderr ?? ''));
+  process.exit(1);
 }
 
 async function waitForServer(timeoutMs = 30_000) {
@@ -105,11 +132,9 @@ if (!fs.existsSync(srdTarget) && fs.existsSync(srdSource)) {
   console.log('  no SRD cache found - the import will download it once.');
 }
 
-const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-
-run('building', NPM, ['run', 'build']);
-run('importing the compendium', NPM, ['run', 'srd:import'], { DATA_DIR });
-run('seeding a campaign', NPM, ['run', 'seed'], { DATA_DIR });
+runScript('building', 'build');
+runScript('importing the compendium', 'srd:import', { DATA_DIR });
+runScript('seeding a campaign', 'seed', { DATA_DIR });
 
 const server = spawn('node', ['apps/server/dist/index.js'], {
   cwd: ROOT,
@@ -132,6 +157,16 @@ try {
   process.stdout.write('  starting the server... ');
   await waitForServer();
   console.log('ok');
+
+  // A smoke test of everything but the windows, for checking that the build,
+  // the import, the seed and the server itself still work without two browsers
+  // taking over the screen.
+  if (process.env.PLAYTEST_NO_BROWSER) {
+    console.log(`
+  Server up at ${BASE}, no windows opened (PLAYTEST_NO_BROWSER).
+`);
+    stop(0);
+  }
 
   const { chromium } = await import('playwright');
   // Edge, because this machine has Edge and not Chrome.

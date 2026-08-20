@@ -25,6 +25,25 @@ audio system rather than extending it.
 
 ---
 
+## `npm run playtest` could not start npm — 2026-08-19
+
+It died on the first step with `building... failed` and not one word more.
+
+npm on Windows is a `.cmd` shim, and node has refused to spawn one without a
+shell since the 2024 argument-injection fix: `spawnSync` returns EINVAL, a null
+exit status and two empty streams. The script printed only those streams, so a
+spawn that never happened looked exactly like a build that failed silently.
+
+Both halves fixed. It now runs npm's own JavaScript entry point under the node
+already running - no shell, so nothing re-parses the arguments, which is what
+that fix exists to prevent - and a failure says what went wrong even when there
+is no output to show.
+
+`PLAYTEST_NO_BROWSER=1` runs everything but the two windows, which is how this
+was checked without taking over the screen.
+
+---
+
 ## Pausing on a ford cost you five feet — 2026-08-19
 
 Found by checking the obvious question - do two creatures with different speeds
