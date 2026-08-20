@@ -27,6 +27,26 @@ const PASSWORD = 'demo-password';
 const WINDOW = { width: 960, height: 1040 };
 
 /**
+ * Addresses somebody else could reach this on.
+ *
+ * The server binds 0.0.0.0, so a friend on the tailnet can join the throwaway
+ * table from their own machine - which is the whole point of showing it to
+ * somebody. Printing only `localhost` sends them nowhere. Tailscale hands out
+ * 100.64.0.0/10, so those are listed first and named.
+ */
+function reachableUrls() {
+  const found = [];
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family !== 'IPv4' || address.internal) continue;
+      const tailnet = address.address.startsWith('100.');
+      found.push({ url: `http://${address.address}:${PORT}`, tailnet });
+    }
+  }
+  return found.sort((a, b) => Number(b.tailnet) - Number(a.tailnet));
+}
+
+/**
  * Runs one of this project's npm scripts.
  *
  * Through npm's own JavaScript entry point, under the node already running,
@@ -190,6 +210,10 @@ try {
   Every password is "${PASSWORD}".
 
   ${BASE}
+${reachableUrls()
+  .map((entry) => `  ${entry.url}${entry.tailnet ? '   <- share this one (tailnet)' : ''}`)
+  .join('
+')}
 
   Close the windows or press Ctrl-C to stop. Your real campaign in data/ was
   never opened.
