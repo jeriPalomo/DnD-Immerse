@@ -228,6 +228,15 @@ const STAT_BLOCK_FIELDS = [
     // it afterwards would carry the published numbers anyway. Refused rather
     // than dropped: a save that silently keeps the old value is a save that
     // looks like it worked.
+    // A patch that writes all six scores is the roller being applied; that is
+    // the moment the dice stop being available. Typing one score by hand is
+    // not, so a sheet built by point-buy or the standard array is untouched.
+    const rolledSet =
+      !actor.abilitiesRolled &&
+      (['str', 'dex', 'con', 'int', 'wis', 'cha'] as const).every(
+        (key) => patch[key] !== undefined,
+      );
+
     if (actor.srdMonsterId) {
       const locked = STAT_BLOCK_FIELDS.filter((field) => patch[field] !== undefined);
       if (locked.length > 0) {
@@ -240,7 +249,7 @@ const STAT_BLOCK_FIELDS = [
 
     await db
       .update(actors)
-      .set({ ...patch, updatedAt: Date.now() })
+      .set({ ...patch, ...(rolledSet ? { abilitiesRolled: true } : {}), updatedAt: Date.now() })
       .where(eq(actors.id, id));
 
     // A linked token is the same creature as its sheet; keep the board in step.
@@ -466,6 +475,15 @@ const STAT_BLOCK_FIELDS = [
     const user = assertUser(request);
     const { id } = request.params as { id: string };
     const { actor } = await requireActorWrite(id, user.id);
+
+    // Rolling until the numbers are good is not rolling. The roller closes once
+    // its result has been kept, and the refusal lives here rather than in the
+    // page, because a page can be reloaded and a disabled button is a layout
+    // decision. Applying a set is what sets the flag - a roll you throw away
+    // costs nothing, which is the point of seeing it before you keep it.
+    if (actor.abilitiesRolled) {
+      throw new HttpError(400, `${actor.name}'s scores have already been rolled and kept.`);
+    }
 
     const results = ABILITIES.map((ability) => ({
       ability,

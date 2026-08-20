@@ -135,6 +135,15 @@ export const actors = sqliteTable(
      * columns and items.
      */
     srdMonsterId: text('srd_monster_id'),
+    /**
+     * Whether this sheet's scores have been rolled and kept.
+     *
+     * Rolling until the numbers are good is not rolling, so the roller closes
+     * once its result has been applied. Stored rather than held in the page,
+     * or a reload hands out another set - which is the whole of what this
+     * prevents.
+     */
+    abilitiesRolled: integer('abilities_rolled', { mode: 'boolean' }).notNull().default(false),
 
     className: text('class_name').notNull().default(''),
     subclass: text('subclass').notNull().default(''),
@@ -355,6 +364,16 @@ export const tokens = sqliteTable(
     lightDim: real('light_dim').notNull().default(0),
     /** Torchlight is warm, a spell might not be. Cosmetic, like weather. */
     lightColor: text('light_color').notNull().default('#ffb46b'),
+    /**
+     * The ring a player chose for their own token, or null for the allegiance
+     * colour.
+     *
+     * On the token rather than the sheet because the ring is a property of the
+     * thing on the board. Four party members are all `friendly` and so all wore
+     * the same blue; telling them apart is what this is for. The palette
+     * deliberately holds no red or green, or a player could dress as a monster.
+     */
+    ringColor: text('ring_color'),
 
     hp: integer('hp'),
     maxHp: integer('max_hp'),

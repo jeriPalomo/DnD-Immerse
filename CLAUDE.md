@@ -634,6 +634,22 @@ range and gives itself away. Accuracy loses to secrecy here — a range may cros
 a square that turns out to be occupied, and `token:commit` rejects the move
 anyway.
 
+**A chosen ring beats the allegiance one, and the palette has no red or green.**
+Four party members are all `friendly`, so allegiance alone dresses them in four
+identical blue circles — telling them apart is what `tokens.ringColor` is for. It
+lives on the token rather than the sheet because the ring is a property of the
+thing on the board, and it is set by whoever may already edit that token. Red and
+green are not offered, or a player could dress as something the table is meant to
+kill; hostile and neutral therefore still read as themselves.
+
+**Ability scores are rolled once.** Rolling until the numbers are good is not
+rolling, so `actors.abilitiesRolled` closes the roller when a set has been kept.
+Enforced on the route, not by disabling a button: a page can be reloaded, and a
+disabled button is a layout decision. **Applying is what closes it** — a roll you
+throw away costs nothing, which is the point of seeing it before you keep it —
+and only a patch carrying all six scores counts, so point-buy and the standard
+array, typed one at a time, are untouched.
+
 **`disposition` is what tells friend from foe, and `ownerUserId` is not.** Blue
 for the party, green for neutral — allies and allies-for-now, never counted as
 a threat — red for hostile. They are separate signals on purpose:

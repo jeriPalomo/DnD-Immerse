@@ -13,6 +13,8 @@ export type Actor = ActorInput & {
    * write.
    */
   srdMonsterId: string | null;
+  /** Set once a rolled set of scores has been applied; the roller then closes. */
+  abilitiesRolled: boolean;
   createdAt: number;
   updatedAt: number;
 };

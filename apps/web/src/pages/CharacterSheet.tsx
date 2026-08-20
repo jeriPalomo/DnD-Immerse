@@ -158,7 +158,9 @@ export default function CharacterSheet() {
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
         {/* Left rail: the derived numbers */}
         <div className="space-y-4">
-          {statsEditable && <AbilityRoller actorId={actor.id} onApply={sheet.patch} />}
+          {statsEditable && !actor.abilitiesRolled && (
+            <AbilityRoller actorId={actor.id} onApply={sheet.patch} />
+          )}
 
           {statsLocked && (
             <p className="rounded-lg border border-ink-700 bg-ink-850 px-2 py-1.5 text-[11px] text-ink-500">

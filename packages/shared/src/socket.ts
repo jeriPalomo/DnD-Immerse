@@ -64,6 +64,8 @@ export interface WireToken {
   lightBright: number;
   lightDim: number;
   lightColor: string;
+  /** Chosen by whoever owns it; null means wear the allegiance colour. */
+  ringColor: string | null;
   hp: number | null;
   maxHp: number | null;
   ac: number | null;

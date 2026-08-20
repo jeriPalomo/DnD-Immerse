@@ -885,7 +885,14 @@ function TokenShape({
   const position = gridToPixel({ x: token.x, y: token.y }, grid);
   const width = token.w * grid.gridSize;
   const height = token.h * grid.gridSize;
-  const ring = DISPOSITION_COLOR[token.disposition] ?? '#a9a3bd';
+  /**
+   * A chosen ring wins over the allegiance one.
+   *
+   * Only ever set on a token somebody owns, and the palette holds no red or
+   * green - so hostile and neutral still read as themselves, while four party
+   * members stop being four identical blue circles.
+   */
+  const ring = token.ringColor ?? DISPOSITION_COLOR[token.disposition] ?? '#a9a3bd';
 
   const hpPercent = token.maxHp && token.maxHp > 0 ? Math.max(0, (token.hp ?? 0) / token.maxHp) : null;
 

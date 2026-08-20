@@ -25,6 +25,24 @@ export function actorColor(actorId: string): string {
 }
 
 /**
+ * What a player may choose for their own token's ring.
+ *
+ * No red and no green, deliberately: those are what hostile and neutral wear,
+ * and a player in red would read as something to kill. Everything here is
+ * legible against a dark map at the size a token is drawn.
+ */
+export const TOKEN_RING_COLORS = [
+  '#8b7bf0',
+  '#5aa9e6',
+  '#38bdf8',
+  '#c084fc',
+  '#f0abfc',
+  '#fbbf24',
+  '#fb923c',
+  '#e5e7eb',
+] as const;
+
+/**
  * Allegiance, the way a tactics game reads it: your units, your allies, and
  * what is trying to kill you.
  *

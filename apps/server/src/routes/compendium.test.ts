@@ -423,3 +423,47 @@ describe('a bestiary sheet keeps the compendium’s numbers', () => {
     expect(saved.actor.str).toBe(18);
   });
 });
+
+describe('ability scores are rolled once', () => {
+  /**
+   * Rolling until the numbers are good is not rolling. The roller closes when a
+   * set has been kept - enforced here rather than by disabling a button, since
+   * a page can be reloaded and a disabled button is a layout decision.
+   */
+  let heroId: string;
+
+  beforeAll(async () => {
+    const made = await api<{ actor: { id: string } }>('POST', '/api/actors', { name: 'Hero' });
+    heroId = made.actor.id;
+  });
+
+  it('rolls freely until a set is applied', async () => {
+    const first = await api<{ rolls: unknown[] }>('POST', `/api/actors/${heroId}/roll-abilities`);
+    expect(first.rolls).toHaveLength(6);
+
+    // Throwing one away costs nothing; that is the point of seeing it first.
+    const again = await api<{ rolls: unknown[] }>('POST', `/api/actors/${heroId}/roll-abilities`);
+    expect(again.rolls).toHaveLength(6);
+  });
+
+  it('refuses once a whole set has been kept', async () => {
+    await api('PATCH', `/api/actors/${heroId}`, {
+      str: 15, dex: 14, con: 13, int: 12, wis: 10, cha: 8,
+    });
+
+    await expect(api('POST', `/api/actors/${heroId}/roll-abilities`)).rejects.toThrow(
+      /already been rolled/i,
+    );
+  });
+
+  it('leaves a sheet built by hand alone', async () => {
+    // Point-buy and the standard array type scores one at a time, and that is
+    // not the roller being applied.
+    const made = await api<{ actor: { id: string } }>('POST', '/api/actors', { name: 'Careful' });
+    await api('PATCH', `/api/actors/${made.actor.id}`, { str: 15 });
+    await api('PATCH', `/api/actors/${made.actor.id}`, { dex: 14 });
+
+    const rolls = await api<{ rolls: unknown[] }>('POST', `/api/actors/${made.actor.id}/roll-abilities`);
+    expect(rolls.rolls).toHaveLength(6);
+  });
+});

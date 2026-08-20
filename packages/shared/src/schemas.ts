@@ -125,6 +125,8 @@ export const tokenInputSchema = z.object({
   lightBright: z.number().min(0).default(0),
   lightDim: z.number().min(0).default(0),
   lightColor: z.string().max(20).default('#ffb46b'),
+  /** A player's chosen ring, or null for the allegiance colour. */
+  ringColor: z.string().max(20).nullable().default(null),
   x: z.number().default(0),
   y: z.number().default(0),
   w: z.number().min(0.25).max(40).default(1),

@@ -25,6 +25,22 @@ audio system rather than extending it.
 
 ---
 
+## Two small ones from the playtest list — 2026-08-20
+
+**Players pick their token's ring.** All four of them are `friendly`, so
+allegiance dressed the whole party in the same blue. The colour sits on the
+token, not the sheet, because the ring is a property of the thing on the board,
+and it is chosen from a palette with no red and no green in it - hostile and
+neutral have to keep reading as themselves.
+
+**Ability scores are rolled once.** The roller closes when a set has been
+applied, on the route rather than by disabling the button, since a page can be
+reloaded. Applying is what closes it, not rolling: a set you throw away costs
+nothing, which is the point of seeing it first. Only a patch carrying all six
+counts, so point-buy typed one score at a time is untouched.
+
+---
+
 ## Recommending enemies for the party — 2026-08-20
 
 Asked for during the panel work: a dropdown in the bestiary that suggests

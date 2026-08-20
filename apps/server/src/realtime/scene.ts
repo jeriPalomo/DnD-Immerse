@@ -222,6 +222,7 @@ function toWireToken(
     lightBright: token.lightBright,
     lightDim: token.lightDim,
     lightColor: token.lightColor,
+    ringColor: token.ringColor,
     hp: showHp ? token.hp : null,
     maxHp: showHp ? token.maxHp : null,
     ac: token.ac,

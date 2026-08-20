@@ -7,6 +7,7 @@ import {
   CONDITION_SUMMARY,
   DISPOSITIONS,
   DISPOSITION_HINT,
+  TOKEN_RING_COLORS,
   deriveToken,
 } from '@dnd/shared';
 import type { WireToken } from '@dnd/shared';
@@ -405,6 +406,39 @@ export function TokenHUD({
               })}
               </div>
             </>
+          )}
+
+          {/* Whoever owns the token picks its ring. Four party members are all
+              `friendly`, so allegiance alone dresses them identically - and the
+              palette carries no red or green, or a player could dress as
+              something the table is meant to kill. */}
+          {canEdit && (
+            <div>
+              <div className="mb-1 text-[10px] tracking-wide text-ink-500 uppercase">Ring</div>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => onUpdate({ ringColor: null })}
+                  title="Wear the allegiance colour — blue for the party, green neutral, red hostile"
+                  className={`size-5 rounded-full border-2 border-dashed transition-colors ${
+                    token.ringColor === null ? 'border-ink-200' : 'border-ink-600 hover:border-ink-400'
+                  }`}
+                />
+                {TOKEN_RING_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    onClick={() => onUpdate({ ringColor: color })}
+                    title={`Ring this token in ${color}`}
+                    aria-label={`Ring colour ${color}`}
+                    style={{ backgroundColor: color }}
+                    className={`size-5 rounded-full transition-transform ${
+                      token.ringColor === color
+                        ? 'ring-2 ring-ink-100 ring-offset-2 ring-offset-ink-900'
+                        : 'hover:scale-110'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
           )}
 
           {isDM && (
