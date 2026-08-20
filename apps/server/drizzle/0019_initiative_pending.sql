@@ -1,0 +1,1 @@
+ALTER TABLE `initiative_entries` ADD `pending` integer DEFAULT false NOT NULL;

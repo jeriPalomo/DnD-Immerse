@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { CONDITION_SUMMARY, tokensInTemplate } from '@dnd/shared';
+import { CONDITION_SUMMARY, formatModifier, tokensInTemplate } from '@dnd/shared';
 import { Button } from '../ui.js';
 import { useTable } from '../../store/table.js';
+import { useAuth } from '../../store/auth.js';
 
 /**
  * The turn order.
@@ -14,8 +15,9 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
   const {
     encounter, tokens, selectedTokenId, lastDamage, templates, scene, clearTemplate, rollDeathSave,
     startEncounter, endEncounter, addToInitiative, removeFromInitiative, setInitiative,
-    nextTurn, previousTurn, select,
+    nextTurn, previousTurn, select, rollInitiative,
   } = useTable();
+  const { user } = useAuth();
 
   const [damage, setDamage] = useState('');
   const [damageType, setDamageType] = useState('slashing');
@@ -24,13 +26,38 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
 
   if (!encounter) {
     if (!isDM) return null;
+
+    // Everything on the board, in one press. Adding combatants one at a time
+    // still exists below for a straggler arriving mid-fight, but it was the
+    // *only* way in - and it lived behind "Start encounter", so the ordinary
+    // move of starting a fight was two steps with the second one buried in a
+    // wrap of one button per creature.
+    const everyone = tokens.filter((t) => t.layer !== 'gm').map((t) => t.id);
+
     return (
       <div className="space-y-3 p-2">
         <div>
           <h2 className="mb-2 font-display text-sm text-ink-100">Combat</h2>
-          <Button size="sm" variant="secondary" onClick={() => startEncounter()}>
-            Start encounter
-          </Button>
+          <div className="flex flex-wrap gap-1.5">
+            <Button size="sm" variant="secondary" onClick={() => startEncounter()}>
+              Start encounter
+            </Button>
+            {everyone.length > 0 && (
+              <Button
+                size="sm"
+                title="Rolls your creatures now and asks each player for their own"
+                onClick={() => {
+                  startEncounter();
+                  // Queued behind the encounter it belongs to: the handler
+                  // refuses entries with no active encounter, and the socket
+                  // delivers in order, so this only needs to be sent second.
+                  addToInitiative(everyone, true);
+                }}
+              >
+                Roll monsters, ask the players
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -56,6 +83,19 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
     setInitiative(encounter!.id, {
       entries: [{ id: entryId, initiative: value }],
     });
+  }
+
+  /**
+   * Whether this viewer may answer that entry.
+   *
+   * Theirs, or the DM's - who fills in for whoever is not at the table, exactly
+   * as they can on a group roll card. Enforced on the server; this only decides
+   * whether to offer the button.
+   */
+  function mayRoll(tokenId: string | null): boolean {
+    if (isDM) return true;
+    const token = tokens.find((t) => t.id === tokenId);
+    return Boolean(token && token.ownerUserId === user?.id);
   }
 
   const active = encounter.entries[encounter.activeIndex] ?? null;
@@ -155,6 +195,28 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
                       className="w-8 shrink-0 rounded border border-ember-500/60 bg-ink-900 text-center font-mono text-xs text-ink-100 focus:outline-none"
                       aria-label={`Initiative for ${entry.name}`}
                     />
+                  ) : entry.pending ? (
+                    // Waiting on whoever runs this creature. The button is here
+                    // rather than in a banner because the turn order is where
+                    // somebody is already looking when a fight starts.
+                    mayRoll(entry.tokenId) ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          rollInitiative(entry.id);
+                        }}
+                        title="Roll your initiative"
+                        className="shrink-0 rounded border border-ember-500/60 bg-ember-500/15 px-1.5 text-[10px] text-ember-300 transition-colors hover:bg-ember-500/25"
+                      >
+                        {/* The Dexterity modifier, because 5e initiative is a
+                            Dexterity check - the same number the party list
+                            prints beside a name. Computed on the server and
+                            sent only on a waiting entry. */}
+                        Roll {formatModifier(entry.initiativeBonus ?? 0)}
+                      </button>
+                    ) : (
+                      <span className="w-6 shrink-0 text-center text-[9px] text-ink-600">…</span>
+                    )
                   ) : (
                     <span
                       onClick={(e) => {

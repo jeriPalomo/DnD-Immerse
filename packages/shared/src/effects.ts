@@ -351,12 +351,22 @@ export interface InitiativeRow {
   initiative: number;
   /** Higher DEX wins ties, per the PHB tiebreaker. */
   dexterity?: number;
+  /** Still waiting on whoever runs this creature to roll it. */
+  pending?: boolean;
 }
 
-/** Descending initiative, breaking ties on DEX and then stably by name. */
+/**
+ * Descending initiative, breaking ties on DEX and then stably by name.
+ *
+ * Anything still waiting to be rolled sorts last, and explicitly rather than by
+ * leaning on its stored `0`: a Dexterity of 1 is a -5 modifier, so that
+ * character rolling a 1 scores -4 and would otherwise be placed below somebody
+ * who has not rolled at all.
+ */
 export function sortInitiative<T extends InitiativeRow>(rows: T[]): T[] {
   return [...rows].sort(
     (a, b) =>
+      Number(a.pending ?? false) - Number(b.pending ?? false) ||
       b.initiative - a.initiative ||
       (b.dexterity ?? 0) - (a.dexterity ?? 0) ||
       a.name.localeCompare(b.name),

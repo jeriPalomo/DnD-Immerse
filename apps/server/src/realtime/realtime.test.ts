@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { io as connect, type Socket } from 'socket.io-client';
-import type { WireChatMessage, WirePresence, WireToken } from '@dnd/shared';
+import type { WireChatMessage, WireEncounter, WirePresence, WireToken } from '@dnd/shared';
 
 /**
  * End-to-end realtime tests against a real HTTP + Socket.IO server on a
@@ -851,6 +851,215 @@ describe('group rolls for the creatures the DM runs', () => {
       kind: 'save', key: 'dex', dc: null, secret: false, who: 'creatures', tokenIds: goblinTokens,
     } as never);
     expect((await failure)?.message).toMatch(/only the dm/i);
+  });
+});
+
+/**
+ * Initiative: the DM's monsters roll, the characters are asked.
+ *
+ * The same split the group roll makes, so the same things have to hold - and
+ * the one most likely to be silently wrong is the ordering, because a pending
+ * entry stores a zero and a low-Dexterity character can legitimately roll below
+ * that.
+ */
+describe('initiative is rolled for monsters and asked of players', () => {
+  let sceneId: string;
+  let goblinTokenId: string;
+  let aliceTokenId: string;
+  let bobTokenId: string;
+
+  beforeAll(async () => {
+    const scene = await api<{ scene: { id: string } }>(
+      'POST', `/api/campaigns/${campaignId}/scenes`, { name: 'Ambush Point', gridSize: 70 }, dm.cookie,
+    );
+    sceneId = scene.scene.id;
+    dmSocket.emit('scene:activate', { sceneId });
+    await new Promise((r) => setTimeout(r, 300));
+
+    // A creature the DM runs, and two characters with real sheets. Dexterity 1
+    // on Bob's is deliberate: a -5 modifier means he can roll as low as -4,
+    // which is below the zero a pending entry stores.
+    const monster = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors', { name: 'Ambusher', type: 'npc', campaignId, dex: 14 }, dm.cookie,
+    );
+    const hers = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors', { name: 'Alice Scout', type: 'character', dex: 18 }, alice.cookie,
+    );
+    const his = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors', { name: 'Bob Slow', type: 'character', dex: 1 }, bob.cookie,
+    );
+
+    const place = async (name: string, x: number, actorId: string, ownerUserId?: string) => {
+      const placed = next<{ token: WireToken }>(dmSocket, 'token:created');
+      dmSocket.emit('token:create', { sceneId, x, y: 2, name, actorId, ownerUserId } as never);
+      return (await placed)!.token.id;
+    };
+
+    goblinTokenId = await place('Ambusher', 2, monster.actor.id);
+    aliceTokenId = await place('Alice Scout', 3, hers.actor.id, alice.userId);
+    bobTokenId = await place('Bob Slow', 4, his.actor.id, bob.userId);
+    await new Promise((r) => setTimeout(r, 300));
+  });
+
+  /** Start a fight and put everybody in it, asking the players for their own. */
+  async function openFight() {
+    dmSocket.emit('encounter:end', {});
+    await new Promise((r) => setTimeout(r, 200));
+    dmSocket.emit('encounter:start', { sceneId } as never);
+    await new Promise((r) => setTimeout(r, 200));
+
+    const waiting = nextWhere<{ encounter: WireEncounter | null }>(
+      dmSocket,
+      'initiative:state',
+      (payload) => (payload.encounter?.entries.length ?? 0) === 3,
+    );
+    dmSocket.emit('initiative:add', {
+      tokenIds: [goblinTokenId, aliceTokenId, bobTokenId], roll: true, askPlayers: true,
+    } as never);
+    const encounter = (await waiting)?.encounter;
+    expect(encounter).toBeTruthy();
+    return encounter!;
+  }
+
+  const entryFor = (encounter: WireEncounter, tokenId: string) =>
+    encounter.entries.find((e) => e.tokenId === tokenId)!;
+
+  it('rolls the DM’s creature and leaves the characters waiting', async () => {
+    const encounter = await openFight();
+
+    // A monster has nobody to ask, so a fight is never held up by a goblin.
+    expect(entryFor(encounter, goblinTokenId).pending).toBe(false);
+    expect(entryFor(encounter, goblinTokenId).initiative).not.toBe(0);
+
+    for (const tokenId of [aliceTokenId, bobTokenId]) {
+      expect(entryFor(encounter, tokenId).pending).toBe(true);
+      expect(entryFor(encounter, tokenId).initiative).toBe(0);
+    }
+  });
+
+  it('shows a waiting entry what it is about to add, and a rolled one nothing', async () => {
+    const encounter = await openFight();
+
+    // DEX 18 is +4, DEX 1 is -5. Sent only while waiting, so a monster's
+    // numbers can never ride along here.
+    expect(entryFor(encounter, aliceTokenId).initiativeBonus).toBe(4);
+    expect(entryFor(encounter, bobTokenId).initiativeBonus).toBe(-5);
+    expect(entryFor(encounter, goblinTokenId).initiativeBonus).toBeNull();
+  });
+
+  it('sorts a waiting entry last, below a roll that came out negative', async () => {
+    const encounter = await openFight();
+
+    // Set rather than rolled, because the point has to be tested and not merely
+    // sampled: Bob's -5 modifier means 1d20-5 lands below zero only one run in
+    // five, so a rolled version of this test would pass without the rule four
+    // times out of five and prove nothing.
+    const answered = nextWhere<{ encounter: WireEncounter | null }>(
+      dmSocket,
+      'initiative:state',
+      (payload) => payload.encounter?.entries.some((e) => e.initiative === -4) ?? false,
+    );
+    dmSocket.emit('initiative:roll', { entryId: entryFor(encounter, bobTokenId).id });
+    await new Promise((r) => setTimeout(r, 300));
+    dmSocket.emit('initiative:update', {
+      encounterId: encounter.id,
+      entries: [{ id: entryFor(encounter, bobTokenId).id, initiative: -4 }],
+    } as never);
+    const after = (await answered)!.encounter!;
+
+    // Alice has not rolled. Her entry stores 0, which is *above* Bob's -4, so
+    // ordering on the stored number alone puts somebody who has not rolled
+    // ahead of somebody who has.
+    const order = after.entries.map((e) => e.tokenId);
+    expect(entryFor(after, bobTokenId).initiative).toBe(-4);
+    expect(entryFor(after, aliceTokenId).pending).toBe(true);
+    expect(order.indexOf(aliceTokenId)).toBe(order.length - 1);
+  });
+
+  it('fills the entry in when its owner presses the button', async () => {
+    const encounter = await openFight();
+    const mine = entryFor(encounter, aliceTokenId);
+
+    const answered = nextWhere<{ encounter: WireEncounter | null }>(
+      dmSocket,
+      'initiative:state',
+      (payload) => payload.encounter?.entries.some((e) => e.tokenId === aliceTokenId && !e.pending) ?? false,
+    );
+    aliceSocket.emit('initiative:roll', { entryId: mine.id });
+    const rolled = entryFor((await answered)!.encounter!, aliceTokenId);
+
+    expect(rolled.pending).toBe(false);
+    expect(rolled.initiativeBonus).toBeNull();
+    // 1d20 + 4, so somewhere in 5..24 and never the stored zero.
+    expect(rolled.initiative).toBeGreaterThanOrEqual(5);
+    expect(rolled.initiative).toBeLessThanOrEqual(24);
+  });
+
+  it('refuses an entry that is not yours', async () => {
+    const encounter = await openFight();
+
+    const failure = next<{ message: string }>(bobSocket, 'error');
+    bobSocket.emit('initiative:roll', { entryId: entryFor(encounter, aliceTokenId).id });
+    expect((await failure)?.message).toMatch(/not yours/i);
+  });
+
+  it('lets the DM fill in for whoever is not at the table', async () => {
+    const encounter = await openFight();
+
+    const answered = nextWhere<{ encounter: WireEncounter | null }>(
+      dmSocket,
+      'initiative:state',
+      (payload) => payload.encounter?.entries.some((e) => e.tokenId === aliceTokenId && !e.pending) ?? false,
+    );
+    dmSocket.emit('initiative:roll', { entryId: entryFor(encounter, aliceTokenId).id });
+    expect((await answered)!.encounter!).toBeTruthy();
+  });
+
+  it('answers an entry once, however many times the button is pressed', async () => {
+    const encounter = await openFight();
+    const mine = entryFor(encounter, aliceTokenId);
+
+    const first = nextWhere<{ encounter: WireEncounter | null }>(
+      dmSocket,
+      'initiative:state',
+      (payload) => payload.encounter?.entries.some((e) => e.tokenId === aliceTokenId && !e.pending) ?? false,
+    );
+    aliceSocket.emit('initiative:roll', { entryId: mine.id });
+    const settled = entryFor((await first)!.encounter!, aliceTokenId).initiative;
+
+    // Two tabs racing the same button is one person pressing it once; a second
+    // roll would change the number.
+    const again = next<{ encounter: WireEncounter | null }>(dmSocket, 'initiative:state', 900);
+    aliceSocket.emit('initiative:roll', { entryId: mine.id });
+    expect(await again).toBeNull();
+    expect(settled).not.toBe(0);
+  });
+
+  it('rolls everybody when the DM does not ask', async () => {
+    dmSocket.emit('encounter:end', {});
+    await new Promise((r) => setTimeout(r, 200));
+    dmSocket.emit('encounter:start', { sceneId } as never);
+    await new Promise((r) => setTimeout(r, 200));
+
+    const waiting = nextWhere<{ encounter: WireEncounter | null }>(
+      dmSocket,
+      'initiative:state',
+      (payload) => (payload.encounter?.entries.length ?? 0) === 3,
+    );
+    dmSocket.emit('initiative:add', {
+      tokenIds: [goblinTokenId, aliceTokenId, bobTokenId], roll: true,
+    } as never);
+
+    // The old behaviour, unchanged: `askPlayers` defaults to false, so a client
+    // that has not been rebuilt still gets a complete order.
+    for (const entry of (await waiting)!.encounter!.entries) {
+      expect(entry.pending).toBe(false);
+    }
+  });
+
+  afterAll(async () => {
+    dmSocket.emit('encounter:end', {});
+    await new Promise((r) => setTimeout(r, 200));
   });
 });
 

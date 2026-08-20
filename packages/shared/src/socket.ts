@@ -186,6 +186,23 @@ export interface WireInitiativeEntry {
   tokenId: string | null;
   name: string;
   initiative: number;
+  /**
+   * Waiting on whoever runs this creature to roll it.
+   *
+   * The DM's monsters are rolled when the fight starts - they have nobody to
+   * ask - and a character is asked, the same split the group roll makes. A
+   * pending entry sorts last until it is answered.
+   */
+  pending: boolean;
+  /**
+   * What the d20 will have added to it, on an entry that is still waiting.
+   *
+   * Null on anything already rolled, so there is no path for a monster's
+   * numbers to ride along here - the DM's creatures roll the moment the fight
+   * starts and are never pending. A pending entry is therefore always a
+   * character, whose Dexterity modifier the party list already prints.
+   */
+  initiativeBonus: number | null;
   sortOrder: number;
   /** Shown in the tracker so the DM can see who is hurt at a glance. */
   hp: number | null;
@@ -393,10 +410,22 @@ export const initiativeAddSchema = z.object({
   tokenIds: z.array(z.string()).min(1).max(50),
   /** Roll initiative automatically rather than entering it by hand. */
   roll: z.boolean().default(true),
+  /**
+   * Leave the characters unrolled for their players to answer.
+   *
+   * Only ever applies to creatures somebody else runs: the DM's own monsters
+   * have nobody to ask and roll immediately, so a fight is never held up
+   * waiting on a goblin.
+   */
+  askPlayers: z.boolean().default(false),
 });
+
+/** One person rolling an initiative entry that is waiting on them. */
+export const initiativeRollSchema = z.object({ entryId: z.string() });
 
 export type DamageApplyPayload = z.infer<typeof damageApplySchema>;
 export type InitiativeAddPayload = z.infer<typeof initiativeAddSchema>;
+export type InitiativeRollPayload = z.infer<typeof initiativeRollSchema>;
 
 /**
  * Putting a condition on a token, with an optional timer.
@@ -677,6 +706,7 @@ export interface ClientToServerEvents {
   'encounter:start': (payload: { sceneId: string | null }) => void;
   'encounter:end': (payload: Record<string, never>) => void;
   'initiative:add': (payload: InitiativeAddPayload) => void;
+  'initiative:roll': (payload: InitiativeRollPayload) => void;
   'initiative:remove': (payload: { entryId: string }) => void;
   'turn:next': (payload: Record<string, never>) => void;
   'turn:previous': (payload: Record<string, never>) => void;

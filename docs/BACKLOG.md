@@ -25,6 +25,37 @@ audio system rather than extending it.
 
 ---
 
+## Initiative, and a column that stayed on the screen — 2026-08-20
+
+**"Roll initiative for everyone" half existed and was unfindable.** `+ roll all`
+only appeared *after* an encounter had been started, at the end of a wrap of one
+`+ Name` button per creature - sixteen of them with sixteen goblins out. Starting
+a fight now offers **"Roll monsters, ask the players"**, which does both steps in
+one press. The per-creature buttons stay for a straggler arriving mid-fight.
+
+The players are asked rather than rolled for, the same split the group roll
+makes. Their entry sits in the turn order with a `Roll +3` button on it - in the
+order rather than in a banner, because that is where everyone is looking when a
+fight starts. The DM can roll any waiting entry for whoever is absent.
+
+`pending` is a flag, not a null initiative, and sorting puts pending last
+explicitly: the column stores 0, and a DEX 1 character rolling a 1 scores -4, so
+sorting on the stored number alone puts somebody who has not rolled *ahead* of
+somebody who has. That test was written rolling the dice first, which passed four
+runs in five without the rule - it sets the number now.
+
+**The contextual column was running off the screen.** One missing `min-h-0`:
+a flex child will not shrink below its content, so the token HUD and a `shrink-0`
+party card pushed the tab stack out rather than being made to fit. Measured on a
+1500x950 window with a token selected and both tool sections open: 1064px of
+content in a 950px viewport, party card ending below the fold with no way to
+scroll to it, and the turn order at -32px before anything was touched.
+
+Fixed by `min-h-0`, capping the transient panels and the party list, and moving
+the scroll out of `SidebarTabs` into each panel - which is what lets `RunPanel`
+pin the turn order and scroll only the tools. Caps are measured: at half, the HUD
+took 370 of 822px and left the tabs 150. At a third it is 305 / 279 / 214.
+
 ## The party is asked, not rolled for — 2026-08-20
 
 The group roll came back pointed at the DM's monsters, and the party half still

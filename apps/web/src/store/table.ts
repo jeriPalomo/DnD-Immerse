@@ -137,7 +137,9 @@ interface TableState {
 
   startEncounter: () => void;
   endEncounter: () => void;
-  addToInitiative: (tokenIds: string[]) => void;
+  addToInitiative: (tokenIds: string[], askPlayers?: boolean) => void;
+  /** Answer an initiative entry that is waiting on you. */
+  rollInitiative: (entryId: string) => void;
   removeFromInitiative: (entryId: string) => void;
   nextTurn: () => void;
   previousTurn: () => void;
@@ -630,9 +632,13 @@ export const useTable = create<TableState>((set, get) => ({
     get().socket?.emit('encounter:end', {});
   },
 
-  addToInitiative(tokenIds) {
+  addToInitiative(tokenIds, askPlayers = false) {
     // Rolled on the server, like every other die.
-    get().socket?.emit('initiative:add', { tokenIds, roll: true });
+    get().socket?.emit('initiative:add', { tokenIds, roll: true, askPlayers });
+  },
+
+  rollInitiative(entryId) {
+    get().socket?.emit('initiative:roll', { entryId });
   },
 
   removeFromInitiative(entryId) {

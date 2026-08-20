@@ -12,8 +12,10 @@ import {
   effectRemoveSchema,
   effectUpdateSchema,
   CONDITIONS,
+  abilityModifier,
   initiativeExpression,
   initiativeAddSchema,
+  initiativeRollSchema,
   initiativeUpdateSchema,
   rewindTurn,
   sortInitiative,
@@ -105,9 +107,12 @@ async function projectEncounter(campaignId: string, isDM: boolean): Promise<Wire
   if (!encounter) return null;
 
   const rows = await db
-    .select({ entry: initiativeEntries, token: tokens })
+    // The sheet comes along for the Dexterity modifier, which a waiting entry
+    // shows on its button so pressing it is not a leap of faith.
+    .select({ entry: initiativeEntries, token: tokens, dexterity: actors.dex })
     .from(initiativeEntries)
     .leftJoin(tokens, eq(initiativeEntries.tokenId, tokens.id))
+    .leftJoin(actors, eq(tokens.actorId, actors.id))
     .where(eq(initiativeEntries.encounterId, encounter.id))
     .orderBy(asc(initiativeEntries.sortOrder));
 
@@ -115,7 +120,7 @@ async function projectEncounter(campaignId: string, isDM: boolean): Promise<Wire
     rows.map(({ token }) => token?.id).filter((id): id is string => Boolean(id)),
   );
 
-  const entries: WireInitiativeEntry[] = rows.map(({ entry, token }) => {
+  const entries: WireInitiativeEntry[] = rows.map(({ entry, token, dexterity }) => {
     const ownedByPlayer = Boolean(token?.ownerUserId);
     const showHp = isDM || ownedByPlayer;
 
@@ -124,6 +129,9 @@ async function projectEncounter(campaignId: string, isDM: boolean): Promise<Wire
       tokenId: entry.tokenId,
       name: entry.name,
       initiative: entry.initiative,
+      pending: entry.pending,
+      // Only while it is waiting, so a rolled entry never carries it.
+      initiativeBonus: entry.pending ? abilityModifier(dexterity ?? 10) : null,
       sortOrder: entry.sortOrder,
       hp: showHp ? (token?.hp ?? null) : null,
       maxHp: showHp ? (token?.maxHp ?? null) : null,
@@ -170,6 +178,9 @@ async function resequence(encounterId: string): Promise<void> {
       name: entry.name,
       initiative: entry.initiative,
       dexterity: dexterity ?? 0,
+      // Anything nobody has rolled yet sorts last, however low the stored zero
+      // would have placed it on its own.
+      pending: entry.pending,
     })),
   );
 
@@ -309,14 +320,22 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
     const chosen = await tokensIn(input.tokenIds, ctx.campaignId);
 
     for (const token of chosen) {
+      const actor = token.actorId
+        ? (await db.select().from(actors).where(eq(actors.id, token.actorId)).limit(1))[0]
+        : undefined;
+
+      // Somebody else's creature is asked rather than rolled - the same split
+      // the group roll makes, and for the same reason. The DM's own monsters
+      // have nobody to ask, so they roll now and the fight is never held up.
+      const theirs = Boolean(token.ownerUserId) || actor?.type === 'character';
+      const pending = input.askPlayers && theirs;
+
       // Rolled on the server, like every other die in the app.
       let initiative = 0;
-      if (input.roll) {
-        let scores: AbilityScores = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
-        if (token.actorId) {
-          const found = await db.select().from(actors).where(eq(actors.id, token.actorId)).limit(1);
-          if (found[0]) scores = scoresOfToken(found[0]);
-        }
+      if (input.roll && !pending) {
+        const scores: AbilityScores = actor
+          ? scoresOfToken(actor)
+          : { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
         initiative = rollExpression(
           initiativeExpression(scores),
           `${token.name} initiative`,
@@ -329,11 +348,64 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
         tokenId: token.id,
         name: token.name || 'Combatant',
         initiative,
+        pending,
         sortOrder: 0,
       });
     }
 
     await resequence(encounter.id);
+    await broadcastEncounter(io, ctx.campaignId);
+  });
+
+  /**
+   * One person rolling an initiative entry that is waiting on them.
+   *
+   * The mirror of `chat:groupAnswer`, down to who may press it: the creature's
+   * owner, or the DM filling in for whoever is not at the table tonight. A
+   * request nobody can answer would hold the fight up for the whole session.
+   */
+  socket.on('initiative:roll', async (payload) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const { entryId } = initiativeRollSchema.parse(payload);
+
+    // Scoped through the encounter's campaign, like every other id from a
+    // client - room membership authenticates and does not authorize.
+    const rows = await db
+      .select({ entry: initiativeEntries, token: tokens, actor: actors })
+      .from(initiativeEntries)
+      .innerJoin(encounters, eq(initiativeEntries.encounterId, encounters.id))
+      .leftJoin(tokens, eq(initiativeEntries.tokenId, tokens.id))
+      .leftJoin(actors, eq(tokens.actorId, actors.id))
+      .where(and(eq(initiativeEntries.id, entryId), eq(encounters.campaignId, ctx.campaignId)))
+      .limit(1);
+
+    const found = rows[0];
+    // Already rolled, or no such entry here. Silently, because two tabs racing
+    // the same button is one person pressing it once.
+    if (!found || !found.entry.pending) return;
+
+    if (!ctx.isDM && found.token?.ownerUserId !== user.id) {
+      socket.emit('error', { message: 'That roll is not yours to make' });
+      return;
+    }
+
+    const scores: AbilityScores = found.actor
+      ? scoresOfToken(found.actor)
+      : { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
+
+    const initiative = rollExpression(
+      initiativeExpression(scores),
+      `${found.entry.name} initiative`,
+    ).total;
+
+    await db
+      .update(initiativeEntries)
+      .set({ initiative, pending: false })
+      .where(eq(initiativeEntries.id, entryId));
+
+    await resequence(found.entry.encounterId);
     await broadcastEncounter(io, ctx.campaignId);
   });
 

@@ -269,6 +269,33 @@ than guessed.
 written on the sheet to already include them, so adding them again would
 double-count. The green chip is a reminder of what the species grants.
 
+**Initiative follows the same split: monsters roll, characters are asked.**
+"Roll monsters, ask the players" starts the fight and puts everyone in it in one
+press - the DM's creatures roll immediately because they have nobody to ask, so
+a fight is never held up by a goblin, and each character's entry waits with a
+`Roll +N` button on it. The button is in the turn order rather than in a banner,
+because that is where somebody is already looking when a fight starts. The DM
+may roll any waiting entry, for whoever is not at the table. `pending` is a flag
+rather than a null initiative, and `sortInitiative` puts pending entries last
+**explicitly**: the column stores 0 while waiting, and a Dexterity of 1 rolling
+a 1 scores -4, so ordering on the stored number alone puts somebody who has not
+rolled ahead of somebody who has. `initiativeBonus` rides only on a *pending*
+entry, so a monster's numbers can never travel with it - and a pending entry is
+always a character, whose Dexterity modifier the party list already prints.
+
+**A panel that is stacked has to pin what matters.** `RunPanel` keeps the turn
+order and the group-roll prompt in a `shrink-0` region and scrolls only the
+tools under it, which means `SidebarTabs` must **not** own the scroll - a pinned
+region needs something to pin against, so each panel does its own now. The
+contextual column needs `min-h-0` beside its fixed height: a flex child will not
+shrink below its content, so without it a token HUD and a `shrink-0` party card
+pushed the tab stack straight out of the window - measured at 1064px of content
+in a 950px viewport, with the turn order sitting at -32px before anything was
+touched. The transient panels share one capped slice and the party list is
+capped too, both at fractions **measured rather than guessed**: at half, the HUD
+took 370px of an 822px column and left the tabs 150, which is a Combat panel you
+cannot work in.
+
 **The DM's creatures are rolled; the party is asked.** Those are two different
 behaviours behind one control, and the difference is the whole point. A fireball
 landing on six goblins is six saves the DM otherwise rolls by hand off a stat

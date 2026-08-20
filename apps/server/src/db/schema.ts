@@ -606,6 +606,15 @@ export const initiativeEntries = sqliteTable(
     name: text('name').notNull(),
     /** Fractional to allow DEX tiebreakers like 17.2. */
     initiative: real('initiative').notNull().default(0),
+    /**
+     * Waiting on the person who runs this creature to roll it.
+     *
+     * A separate flag rather than a null initiative: the column is `real` and
+     * non-null everywhere else, and "0 means unrolled" is a lie a Dexterity of
+     * 1 can tell - that character rolling a 1 scores -4 and would sort below
+     * somebody who has not rolled at all.
+     */
+    pending: integer('pending', { mode: 'boolean' }).notNull().default(false),
     sortOrder: integer('sort_order').notNull().default(0),
   },
   (t) => [index('initiative_encounter_idx').on(t.encounterId)],
