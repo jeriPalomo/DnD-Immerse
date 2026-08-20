@@ -29,6 +29,7 @@ import {
   items,
   scenes,
   srdItems,
+  srdMonsters,
   srdSpells,
   tokens,
   users,
@@ -37,6 +38,7 @@ import {
 import { runMigrations } from './db/migrate.js';
 import { hashPassword } from './auth/password.js';
 import { ensureDataDirs, paths } from './env.js';
+import { stampMonster } from './routes/actors.js';
 import { newId, newInviteCode } from './lib/id.js';
 
 /**
@@ -384,55 +386,21 @@ export async function seed(): Promise<{ inviteCode: string; campaignId: string }
     console.log(`  ${spec.name.padEnd(22)} ${email}`);
   }
 
-  // NPCs for the DM, sized from their stat blocks.
+  // NPCs for the DM, through the very same path the bestiary button uses.
+  //
+  // This used to build them by hand and had drifted badly: no portrait, no
+  // `srdMonsterId` - so their stat blocks were editable when a real stamped one
+  // is not - and no actions at all, which is exactly the empty attack table the
+  // stamping exists to prevent. The demo taught the opposite of how the app
+  // behaves, which is worse than having no demo.
   let goblinActorId: string | null = null;
-  const { srdMonsters } = await import('./db/schema.js');
   for (const monsterId of BESTIARY) {
     const found = await db.select().from(srdMonsters).where(eq(srdMonsters.id, monsterId)).limit(1);
     const monster = found[0];
     if (!monster) continue;
 
-    const input = actorInputSchema.parse({
-      ...emptyActor(monster.name, 'npc'),
-      name: monster.name,
-      type: 'npc',
-      str: monster.str, dex: monster.dex, con: monster.con,
-      int: monster.int, wis: monster.wis, cha: monster.cha,
-      armorClass: monster.armorClass,
-      hpCurrent: monster.hitPoints,
-      hpMax: monster.hitPoints,
-      hitDiceTotal: monster.hitDice,
-      challengeRating: monster.challengeRating,
-      race: monster.type,
-      alignment: monster.alignment,
-      prototypeToken: {
-        w: monster.tokenSize,
-        h: monster.tokenSize,
-        actorLinked: false,
-        disposition: 'hostile',
-      },
-    });
-    const {
-      skillProficiencies, saveProficiencies, spellSlots, currency, damageModifiers, prototypeToken, ...rest
-    } = input;
-
-    const npcId = newId();
-    await db.insert(actors).values({
-      id: npcId,
-      ownerUserId: dm.id,
-      campaignId: campaign.id,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      ...rest,
-      skillProficiencies, saveProficiencies, spellSlots, currency, damageModifiers, prototypeToken,
-    });
-    await db.insert(actorCampaigns).values({
-      actorId: npcId,
-      campaignId: campaign.id,
-      assignedAt: Date.now(),
-    });
-
-    if (monster.name === 'Goblin') goblinActorId = npcId;
+    const actor = await stampMonster(monster, campaign.id, dm.id);
+    if (monster.name === 'Goblin') goblinActorId = actor.id;
 
     console.log(`  NPC: ${monster.name.padEnd(17)} ${monster.tokenSize}x${monster.tokenSize} squares, CR ${monster.challengeRating}`);
   }

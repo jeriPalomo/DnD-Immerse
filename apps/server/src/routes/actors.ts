@@ -52,6 +52,101 @@ function toRow(input: ActorInput) {
   };
 }
 
+/**
+ * Creates an NPC from a compendium row.
+ *
+ * Shared by the `from-monster` route and by `npm run seed`, because the seed
+ * used to build one of these by hand and drifted: its NPCs arrived with no
+ * portrait, no `srdMonsterId` and - worst - **no actions at all**, which is
+ * precisely the state the stamping was written to fix. A DM poking at the demo
+ * met a goblin with an empty attack table and an editable stat block, and
+ * learned the opposite of how the app behaves.
+ *
+ * Anything that creates a creature from the bestiary belongs here rather than
+ * beside here.
+ */
+export async function stampMonster(
+  monster: typeof srdMonsters.$inferSelect,
+  campaignId: string,
+  ownerUserId: string,
+): Promise<typeof actors.$inferSelect> {
+  const input = actorInputSchema.parse({
+    ...emptyActor(monster.name, 'npc'),
+    name: monster.name,
+    type: 'npc',
+    str: monster.str,
+    dex: monster.dex,
+    con: monster.con,
+    int: monster.int,
+    wis: monster.wis,
+    cha: monster.cha,
+    armorClass: monster.armorClass,
+    hpCurrent: monster.hitPoints,
+    hpMax: monster.hitPoints,
+    hitDiceTotal: monster.hitDice,
+    challengeRating: monster.challengeRating,
+    race: monster.type,
+    alignment: monster.alignment,
+    // Bestiary art, where upstream published any. This is a `/srd-images/`
+    // URL shared by every copy of the monster, not an upload - deleting one
+    // goblin must not take the goblin picture away from the other four.
+    portraitUrl: monster.imageUrl,
+    // Monsters are unlinked so each copy tracks its own HP, and sized from
+    // the stat block: a Gargantuan dragon lands as a 4x4 token.
+    prototypeToken: {
+      // No `imageUrl` here on purpose: `token:create` stamps board art from
+      // `actor.portraitUrl`, and nothing has ever read the prototype's own
+      // image. Setting it would be a value with no reader, and one that a
+      // later portrait upload could never override.
+      w: monster.tokenSize,
+      h: monster.tokenSize,
+      actorLinked: false,
+      disposition: 'hostile',
+    },
+  });
+
+  const actor = {
+    id: newId(),
+    ownerUserId,
+    campaignId,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    ...toRow(input),
+    // Set here rather than through `actorInputSchema`: this is provenance the
+    // server knows, not a field a client may claim. Routing it through the
+    // input schema would let anyone POST an actor asserting it is an ancient
+    // dragon's stat block.
+    srdMonsterId: monster.id,
+  };
+
+  await db.insert(actors).values(actor);
+  await db.insert(actorCampaigns).values({ actorId: actor.id, campaignId, assignedAt: Date.now() });
+
+  // Its attacks, traits and legendary actions. Without these the NPC arrives
+  // with an empty attack table and the DM rolls a goblin's scimitar by hand
+  // off a stat block the app would not show them.
+  const stamped = itemsFromMonster(monster.data as Record<string, unknown>, monster.str);
+  if (stamped.length > 0) {
+    await db.insert(items).values(
+      stamped.map((entry, index) => ({
+        id: newId(),
+        ownerActorId: actor.id,
+        campaignId: null,
+        type: entry.type,
+        name: entry.name,
+        imageUrl: null,
+        // Validated like every other item write, so a malformed action in the
+        // compendium fails here rather than at the first attack roll.
+        system: parseItemSystem(entry.type, entry.system),
+        sortOrder: index,
+        createdAt: Date.now(),
+      })),
+    );
+  }
+
+  return actor as typeof actors.$inferSelect;
+}
+
 export async function actorRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
 
@@ -586,86 +681,11 @@ const STAT_BLOCK_FIELDS = [
 
     const { monsterId } = z.object({ monsterId: z.string() }).parse(request.body);
 
-    const { srdMonsters } = await import('../db/schema.js');
     const found = await db.select().from(srdMonsters).where(eq(srdMonsters.id, monsterId)).limit(1);
     const monster = found[0];
     if (!monster) throw new HttpError(404, 'Monster not found');
 
-    const input = actorInputSchema.parse({
-      ...emptyActor(monster.name, 'npc'),
-      name: monster.name,
-      type: 'npc',
-      str: monster.str,
-      dex: monster.dex,
-      con: monster.con,
-      int: monster.int,
-      wis: monster.wis,
-      cha: monster.cha,
-      armorClass: monster.armorClass,
-      hpCurrent: monster.hitPoints,
-      hpMax: monster.hitPoints,
-      hitDiceTotal: monster.hitDice,
-      challengeRating: monster.challengeRating,
-      race: monster.type,
-      alignment: monster.alignment,
-      // Bestiary art, where upstream published any. This is a `/srd-images/`
-      // URL shared by every copy of the monster, not an upload - deleting one
-      // goblin must not take the goblin picture away from the other four.
-      portraitUrl: monster.imageUrl,
-      // Monsters are unlinked so each copy tracks its own HP, and sized from
-      // the stat block: a Gargantuan dragon lands as a 4x4 token.
-      prototypeToken: {
-        // No `imageUrl` here on purpose: `token:create` stamps board art from
-        // `actor.portraitUrl`, and nothing has ever read the prototype's own
-        // image. Setting it would be a value with no reader, and one that a
-        // later portrait upload could never override.
-        w: monster.tokenSize,
-        h: monster.tokenSize,
-        actorLinked: false,
-        disposition: 'hostile',
-      },
-    });
-
-    const actor = {
-      id: newId(),
-      ownerUserId: user.id,
-      campaignId,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      ...toRow(input),
-      // Set here rather than through `actorInputSchema`: this is provenance the
-      // server knows, not a field a client may claim. Routing it through the
-      // input schema would let anyone POST an actor asserting it is an ancient
-      // dragon's stat block.
-      srdMonsterId: monster.id,
-    };
-
-    await db.insert(actors).values(actor);
-    await db.insert(actorCampaigns).values({ actorId: actor.id, campaignId, assignedAt: Date.now() });
-
-    // Its attacks, traits and legendary actions. Without these the NPC arrived
-    // with an empty attack table and the DM rolled a goblin's scimitar by hand
-    // off a stat block the app would not show them.
-    const stamped = itemsFromMonster(monster.data as Record<string, unknown>, monster.str);
-    if (stamped.length > 0) {
-      await db.insert(items).values(
-        stamped.map((entry, index) => ({
-          id: newId(),
-          ownerActorId: actor.id,
-          campaignId: null,
-          type: entry.type,
-          name: entry.name,
-          imageUrl: null,
-          // Validated like every other item write, so a malformed action in the
-          // compendium fails here rather than at the first attack roll.
-          system: parseItemSystem(entry.type, entry.system),
-          sortOrder: index,
-          createdAt: Date.now(),
-        })),
-      );
-    }
-
-    return { actor };
+    return { actor: await stampMonster(monster, campaignId, user.id) };
   });
 
   /* ------------------------------------------------------------ stat block */

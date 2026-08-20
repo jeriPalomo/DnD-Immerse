@@ -372,6 +372,90 @@ describe('hand-entered items', () => {
   });
 });
 
+/**
+ * What `stampMonster` puts on the sheet.
+ *
+ * Everything that creates a creature from the bestiary goes through this one
+ * function, and it is tested here because the seed used to have its own copy
+ * and drifted: the demo campaign's NPCs arrived with no portrait, no
+ * `srdMonsterId` - so their stat blocks were editable when a real stamped one
+ * is not - and no actions at all, which is the empty attack table the stamping
+ * was written to fix. Nothing noticed for months because the *lock* was tested
+ * against a hand-faked `srdMonsterId` and the real path never was.
+ */
+describe('stamping a monster copies everything, not just the numbers', () => {
+  let stamped: { id: string; name: string; srdMonsterId: string | null; portraitUrl: string | null };
+
+  beforeAll(async () => {
+    const { db } = await import('../db/index.js');
+    const { srdMonsters } = await import('../db/schema.js');
+    const { stampMonster } = await import('./actors.js');
+
+    // A block with published art and one action, which is the whole point.
+    const monster = {
+      id: 'srd-stamp-test',
+      ruleset: '2014' as const,
+      name: 'Test Ogre',
+      size: 'Large',
+      type: 'giant',
+      alignment: 'chaotic evil',
+      armorClass: 11,
+      hitPoints: 59,
+      hitDice: '7d10',
+      speed: '40 ft.',
+      str: 19, dex: 8, con: 16, int: 5, wis: 7, cha: 7,
+      challengeRating: '2',
+      xp: 450,
+      tokenSize: 2,
+      imageUrl: '/srd-images/ogre.webp',
+      data: {
+        actions: [
+          {
+            name: 'Greatclub',
+            desc: 'Melee Weapon Attack: +6 to hit, reach 5 ft., one target. Hit: 13 (2d8 + 4) bludgeoning damage.',
+            attack_bonus: 6,
+            damage: [{ damage_dice: '2d8+4', damage_type: { name: 'Bludgeoning' } }],
+          },
+        ],
+      },
+    };
+    await db.insert(srdMonsters).values(monster as never);
+
+    const campaigns = await api<{ campaigns: { id: string }[] }>('GET', '/api/campaigns');
+    const campaignId =
+      campaigns.campaigns[0]?.id ??
+      (await api<{ campaign: { id: string } }>('POST', '/api/campaigns', { name: 'Stamping' }))
+        .campaign.id;
+
+    const me = await api<{ user: { id: string } }>('GET', '/api/auth/me');
+    stamped = (await stampMonster(monster as never, campaignId, me.user.id)) as never;
+  });
+
+  it('records where it came from, so the stat block locks', () => {
+    expect(stamped.srdMonsterId).toBe('srd-stamp-test');
+  });
+
+  it('carries the bestiary art', () => {
+    // A `/srd-images/` URL shared by every copy, never an upload - deleting one
+    // ogre must not take the picture away from the other four.
+    expect(stamped.portraitUrl).toBe('/srd-images/ogre.webp');
+  });
+
+  it('stamps its actions as items it can actually swing', async () => {
+    const sheet = await api<{ items: { name: string; type: string }[] }>(
+      'GET',
+      `/api/actors/${stamped.id}`,
+    );
+    const club = sheet.items.find((item) => item.name === 'Greatclub');
+    expect(club).toBeTruthy();
+    expect(club?.type).toBe('weapon');
+  });
+
+  it('refuses an edit to the numbers it copied', async () => {
+    await expect(api('PATCH', `/api/actors/${stamped.id}`, { str: 30 })).rejects.toThrow(/bestiary/i);
+  });
+});
+
 describe('a bestiary sheet keeps the compendium’s numbers', () => {
   /**
    * A stamped monster's stat block is not the DM's to retype. Editing it would

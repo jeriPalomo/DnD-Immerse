@@ -215,6 +215,16 @@ not land until an unrelated event happened to push a full scene state.
 **AoE outlines and target lists come from the same geometry.** `templateCovers`
 decides both what is drawn and who is caught, so they cannot disagree.
 
+**Everything that creates a creature from the bestiary calls `stampMonster`.**
+`npm run seed` used to build its NPCs by hand, imitating the route field by
+field, and drifted: the demo's goblins had no portrait, no `srdMonsterId` - so
+their stat blocks were editable where a real stamped one refuses - and **no
+actions at all**, which is precisely the empty attack table the stamping exists
+to prevent. Nothing noticed, because the *lock* was tested against a hand-faked
+`srdMonsterId` while the real path was never exercised end to end. Two copies of
+a rule is one copy plus a bug waiting; the route and the seed now share one
+function, and it is tested for provenance, art and actions together.
+
 **A stamped monster's numbers are copied, not recomputed.** `from-monster` used
 to create the actor and nothing else, so a goblin arrived with an empty attack
 table and the DM rolled its scimitar by hand off a stat block the app would not

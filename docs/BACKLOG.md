@@ -25,6 +25,28 @@ audio system rather than extending it.
 
 ---
 
+## Full review — 2026-08-20
+
+Drove the whole product as a DM and as a player, 48 checks over two passes, plus
+the 597-test suite. Everything passed except one, which turned out to matter.
+
+**The seeded NPCs were not stamped.** `npm run seed` built them by hand instead
+of calling the bestiary path, and had drifted three ways: no portrait, no
+`srdMonsterId` - so a demo goblin's stat block was editable where a real one
+refuses - and no actions, so the DM could not swing its scimitar. That is the
+exact state the stamping was written to fix, sitting in the campaign we hand to
+anyone being shown the app.
+
+It survived because the *lock* was tested against a hand-faked `srdMonsterId`
+and the real creation path had no end-to-end test at all. Fixed by extracting
+`stampMonster` so the route and the seed share one implementation, and by
+testing provenance, art and actions together - all four proven to fail when the
+stamping is reverted to what the seed used to do.
+
+Also audited every exported helper in `packages/shared` for the dead-code
+invariant: 18 are exported and unused outside their module, and all 18 are
+called within it, `deriveActor` included. Nothing dead.
+
 ## Ready to show somebody — 2026-08-20
 
 **A grid-only scene had a dead board.** The stage click handler accepts the
