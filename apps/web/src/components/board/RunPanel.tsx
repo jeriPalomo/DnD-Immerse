@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { InitiativeTracker } from './InitiativeTracker.js';
 import { CreaturePanel } from './CreaturePanel.js';
+import { GroupRoll } from './GroupRoll.js';
 import { EnemyHealth } from './EnemyHealth.js';
 import { TurnPrompt } from './TurnPrompt.js';
 
@@ -30,6 +31,12 @@ export function RunPanel({ campaignId, isDM }: { campaignId: string; isDM: boole
       {isDM && (
         <Section title="Place a creature">
           <CreaturePanel campaignId={campaignId} />
+        </Section>
+      )}
+
+      {isDM && (
+        <Section title="Roll for a group">
+          <GroupRoll />
         </Section>
       )}
 

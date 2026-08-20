@@ -130,6 +130,30 @@ export interface WireCard {
   targetTokenId: string | null;
 }
 
+/**
+ * One check rolled for several creatures at once.
+ *
+ * Structured rather than a block of text, for the reason `rollData` and
+ * `cardData` already are: the totals are the thing being read, and eight lines
+ * of "Goblin 3: 1d20+2: [11]+2 = 13" buries them in their own arithmetic. The
+ * body is still written out underneath, so a log that predates this column, or
+ * a client that has not been rebuilt, loses nothing.
+ */
+export interface WireGroupRoll {
+  /** "Group DEX saving throw", "Group Stealth check". */
+  label: string;
+  dc: number | null;
+  rows: {
+    name: string;
+    /** The d20 faces. One today, two the day advantage reaches this. */
+    dice: number[];
+    modifier: number;
+    total: number;
+    /** Null when no DC was named - a check with no target number. */
+    passed: boolean | null;
+  }[];
+}
+
 export interface WireChatMessage {
   id: string;
   campaignId: string;
@@ -140,6 +164,7 @@ export interface WireChatMessage {
   body: string;
   rollData: RollResult | null;
   cardData: WireCard | null;
+  groupData: WireGroupRoll | null;
   whisperToUserId: string | null;
   /** Belongs to the battle log rather than the conversation. */
   combat: boolean;
@@ -408,7 +433,7 @@ export const drawingCreateSchema = z.object({
 export type DrawingCreatePayload = z.infer<typeof drawingCreateSchema>;
 
 export const groupRollSchema = z.object({
-  /** Which kind of check every player character makes. */
+  /** Which kind of check each creature makes. */
   kind: z.enum(['skill', 'save', 'ability']),
   /** A skill key, an ability key, or an ability key for a raw check. */
   key: z.string().max(30),
@@ -416,6 +441,25 @@ export const groupRollSchema = z.object({
   dc: z.number().int().min(1).max(40).nullable().default(null),
   /** Secret rolls go to the DM alone - a stealth check nobody should see. */
   secret: z.boolean().default(false),
+  /**
+   * Who rolls: the campaign's characters, or creatures the DM names.
+   *
+   * The creatures half is the one that earns this feature. Six goblins in a
+   * fireball is six saves the DM rolls by hand off a stat block, where the
+   * party half rolls dice on the players' behalf and takes the moment off them.
+   */
+  who: z.enum(['party', 'creatures']).default('party'),
+  /**
+   * Tokens to roll for when `who` is `creatures`.
+   *
+   * Ids from a client are a claim: these are looked up through the scene's
+   * campaign, so one borrowed from another table is simply not found.
+   *
+   * Capped well above any real scene rather than at a tidy number: a horde of
+   * forty zombies is a fight somebody runs, and a payload that trips the cap
+   * fails as "not something the table understood", which explains nothing.
+   */
+  tokenIds: z.array(z.string()).max(60).default([]),
 });
 
 export type GroupRollPayload = z.infer<typeof groupRollSchema>;

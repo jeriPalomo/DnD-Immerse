@@ -36,6 +36,26 @@ interface ScenePayload {
   walls?: unknown[];
 }
 
+/**
+ * Every *number* anywhere in a payload, keys and strings ignored.
+ *
+ * Written because `JSON.stringify(payload).not.toContain('59')` matches the
+ * digits of a random id as happily as it matches a leaked hit point total, and
+ * a nanoid contains any given two-digit pair about half a percent of the time.
+ * That is a test which fails a few runs in a hundred for no reason and passes
+ * the rest - the worst kind, because the fix for a flake is usually to stop
+ * believing it. A leak is a hit point total arriving as a *value*, so look at
+ * the values.
+ */
+function numbersIn(value: unknown, found: number[] = []): number[] {
+  if (typeof value === 'number') found.push(value);
+  else if (Array.isArray(value)) for (const item of value) numbersIn(item, found);
+  else if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) numbersIn(item, found);
+  }
+  return found;
+}
+
 async function api<T>(method: string, route: string, body?: unknown, cookie?: string): Promise<T> {
   const response = await fetch(`${baseUrl}${route}`, {
     method,
@@ -446,12 +466,14 @@ describe('invariant: enemy hit points are the DM’s to reveal', () => {
     expect(seen).toBeTruthy();
     expect(seen!.hp).toBeNull();
     expect(seen!.maxHp).toBeNull();
-    expect(JSON.stringify(player.tokens)).not.toContain('59');
+    expect(numbersIn(player.tokens)).not.toContain(59);
 
     // The DM still sees the real numbers.
     const dmSees = dmView.tokens.find((t) => t.id === ogre!.token.id);
     expect(dmSees?.hp).toBe(7);
     expect(dmSees?.maxHp).toBe(59);
+    // And the check above can fail: the same walk over the DM's payload finds it.
+    expect(numbersIn(dmView.tokens)).toContain(59);
   });
 });
 
@@ -480,7 +502,7 @@ describe('invariant: stat blocks are granted, hit points never', () => {
     expect(block.statBlock).toBeTruthy();
     // The creature has no sheet behind it in this test, so what matters is that
     // the answer carries no hit points of any kind.
-    expect(JSON.stringify(block)).not.toContain('59');
+    expect(numbersIn(block)).not.toContain(59);
     expect(JSON.stringify(block)).not.toMatch(/"hit_points"|"hitPoints"|"hpMax"/);
   });
 

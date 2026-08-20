@@ -269,6 +269,38 @@ than guessed.
 written on the sheet to already include them, so adding them again would
 double-count. The green chip is a reminder of what the species grants.
 
+**A group roll is for the creatures the DM runs, and the party is the other
+half.** "Ask the party" was removed because rolling on the players' behalf takes
+the moment off them - but a fireball landing on six goblins is six saves the DM
+rolls by hand off a stat block this app is already holding, which is the
+arithmetic worth automating. `who: 'creatures'` takes tokens the DM *controls* -
+filtered on `ownerUserId`, never on disposition, so a friendly NPC travelling
+with the party is included and a player's own token is not, whatever colour its
+ring is. Ids are scoped through `scenes.campaignId` like every other
+client-supplied id. A token with no sheet behind it is dropped rather than rolled
+flat, and the panel greys it so a missing creature is explained rather than
+merely absent.
+
+**A stamped monster's saves and skills are read from the block, not recomputed.**
+`from-monster` leaves the actor at level 1 with no proficiencies, because a stat
+line states neither - so `savingThrowBonus` gives an Ancient Red Dragon +0 on a
+Dexterity save the book puts at +7, and `skillBonus` gives a goblin Stealth +2
+where the book says +6. Both are plausible numbers and both are wrong, which is
+the failure mode this codebase keeps refusing. `publishedMonsterBonus` reads
+`data.proficiencies` off the compendium row and wins outright; a key the block
+says nothing about returns null and falls through to the bare ability modifier,
+which is exactly what a stat line with no such save means. A character, or an NPC
+written by hand, has no published block and uses its own sheet.
+
+**A group roll is written as rows and as text.** `groupData` carries a row per
+creature so the totals can be the prominent thing - eight lines of "Goblin 3:
+1d20+2: [11]+2 = 13" buries the answer in its own arithmetic. The body is still
+written out underneath, so a log that predates the column and a client that has
+not been rebuilt both still read. Flagged `combat` on the *check* rather than on
+who rolled: a save belongs beside the damage that follows it, the rule
+`postLine` already follows, while a group Perception check in a corridor is a
+conversation.
+
 **One log, two views.** Chat and the battle log are the same `chat_messages`
 rows filtered on a `combat` flag set at write time by the handlers that produce
 combat events — never derived from the message text, which would break the first
@@ -925,6 +957,15 @@ sheet that renders is not the same as a sheet whose numbers are right. Drive a
 throwaway `DATA_DIR`, never `data/app.db` — and restart the server after a
 client rebuild, because `serveClient` reads `index.html` once at boot and will
 otherwise serve one pointing at deleted asset hashes.
+
+**Do not assert a leak by searching a payload's JSON for a number.**
+`expect(JSON.stringify(tokens)).not.toContain('59')` matched the digits of a
+random nanoid as happily as it matched the ogre's hit points, and a 21-character
+id contains any given pair about half a percent of the time - so the suite failed
+a few runs in a hundred, for no reason, on a test that was right. That is the
+worst kind of flake, because the usual response to one is to stop believing it. A
+leak is a number arriving as a *value*, so walk the parsed payload and look at
+the values (`numbersIn` in `visionleak.test.ts`).
 
 **An empty compendium is not a code bug.** `srd_monsters`, `srd_spells` and
 `srd_items` are empty until `npm run srd:import` runs, and `data/srd/` being

@@ -25,6 +25,54 @@ audio system rather than extending it.
 
 ---
 
+## Group rolls, back and pointed at the monsters — 2026-08-20
+
+**Asked for after the feature was removed.** "Ask the party" went out on the
+grounds that rolling for the players ruins the moment, which stands - but the
+same button pointed at the *DM's* creatures is the arithmetic worth having. Six
+goblins in a fireball is six saves rolled by hand off a stat block the app is
+already holding.
+
+So it is back with a scope: **My creatures** (default) or **The party**. The
+creature list is the tokens the DM controls on the live scene, ticked
+individually - a fireball catches four of six and the other two should not roll.
+Filtered on `ownerUserId` rather than disposition, so a friendly NPC the DM runs
+is included and a player's token never is.
+
+**The numbers come from the stat block.** This is the part that would have been
+silently wrong. `from-monster` leaves a stamped monster at level 1 with no
+proficiencies, because a stat line states neither - so recomputing gives a goblin
+Stealth +2 against a published +6, and an Ancient Red Dragon a Dexterity save of
++0 against a published +7. `publishedMonsterBonus` reads what the compendium
+actually says. Verified in the browser in one roll: three hand-written goblins
+came up +2 and two stamped from the bestiary came up +6, side by side.
+
+**It renders as a table, not a paragraph.** `chat_messages.group_data`
+(migration 0018) carries a row per creature, and the card sets the totals in the
+display face with the dice small beside them. The text body is still written, so
+older log entries and an un-rebuilt client both still read. A save is flagged
+`combat` and lands in the battle log beside the damage that follows it; a skill
+check stays in the conversation.
+
+## A flaky test, root-caused — 2026-08-20
+
+The suite failed about one run in forty, always in `visionleak.test.ts`, always
+on hit-point redaction. Nothing was wrong with the code or with timing:
+`expect(JSON.stringify(tokens)).not.toContain('59')` matches the digits of a
+random nanoid exactly as happily as it matches a leaked hit point total. A
+21-character id carries any given pair about half a percent of the time, and
+there are several ids in that payload.
+
+Fixed by walking the parsed payload for a numeric `59` instead of grepping its
+text, plus a positive control asserting the same walk *does* find it in the DM's
+copy - so the check is proven able to fail.
+
+Two of the new tests were also found to be passing for the wrong reason, by
+deleting the code they covered and watching them stay green: the player-token
+fixture had no sheet, so it was being dropped by the "no stat block" check rather
+than by the ownership check the test named. Both fixtures now carry real sheets,
+and both tests fail when their rule is removed.
+
 ## Two small ones from the playtest list — 2026-08-20
 
 **Players pick their token's ring.** All four of them are `friendly`, so

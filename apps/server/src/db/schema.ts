@@ -561,6 +561,8 @@ export const chatMessages = sqliteTable(
     rollData: text('roll_data', { mode: 'json' }).$type<RollResult | null>(),
     /** Item card payload: buttons for attack, damage, save. */
     cardData: text('card_data', { mode: 'json' }).$type<Record<string, unknown> | null>(),
+    /** One check rolled for several creatures: a row per creature, with totals. */
+    groupData: text('group_data', { mode: 'json' }).$type<Record<string, unknown> | null>(),
     whisperToUserId: text('whisper_to_user_id').references(() => users.id, { onDelete: 'cascade' }),
     /**
      * Whether this belongs in the battle log rather than the conversation.

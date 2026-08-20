@@ -728,3 +728,41 @@ export function howManyFit(
   }
   return fits;
 }
+
+/**
+ * A saving throw or skill bonus as the stat block published it.
+ *
+ * A monster's numbers are copied, never recomputed - the same rule
+ * `from-monster` follows for its attacks, and for the same reason. A stamped
+ * goblin's actor row carries level 1 and no proficiencies, because a stat line
+ * states neither: recomputing its Stealth from the sheet gives DEX +2 and the
+ * book says +6, and recomputing an Ancient Red Dragon's DEX save gives +0
+ * against a published +7. Both are the app being confidently wrong, which is
+ * worse than the app not answering.
+ *
+ * Returns null when the block publishes nothing for that key, which is a real
+ * answer: a stat line that lists no Wisdom save means the creature rolls its
+ * bare ability modifier, and the caller falls back to exactly that.
+ */
+export function publishedMonsterBonus(
+  proficiencies: unknown,
+  kind: 'save' | 'skill',
+  key: string,
+): number | null {
+  if (!Array.isArray(proficiencies)) return null;
+
+  // `sleightOfHand` is `skill-sleight-of-hand` upstream; saves are the bare
+  // three-letter ability. Both are lowercase, hyphenated at the word breaks.
+  const wanted =
+    kind === 'save'
+      ? `saving-throw-${key.toLowerCase()}`
+      : `skill-${key.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}`;
+
+  for (const entry of proficiencies) {
+    if (!entry || typeof entry !== 'object') continue;
+    const row = entry as { value?: unknown; proficiency?: { index?: unknown } };
+    if (row.proficiency?.index !== wanted) continue;
+    return typeof row.value === 'number' ? row.value : null;
+  }
+  return null;
+}

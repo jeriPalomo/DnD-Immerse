@@ -374,12 +374,79 @@ function Message({
         />
       ) : message.kind === 'card' && message.cardData ? (
         <ItemCard card={message.cardData} onAction={onAction} />
+      ) : message.groupData ? (
+        <GroupRollCard group={message.groupData} />
       ) : (
         // `whitespace-pre-line`, because some bodies are several lines and were
         // arriving as one run-on sentence. A group roll is written as a line per
         // character, and every one of those newlines was being collapsed:
         // "Group WIS saving throw Thorin: 1d20+2: [7]+2 = 9 Elaria: ...".
         <p className="whitespace-pre-line text-ink-200">{message.body}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One check, several creatures, one table.
+ *
+ * The totals are what is being read - "did the goblins make it" is answered by
+ * a column of numbers, not by eight lines of arithmetic - so they are the only
+ * thing set in the display face, and the dice that produced them sit small
+ * beside. This replaces a run of text where the answer to the question was the
+ * least prominent thing on screen.
+ *
+ * Rows scroll past eight, because a fireball can catch a dozen and a card that
+ * pushes the rest of the log off the screen is its own problem.
+ */
+function GroupRollCard({ group }: { group: NonNullable<WireChatMessage['groupData']> }) {
+  const passes = group.rows.filter((row) => row.passed).length;
+
+  return (
+    <div className="mt-1 rounded-lg border border-ink-700 bg-ink-850 px-3 py-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-xs text-ink-300">{group.label}</span>
+        {group.dc !== null && (
+          <span className="shrink-0 font-mono text-[11px] text-ink-500">DC {group.dc}</span>
+        )}
+      </div>
+
+      <ul className="mt-1 max-h-64 space-y-0.5 overflow-y-auto">
+        {group.rows.map((row, index) => (
+          // Index in the key because two creatures can legitimately share a
+          // name - an unnumbered pair placed by hand - and this list is never
+          // reordered or filtered after it is written.
+          <li key={`${row.name}-${index}`} className="flex items-baseline gap-2">
+            <span className="min-w-0 flex-1 truncate text-[11px] text-ink-300">{row.name}</span>
+
+            <span className="shrink-0 font-mono text-[10px] text-ink-600">
+              [{row.dice.join(', ')}]
+              {row.modifier >= 0 ? `+${row.modifier}` : row.modifier}
+            </span>
+
+            <span className="w-7 shrink-0 text-right font-display text-base font-bold text-ink-100">
+              {row.total}
+            </span>
+
+            {/* Kept as a fixed-width cell whether or not there is a DC, so the
+                totals stay in one column between a check and a save. */}
+            <span className="w-3 shrink-0 text-center text-xs">
+              {row.passed === null ? (
+                ''
+              ) : row.passed ? (
+                <span className="text-emerald-400">✓</span>
+              ) : (
+                <span className="text-red-400">✗</span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {group.dc !== null && (
+        <div className="mt-1 border-t border-ink-800 pt-1 text-[10px] text-ink-500">
+          {passes} of {group.rows.length} made it
+        </div>
       )}
     </div>
   );

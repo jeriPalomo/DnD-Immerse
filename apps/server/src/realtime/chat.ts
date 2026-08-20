@@ -31,10 +31,12 @@ import type {
 import {
   abilityModifier,
   groupRollSchema,
+  publishedMonsterBonus,
   savingThrowBonus,
   skillBonus,
   SKILLS,
   type GroupRollPayload,
+  type WireGroupRoll,
 } from '@dnd/shared';
 import { db } from '../db/index.js';
 import {
@@ -44,6 +46,7 @@ import {
   chatMessages,
   items,
   scenes,
+  srdMonsters,
   tokens,
   users,
 } from '../db/schema.js';
@@ -164,6 +167,7 @@ export async function persistAndDeliver(
     body: string;
     rollData?: RollResult | null;
     cardData?: WireCard | null;
+    groupData?: WireGroupRoll | null;
     whisperToUserId?: string | null;
     /** Routes this to the battle log instead of the conversation. */
     combat?: boolean;
@@ -180,6 +184,7 @@ export async function persistAndDeliver(
     body: row.body,
     rollData: row.rollData ?? null,
     cardData: row.cardData ?? null,
+    groupData: row.groupData ?? null,
     whisperToUserId: row.whisperToUserId ?? null,
     combat: row.combat ?? false,
     createdAt: Date.now(),
@@ -194,6 +199,7 @@ export async function persistAndDeliver(
     body: row.body,
     rollData: row.rollData ?? null,
     cardData: (row.cardData ?? null) as Record<string, unknown> | null,
+    groupData: (row.groupData ?? null) as Record<string, unknown> | null,
     whisperToUserId: row.whisperToUserId ?? null,
     combat: message.combat,
     createdAt: message.createdAt,
@@ -334,11 +340,18 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
   });
 
   /**
-   * One check, rolled for every player character at once.
+   * One check, rolled for several creatures at once.
    *
-   * Replaces the DM asking four people in turn and waiting. Modifiers come
-   * from the same rules functions the sheet displays, so a group Perception
-   * check agrees with what each player can see on their own sheet.
+   * The half that earns this is `creatures`: a fireball lands on six goblins
+   * and that is six saves the DM otherwise rolls by hand, off a stat block the
+   * app is already holding. `party` is the older half, kept because a corridor
+   * full of traps is a real use for it - but it rolls dice on the players'
+   * behalf, which is a moment taken off them, so it is not the default.
+   *
+   * Modifiers come from the same rules functions each sheet displays, so a
+   * group Perception check agrees with what a player sees on their own
+   * character - except for a creature stamped from the bestiary, whose numbers
+   * are copied rather than recomputed. See `groupModifier`.
    */
   socket.on('chat:groupRoll', async (payload) => {
     const campaignId = activeCampaign();
@@ -352,49 +365,38 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
 
     const input = groupRollSchema.parse(payload);
 
-    // Player characters only. NPC sheets are the DM's business, and rolling
-    // for them here would quietly reveal the bestiary.
-    const party = await db
-      .select({ actor: actors })
-      .from(actorCampaigns)
-      .innerJoin(actors, eq(actorCampaigns.actorId, actors.id))
-      .where(and(eq(actorCampaigns.campaignId, campaignId), eq(actors.type, 'character')));
+    const rollers =
+      input.who === 'creatures'
+        ? await creatureRollers(campaignId, input.tokenIds)
+        : await partyRollers(campaignId);
 
-    if (party.length === 0) {
-      socket.emit('error', { message: 'No characters are assigned to this campaign' });
+    if (rollers.length === 0) {
+      socket.emit('error', {
+        message:
+          input.who === 'creatures'
+            ? 'None of those creatures has a stat block to roll from'
+            : 'No characters are assigned to this campaign',
+      });
       return;
     }
 
     const label = describeGroupRoll(input);
+    const rows: WireGroupRoll['rows'] = [];
     const lines: string[] = [];
 
-    for (const { actor } of party) {
-      const scores = {
-        str: actor.str, dex: actor.dex, con: actor.con,
-        int: actor.int, wis: actor.wis, cha: actor.cha,
-      };
-
-      let modifier = 0;
-      if (input.kind === 'skill') {
-        const level = (actor.skillProficiencies?.[input.key as never] ?? 0) as 0 | 1 | 2;
-        modifier = skillBonus(scores, actor.level, input.key as never, level);
-      } else if (input.kind === 'save') {
-        const proficient = Boolean(actor.saveProficiencies?.[input.key as never]);
-        modifier = savingThrowBonus(scores, actor.level, input.key as never, proficient);
-      } else {
-        modifier = abilityModifier(scores[input.key as keyof typeof scores] ?? 10);
-      }
-
+    for (const roller of rollers) {
+      const modifier = groupModifier(roller, input.kind, input.key);
       const expression = modifier >= 0 ? `1d20+${modifier}` : `1d20${modifier}`;
-      const roll = rollExpression(expression, actor.name);
+      const roll = rollExpression(expression, roller.name);
 
-      const verdict =
-        input.dc === null ? '' : roll.total >= input.dc ? '  ✓' : '  ✗';
-      lines.push(`${actor.name}: ${roll.output}${verdict}`);
+      const passed = input.dc === null ? null : roll.total >= input.dc;
+      rows.push({ name: roller.name, dice: roll.rolls, modifier, total: roll.total, passed });
+
+      const verdict = passed === null ? '' : passed ? '  ✓' : '  ✗';
+      lines.push(`${roller.name}: ${roll.output}${verdict}`);
     }
 
     const header = input.dc === null ? label : `${label} (DC ${input.dc})`;
-    const body = [header, ...lines].join(String.fromCharCode(10));
 
     await persistAndDeliver(
       io,
@@ -403,7 +405,16 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         userId: user.id,
         actorId: null,
         kind: 'system',
-        body,
+        // Written out as text as well as sent as rows. A log that predates the
+        // column, or a client that has not been rebuilt, still reads.
+        body: [header, ...lines].join(String.fromCharCode(10)),
+        groupData: { label, dc: input.dc, rows },
+        // Flagged on the check, not on who rolled. "A save landing is combat"
+        // is the rule `postLine` already follows for a single one, and six
+        // goblins saving against a fireball is the same event six times - it
+        // belongs beside the damage that follows it, not in a second tab.
+        // A group Perception check in a corridor is a conversation either way.
+        combat: input.kind === 'save',
         // A secret group roll reaches only the DM, like a secret single roll.
         whisperToUserId: input.secret ? user.id : null,
       },
@@ -720,6 +731,7 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         body: message.body,
         rollData: message.rollData ?? null,
         cardData: (message.cardData ?? null) as WireCard | null,
+        groupData: (message.groupData ?? null) as WireGroupRoll | null,
         whisperToUserId: message.whisperToUserId,
         combat: message.combat,
         createdAt: message.createdAt,
@@ -947,6 +959,143 @@ async function resolveSave(
 
   const { broadcastEncounter } = await import('./combat.js');
   await broadcastEncounter(io, campaignId);
+}
+
+/**
+ * One creature in a group roll, with everything its modifier needs.
+ *
+ * Flattened out of the actor row rather than passed as one, because a creature
+ * rolls under the name on the *token* - five goblins off one stat block are
+ * Goblin, Goblin 2 and Goblin 3 on the board and in the initiative order, and
+ * five identical lines would be unreadable.
+ */
+interface GroupRoller {
+  name: string;
+  scores: AbilityScores;
+  level: number;
+  skillProficiencies: Actor['skillProficiencies'];
+  saveProficiencies: Actor['saveProficiencies'];
+  /** The stat block's own proficiencies, for a creature stamped from one. */
+  published: unknown;
+}
+
+function rollerFromActor(actor: Actor, name: string, published: unknown): GroupRoller {
+  return {
+    name,
+    scores: {
+      str: actor.str, dex: actor.dex, con: actor.con,
+      int: actor.int, wis: actor.wis, cha: actor.cha,
+    },
+    level: actor.level,
+    skillProficiencies: actor.skillProficiencies,
+    saveProficiencies: actor.saveProficiencies,
+    published,
+  };
+}
+
+/**
+ * The campaign's characters.
+ *
+ * Player characters only. NPC sheets are the DM's business, and rolling for
+ * them here would quietly reveal the bestiary to anyone reading the log.
+ */
+async function partyRollers(campaignId: string): Promise<GroupRoller[]> {
+  const rows = await db
+    .select({ actor: actors })
+    .from(actorCampaigns)
+    .innerJoin(actors, eq(actorCampaigns.actorId, actors.id))
+    .where(and(eq(actorCampaigns.campaignId, campaignId), eq(actors.type, 'character')));
+
+  return rows.map(({ actor }) => rollerFromActor(actor, actor.name, null));
+}
+
+/**
+ * The creatures the DM named, as far as each one has a sheet to roll from.
+ *
+ * Ids are scoped through the scene's campaign, so one borrowed from another
+ * table is simply not found - room membership authenticates and does not
+ * authorize. A token somebody *owns* is dropped: rolling a player's dice for
+ * them is the half of this feature that was asked to go, and it must not come
+ * back through the creature list. A token with no sheet behind it is dropped
+ * too, because there are no ability scores anywhere to roll against; the panel
+ * greys those rather than hiding them, so the DM can see why one is missing.
+ */
+async function creatureRollers(campaignId: string, tokenIds: string[]): Promise<GroupRoller[]> {
+  if (tokenIds.length === 0) return [];
+
+  const rows = await db
+    .select({ token: tokens, actor: actors })
+    .from(tokens)
+    .innerJoin(scenes, eq(tokens.sceneId, scenes.id))
+    .leftJoin(actors, eq(tokens.actorId, actors.id))
+    .where(and(inArray(tokens.id, tokenIds), eq(scenes.campaignId, campaignId)));
+
+  const mine = rows
+    .filter((row): row is { token: Token; actor: Actor } => !row.token.ownerUserId && Boolean(row.actor))
+    // The order the DM sent, which is the order of the list they ticked.
+    .sort((a, b) => tokenIds.indexOf(a.token.id) - tokenIds.indexOf(b.token.id));
+
+  // One query for the stat blocks behind them, rather than one per goblin.
+  const stampedIds = [
+    ...new Set(mine.map((row) => row.actor.srdMonsterId).filter((v): v is string => Boolean(v))),
+  ];
+  const blocks =
+    stampedIds.length === 0
+      ? []
+      : await db
+          .select({ id: srdMonsters.id, data: srdMonsters.data })
+          .from(srdMonsters)
+          .where(inArray(srdMonsters.id, stampedIds));
+
+  const published = new Map(
+    blocks.map((block) => [
+      block.id,
+      (block.data as Record<string, unknown> | null)?.proficiencies ?? null,
+    ]),
+  );
+
+  return mine.map(({ token, actor }) =>
+    rollerFromActor(
+      actor,
+      token.name || actor.name,
+      actor.srdMonsterId ? (published.get(actor.srdMonsterId) ?? null) : null,
+    ),
+  );
+}
+
+/**
+ * What this creature adds to its d20.
+ *
+ * A stamped monster's published number wins outright, for the reason
+ * `from-monster` cancels proficiency out of an attack: its actor row carries
+ * level 1 and no proficiencies, because a stat line states neither. Recomputing
+ * a goblin's Stealth from the sheet gives +2 where the book says +6, and an
+ * Ancient Red Dragon's Dexterity save +0 where the book says +7. A block that
+ * publishes nothing for the key falls through to the bare ability modifier,
+ * which is exactly what a stat line with no such save means.
+ *
+ * A character, or an NPC written by hand, has no published block and uses its
+ * own sheet - the same functions the sheet itself displays, so the two agree.
+ */
+function groupModifier(
+  roller: GroupRoller,
+  kind: GroupRollPayload['kind'],
+  key: string,
+): number {
+  if (kind === 'ability') {
+    return abilityModifier(roller.scores[key as AbilityKey] ?? 10);
+  }
+
+  const published = publishedMonsterBonus(roller.published, kind, key);
+  if (published !== null) return published;
+
+  if (kind === 'save') {
+    const proficient = Boolean(roller.saveProficiencies?.[key as never]);
+    return savingThrowBonus(roller.scores, roller.level, key as never, proficient);
+  }
+
+  const proficiency = (roller.skillProficiencies?.[key as never] ?? 0) as 0 | 1 | 2;
+  return skillBonus(roller.scores, roller.level, key as never, proficiency);
 }
 
 /** A readable title for the group roll card. */

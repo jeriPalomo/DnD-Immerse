@@ -417,6 +417,284 @@ describe('group rolls', () => {
   });
 });
 
+/**
+ * The half of this feature that earns it.
+ *
+ * A fireball lands on six goblins and that is six saves the DM otherwise rolls
+ * by hand. What has to hold: only creatures the DM actually runs, only ones
+ * with a stat block behind them, ids scoped to this campaign, and - the one
+ * most likely to be silently wrong - the numbers taken from the stat block
+ * rather than recomputed off an actor row that says level 1.
+ */
+describe('group rolls for the creatures the DM runs', () => {
+  let sceneId: string;
+  let goblinTokens: string[] = [];
+  let playerTokenId: string;
+  let bareTokenId: string;
+  const monsterId = 'test-goblin-monster';
+
+  beforeAll(async () => {
+    // A compendium row to stamp from. `srd:import` is the only other way to
+    // get one, and this needs a block whose published numbers are known.
+    const { db } = await import('../db/index.js');
+    const { srdMonsters } = await import('../db/schema.js');
+    await db.insert(srdMonsters).values({
+      id: monsterId,
+      ruleset: '2014',
+      name: 'Test Goblin',
+      type: 'humanoid',
+      armorClass: 15,
+      hitPoints: 7,
+      // DEX 14 is +2. The block below publishes +9 and +6, so any number that
+      // comes back as 2 is the sheet being recomputed instead of read.
+      str: 8, dex: 14, con: 10, int: 10, wis: 8, cha: 8,
+      challengeRating: '1/4',
+      xp: 50,
+      tokenSize: 1,
+      data: {
+        proficiencies: [
+          { value: 9, proficiency: { index: 'saving-throw-dex', name: 'Saving Throw: DEX' } },
+          { value: 6, proficiency: { index: 'skill-stealth', name: 'Skill: Stealth' } },
+        ],
+      },
+    } as never);
+
+    const scene = await api<{ scene: { id: string } }>(
+      'POST', `/api/campaigns/${campaignId}/scenes`, { name: 'Ambush', gridSize: 70 }, dm.cookie,
+    );
+    sceneId = scene.scene.id;
+    dmSocket.emit('scene:activate', { sceneId });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const stamped = await api<{ actor: { id: string } }>(
+      'POST', `/api/campaigns/${campaignId}/actors/from-monster`, { monsterId }, dm.cookie,
+    );
+
+    for (const x of [2, 3]) {
+      const placed = next<{ token: WireToken }>(dmSocket, 'token:created');
+      dmSocket.emit('token:create', {
+        sceneId, x, y: 2, name: x === 2 ? 'Goblin' : 'Goblin 2', actorId: stamped.actor.id,
+      } as never);
+      goblinTokens.push((await placed)!.token.id);
+    }
+
+    // A player's own token, with a real sheet behind it. The sheet matters:
+    // without one this token would be dropped for having nothing to roll from,
+    // and the ownership check below would be tested by nothing at all.
+    const hers = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors', { name: 'Alice Rogue', type: 'character', dex: 16 }, alice.cookie,
+    );
+    const theirs = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, x: 8, y: 8, name: 'Alice Rogue', actorId: hers.actor.id, ownerUserId: alice.userId,
+    } as never);
+    playerTokenId = (await theirs)!.token.id;
+
+    const bare = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', { sceneId, x: 9, y: 9, name: 'Rubble' } as never);
+    bareTokenId = (await bare)!.token.id;
+
+    await new Promise((r) => setTimeout(r, 300));
+  });
+
+  it('rolls one line per creature, under the name on the board', async () => {
+    const waiting = next<{ message: WireChatMessage }>(aliceSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: 15, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+
+    const group = (await waiting)?.message.groupData;
+    expect(group?.rows).toHaveLength(2);
+    // The token's name, not the sheet's: five goblins off one stat block are
+    // Goblin, Goblin 2, Goblin 3 on the board, and five identical lines would
+    // be unreadable.
+    expect(group?.rows.map((r) => r.name).sort()).toEqual(['Goblin', 'Goblin 2']);
+    expect(group?.dc).toBe(15);
+  });
+
+  it('takes the modifier from the stat block, not from the actor row', async () => {
+    const waiting = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: null, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+
+    const group = (await waiting)?.message.groupData;
+    // +9 published. A stamped monster's actor row carries level 1 and no
+    // proficiencies, because a stat line states neither - so recomputing gives
+    // DEX +2, which is a plausible number and the wrong one.
+    for (const row of group!.rows) expect(row.modifier).toBe(9);
+  });
+
+  it('does the same for a published skill', async () => {
+    const waiting = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'skill', key: 'stealth', dc: null, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+
+    const group = (await waiting)?.message.groupData;
+    for (const row of group!.rows) expect(row.modifier).toBe(6);
+  });
+
+  it('falls back to the bare ability where the block publishes nothing', async () => {
+    const waiting = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'wis', dc: null, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+
+    // WIS 8 is -1, and a stat line that lists no Wisdom save means exactly
+    // that. A real answer, not a failure to find one.
+    const group = (await waiting)?.message.groupData;
+    for (const row of group!.rows) expect(row.modifier).toBe(-1);
+  });
+
+  it('adds the modifier to the die rather than reporting it beside', async () => {
+    const waiting = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: null, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+
+    const group = (await waiting)?.message.groupData;
+    for (const row of group!.rows) {
+      expect(row.dice).toHaveLength(1);
+      expect(row.total).toBe(row.dice[0] + row.modifier);
+    }
+  });
+
+  it('marks each row against the DC, and null without one', async () => {
+    const withDc = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: 15, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+    for (const row of (await withDc)!.message.groupData!.rows) {
+      expect(row.passed).toBe(row.total >= 15);
+    }
+
+    const without = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: null, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+    for (const row of (await without)!.message.groupData!.rows) {
+      expect(row.passed).toBeNull();
+    }
+  });
+
+  it('refuses to roll a player’s own token for them', async () => {
+    const failure = next<{ message: string }>(dmSocket, 'error');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: null, secret: false,
+      who: 'creatures', tokenIds: [playerTokenId],
+    } as never);
+
+    // Rolling the players' dice is the half of this that was cut, and it must
+    // not come back through the creature list.
+    expect((await failure)?.message).toMatch(/stat block/i);
+  });
+
+  it('drops a player’s token from a mixed list rather than rolling it', async () => {
+    const waiting = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: null, secret: false,
+      who: 'creatures', tokenIds: [...goblinTokens, playerTokenId],
+    } as never);
+
+    const group = (await waiting)?.message.groupData;
+    expect(group?.rows).toHaveLength(2);
+    expect(group?.rows.some((r) => r.name === 'Alice Rogue')).toBe(false);
+  });
+
+  it('skips a token with no sheet behind it', async () => {
+    const failure = next<{ message: string }>(dmSocket, 'error');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: null, secret: false,
+      who: 'creatures', tokenIds: [bareTokenId],
+    } as never);
+
+    // There are no ability scores anywhere to roll against.
+    expect((await failure)?.message).toMatch(/stat block/i);
+  });
+
+  it('does not find a token id from another campaign', async () => {
+    const other = await api<{ campaign: { id: string } }>(
+      'POST', '/api/campaigns', { name: 'Someone Else’s Table' }, dm.cookie,
+    );
+    const otherScene = await api<{ scene: { id: string } }>(
+      'POST', `/api/campaigns/${other.campaign.id}/scenes`, { name: 'Elsewhere' }, dm.cookie,
+    );
+
+    // A real creature, with a real sheet, that this DM genuinely runs - just
+    // in another campaign. Anything less and the id would be refused for some
+    // other reason and the scoping would be tested by nothing.
+    const elsewhere = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors', { name: 'Someone Else’s Goblin', type: 'npc', campaignId: other.campaign.id },
+      dm.cookie,
+    );
+    const { db } = await import('../db/index.js');
+    const { tokens } = await import('../db/schema.js');
+    const strayId = 'stray-token-id-for-scoping';
+    await db.insert(tokens).values({
+      id: strayId, sceneId: otherScene.scene.id, name: 'Not Yours', x: 1, y: 1,
+      actorId: elsewhere.actor.id,
+    } as never);
+
+    const failure = next<{ message: string }>(dmSocket, 'error');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: null, secret: false, who: 'creatures', tokenIds: [strayId],
+    } as never);
+
+    // Room membership authenticates; it does not authorize. The id is looked
+    // up through the scene's campaign, so a borrowed one is simply not found.
+    expect((await failure)?.message).toMatch(/stat block/i);
+  });
+
+  it('keeps a secret creature roll away from the players', async () => {
+    const toPlayer = next<{ message: WireChatMessage }>(aliceSocket, 'chat:message', 1200);
+    const toDm = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: null, secret: true, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+
+    expect((await toDm)?.message.groupData?.rows).toHaveLength(2);
+    expect(await toPlayer).toBeNull();
+  });
+
+  it('still writes the result out as text', async () => {
+    const waiting = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: 15, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+
+    // A log written before the column existed, and a client that has not been
+    // rebuilt, both still read.
+    const body = (await waiting)?.message.body ?? '';
+    expect(body).toMatch(/Group DEX saving throw \(DC 15\)/);
+    expect(body).toContain('Goblin 2');
+  });
+
+  it('files a save in the battle log and a skill check in the conversation', async () => {
+    const asSave = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: 15, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+    // Beside the damage that follows it, rather than in the other tab.
+    expect((await asSave)?.message.combat).toBe(true);
+
+    const asCheck = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'skill', key: 'stealth', dc: null, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+    expect((await asCheck)?.message.combat).toBe(false);
+  });
+
+  it('refuses to let a player call one for the DM’s monsters', async () => {
+    const failure = next<{ message: string }>(aliceSocket, 'error');
+    aliceSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: null, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+    expect((await failure)?.message).toMatch(/only the dm/i);
+  });
+});
+
 describe('players whisper only when their tokens are adjacent', () => {
   let sceneId: string;
   let aliceTokenId: string;

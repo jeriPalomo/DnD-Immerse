@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { getPref, setPref } from '../lib/prefs.js';
 import type {
   ClientToServerEvents,
+  GroupRollPayload,
   TerrainBrush,
   TerrainCells,
   RollMode,
@@ -142,7 +143,7 @@ interface TableState {
   previousTurn: () => void;
   placeTemplate: (payload: Record<string, unknown>) => void;
   clearTemplate: (templateId: string) => void;
-  groupRoll: (kind: 'skill' | 'save' | 'ability', key: string, dc: number | null, secret: boolean) => void;
+  groupRoll: (payload: GroupRollPayload) => void;
   rollDeathSave: (tokenId: string) => void;
   showHandout: (pageId: string) => void;
   /** A handout being shown large right now. */
@@ -529,8 +530,8 @@ export const useTable = create<TableState>((set, get) => ({
     });
   },
 
-  groupRoll(kind, key, dc, secret) {
-    get().socket?.emit('chat:groupRoll', { kind, key, dc, secret });
+  groupRoll(payload) {
+    get().socket?.emit('chat:groupRoll', payload);
   },
 
   rollDeathSave(tokenId) {
