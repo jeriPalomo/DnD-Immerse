@@ -92,14 +92,19 @@ turning it on while people connect to `http://100.69.0.16:3001` would break
 every login. Tailscale already encrypts the traffic with WireGuard, so nothing
 is travelling in the clear.
 
-If you want a real hostname and a real certificate, Tailscale Serve gives both:
+**You already have the hostname.** MagicDNS is on, so
+`http://pc.tail08956b.ts.net:3001` resolves today with nothing to set up - give
+players that rather than the IP. Tailscale Serve is not needed for it.
+
+What Serve would add is HTTPS, and with it the `:3001` disappears:
 
 1. Enable Serve for the tailnet (one click, in the Tailscale admin console).
 2. `tailscale serve --bg --https=443 http://127.0.0.1:3001`
-3. Set `SECURE_COOKIES=true` for the service and restart it.
+3. Set `SECURE_COOKIES=true` and restart.
 
-Players then use `https://pc.tail08956b.ts.net` with no port. Worth doing, not
-urgent.
+Players then use `https://pc.tail08956b.ts.net`. Optional: the traffic is
+already encrypted by WireGuard either way, and the one feature that genuinely
+needed a secure context - copying the invite code - now works without one.
 
 ## Showing somebody
 

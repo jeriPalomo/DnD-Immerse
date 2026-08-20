@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Card, Spinner } from '../components/ui.js';
 import { useAuth } from '../store/auth.js';
 import { CampaignSettings } from '../components/campaign/CampaignSettings.js';
 import { api } from '../lib/api.js';
+import { copyText } from '../lib/clipboard.js';
 import type { Campaign, Member } from '../store/campaigns.js';
 
 /** Where the table left off, derived server-side so it cannot go stale. */
@@ -312,19 +313,29 @@ function LastSession({
  * revoking a code you have already sent reads as the decision it is.
  */
 function InviteCode({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false);
+  /** null before a click, then whether the copy actually worked. */
+  const [copied, setCopied] = useState<boolean | null>(null);
 
   return (
     <button
       onClick={async () => {
-        await navigator.clipboard.writeText(code);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        // Through `copyText`, because `navigator.clipboard` does not exist
+        // outside a secure context - which is every machine but this one, on a
+        // tailnet served over plain http. Reading `.writeText` off undefined
+        // inside an async handler failed as complete silence: no copy, no
+        // error, no feedback. Say which of the two happened, rather than
+        // reporting success and hoping.
+        setCopied(await copyText(code));
+        setTimeout(() => setCopied(null), 2000);
       }}
-      title="Invite code — click to copy"
-      className="rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 font-mono text-sm tracking-[0.2em] text-ember-300 transition-colors hover:border-ember-500"
+      title={
+        copied === false
+          ? 'Could not copy — select the code and copy it by hand'
+          : 'Invite code — click to copy'
+      }
+      className="rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 font-mono text-sm tracking-[0.2em] text-ember-300 transition-colors select-all hover:border-ember-500"
     >
-      {copied ? 'Copied' : code}
+      {copied === true ? 'Copied' : copied === false ? 'Select it' : code}
     </button>
   );
 }
