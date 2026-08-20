@@ -569,6 +569,15 @@ describe('group rolls put to the party', () => {
     expect(request.whisperToUserId).toBeNull();
   });
 
+  it('names a character’s token where they have one, and null where they do not', async () => {
+    const request = await askParty('save', 'dex', 15);
+
+    // Alice PC was never placed on a scene, so there is nothing on the board to
+    // damage - null rather than a guess, and the card names her as skipped.
+    const hers = request.groupData!.rows.find((row) => row.actorId === alicePcId)!;
+    expect(hers.tokenId).toBeNull();
+  });
+
   it('refuses to let a player call for one', async () => {
     const failure = next<{ message: string }>(aliceSocket, 'error');
     aliceSocket.emit('chat:groupRoll', { kind: 'skill', key: 'perception', dc: null, secret: false });
@@ -828,6 +837,18 @@ describe('group rolls for the creatures the DM runs', () => {
     const body = (await waiting)?.message.body ?? '';
     expect(body).toMatch(/Group DEX saving throw \(DC 15\)/);
     expect(body).toContain('Goblin 2');
+  });
+
+  it('names the creature on the board each row is, so damage can follow', async () => {
+    const waiting = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');
+    dmSocket.emit('chat:groupRoll', {
+      kind: 'save', key: 'dex', dc: 15, secret: false, who: 'creatures', tokenIds: goblinTokens,
+    } as never);
+
+    // A fireball otherwise means reading who failed and then hunting each of
+    // them down on the map, while this card is already holding the list.
+    const rows = (await waiting)!.message.groupData!.rows;
+    expect(rows.map((row) => row.tokenId).sort()).toEqual([...goblinTokens].sort());
   });
 
   it('files a save in the battle log and a skill check in the conversation', async () => {

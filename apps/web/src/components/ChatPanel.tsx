@@ -183,6 +183,12 @@ export function ChatPanel({
               myActorIds={myActorIds}
               isDM={isDM}
               onAnswer={answerGroupRoll}
+              // Two calls rather than one: `halved` applies to every id in a
+              // call, so the failures and the successes cannot travel together.
+              onApplyDamage={(failedIds, savedIds, value, type) => {
+                if (failedIds.length) applyDamage(failedIds, value, type);
+                if (savedIds.length) applyDamage(savedIds, value, type, false, true);
+              }}
             />
           ))
         )}
@@ -342,12 +348,14 @@ function Message({
   myActorIds,
   isDM,
   onAnswer,
+  onApplyDamage,
 }: {
   message: WireChatMessage;
   selfId: string;
   myActorIds: string[];
   isDM: boolean;
   onAnswer: (messageId: string, actorId: string) => void;
+  onApplyDamage: (failed: string[], saved: string[], amount: number, type: string) => void;
   onAction: (
     itemId: string,
     actorId: string,
@@ -398,6 +406,7 @@ function Message({
           myActorIds={myActorIds}
           isDM={isDM}
           onAnswer={onAnswer}
+          onApplyDamage={onApplyDamage}
         />
       ) : (
         // `whitespace-pre-line`, because some bodies are several lines and were
@@ -428,6 +437,7 @@ function GroupRollCard({
   myActorIds,
   isDM,
   onAnswer,
+  onApplyDamage,
 }: {
   group: NonNullable<WireChatMessage['groupData']>;
   messageId: string;
@@ -435,10 +445,22 @@ function GroupRollCard({
   myActorIds: string[];
   isDM: boolean;
   onAnswer: (messageId: string, actorId: string) => void;
+  onApplyDamage: (failed: string[], saved: string[], amount: number, type: string) => void;
 }) {
   const rolled = group.rows.filter((row) => row.total !== null);
   const passes = rolled.filter((row) => row.passed).length;
   const waiting = group.rows.length - rolled.length;
+
+  const [amount, setAmount] = useState('');
+  const [damageType, setDamageType] = useState('fire');
+  /** Half on a successful save is the common case; some effects give nothing. */
+  const [halfOnSave, setHalfOnSave] = useState(true);
+
+  const failed = group.rows.filter((row) => row.passed === false && row.tokenId);
+  const saved = group.rows.filter((row) => row.passed === true && row.tokenId);
+  // Named rather than silently dropped: a row with nothing on the board cannot
+  // be damaged from here, and the DM needs to know which one to go and find.
+  const offBoard = group.rows.filter((row) => row.total !== null && !row.tokenId);
 
   return (
     <div className="mt-1 rounded-lg border border-ink-700 bg-ink-850 px-3 py-2">
@@ -510,6 +532,75 @@ function GroupRollCard({
           {waiting > 0
             ? `waiting on ${waiting} of ${group.rows.length}`
             : `${passes} of ${group.rows.length} made it`}
+        </div>
+      )}
+
+      {/*
+        The damage a save was against, applied where the answer already is.
+
+        A fireball otherwise means reading who failed, then finding each of them
+        on the board and damaging them one at a time - and this card is already
+        holding the list. Offered rather than applied automatically, for the same
+        reason `RollCard` offers its button: damage gets rolled for things that
+        turn out not to land.
+
+        Only once everybody has answered, and only against a DC - a check with no
+        target number has no failures to act on.
+      */}
+      {isDM && group.dc !== null && waiting === 0 && failed.length + saved.length > 0 && (
+        <div className="mt-1.5 space-y-1.5 border-t border-ink-800 pt-1.5">
+          <div className="flex gap-1">
+            <input
+              type="number"
+              min={0}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0"
+              aria-label="Damage amount"
+              className="w-14 rounded border border-ink-600 bg-ink-850 px-1.5 py-1 text-center text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
+            />
+            <input
+              value={damageType}
+              onChange={(e) => setDamageType(e.target.value)}
+              aria-label="Damage type"
+              className="min-w-0 flex-1 rounded border border-ink-600 bg-ink-850 px-1.5 py-1 text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
+            />
+            <select
+              value={halfOnSave ? 'half' : 'none'}
+              onChange={(e) => setHalfOnSave(e.target.value === 'half')}
+              aria-label="On a successful save"
+              title="What a creature that made its save takes"
+              className="rounded border border-ink-600 bg-ink-850 px-1 py-1 text-[10px] text-ink-300 focus:border-arcane-400 focus:outline-none"
+            >
+              <option value="half">half on a save</option>
+              <option value="none">nothing on a save</option>
+            </select>
+          </div>
+
+          <button
+            disabled={!Number(amount)}
+            onClick={() => {
+              const value = Number(amount) || 0;
+              if (!value) return;
+              onApplyDamage(
+                failed.map((row) => row.tokenId!),
+                halfOnSave ? saved.map((row) => row.tokenId!) : [],
+                value,
+                damageType,
+              );
+              setAmount('');
+            }}
+            className="w-full rounded border border-red-900/60 bg-red-950/40 px-2 py-1 text-[11px] text-red-200 transition-colors hover:bg-red-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Apply to {failed.length} failed
+            {halfOnSave && saved.length > 0 && `, half to ${saved.length}`}
+          </button>
+
+          {offBoard.length > 0 && (
+            <p className="text-[10px] text-ink-600">
+              Not on this scene, so not included: {offBoard.map((row) => row.name).join(', ')}
+            </p>
+          )}
         </div>
       )}
     </div>

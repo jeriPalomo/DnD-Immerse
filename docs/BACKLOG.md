@@ -25,6 +25,23 @@ audio system rather than extending it.
 
 ---
 
+## Fireball, applied from the card — 2026-08-20
+
+Resolving one used to be four moves: ask for saves, read who failed, find each
+of them on the board, damage them one at a time. The card was already holding
+the list; it just did not know which token each row was. Rows carry a `tokenId`
+now, and the DM gets an amount, a type and a "half on a save / nothing on a
+save" choice under the results.
+
+Two `applyDamage` calls rather than one, because `halved` applies to every id in
+a call. Offered rather than applied automatically, the same as a damage roll.
+Only once every row is answered and only against a DC - a check with no target
+number has no failures to act on. Somebody with no token on the active scene is
+named as skipped rather than quietly left out.
+
+Verified end to end: five goblins, DC 12, one failed. 4 fire applied - the
+failure took 4 and dropped to 3/7, the four who saved took 2 and dropped to 5/7.
+
 ## Initiative, and a column that stayed on the screen — 2026-08-20
 
 **"Roll initiative for everyone" half existed and was unfindable.** `+ roll all`

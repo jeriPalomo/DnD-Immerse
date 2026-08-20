@@ -154,6 +154,14 @@ export interface WireGroupRoll {
      * two characters is asked twice, which is correct.
      */
     actorId: string | null;
+    /**
+     * The creature on the board this row is, where there is one.
+     *
+     * Carried so a fireball can be applied from the card rather than by hunting
+     * down each failure on the map. Null for somebody with no token on the
+     * active scene, who is then simply not damageable from here.
+     */
+    tokenId: string | null;
     /** The d20 faces. Empty while the row is still waiting. */
     dice: number[];
     modifier: number;

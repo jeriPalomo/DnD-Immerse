@@ -396,6 +396,7 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
             // player is about to add - and it is public anyway, since the party
             // panel already prints it beside every name.
             actorId: roller.actorId,
+            tokenId: roller.tokenId,
             dice: [],
             modifier: groupModifier(roller, input.kind, input.key),
             total: null,
@@ -1064,6 +1065,14 @@ interface GroupRoller {
   name: string;
   /** The sheet behind it, so a request knows whose row is whose. */
   actorId: string;
+  /**
+   * The creature on the board, where there is one.
+   *
+   * Carried so damage can be applied from the card. A creature roll always has
+   * one - it started from a token; a character may not, if they have nothing
+   * placed on the active scene.
+   */
+  tokenId: string | null;
   scores: AbilityScores;
   level: number;
   skillProficiencies: Actor['skillProficiencies'];
@@ -1072,10 +1081,16 @@ interface GroupRoller {
   published: unknown;
 }
 
-function rollerFromActor(actor: Actor, name: string, published: unknown): GroupRoller {
+function rollerFromActor(
+  actor: Actor,
+  name: string,
+  published: unknown,
+  tokenId: string | null,
+): GroupRoller {
   return {
     name,
     actorId: actor.id,
+    tokenId,
     scores: {
       str: actor.str, dex: actor.dex, con: actor.con,
       int: actor.int, wis: actor.wis, cha: actor.cha,
@@ -1092,6 +1107,11 @@ function rollerFromActor(actor: Actor, name: string, published: unknown): GroupR
  *
  * Player characters only. NPC sheets are the DM's business, and rolling for
  * them here would quietly reveal the bestiary to anyone reading the log.
+ *
+ * Each one's token on the *active* scene comes along where they have one, so a
+ * fireball that catches the party can be applied from the card exactly as one
+ * that catches the goblins. Somebody with nothing on the board carries null and
+ * is simply not damageable from there.
  */
 async function partyRollers(campaignId: string): Promise<GroupRoller[]> {
   const rows = await db
@@ -1100,7 +1120,22 @@ async function partyRollers(campaignId: string): Promise<GroupRoller[]> {
     .innerJoin(actors, eq(actorCampaigns.actorId, actors.id))
     .where(and(eq(actorCampaigns.campaignId, campaignId), eq(actors.type, 'character')));
 
-  return rows.map(({ actor }) => rollerFromActor(actor, actor.name, null));
+  const placed = await db
+    .select({ actorId: tokens.actorId, tokenId: tokens.id })
+    .from(tokens)
+    .innerJoin(scenes, eq(tokens.sceneId, scenes.id))
+    .innerJoin(campaigns, eq(campaigns.activeSceneId, scenes.id))
+    .where(eq(campaigns.id, campaignId));
+
+  const onBoard = new Map(
+    placed
+      .filter((row): row is { actorId: string; tokenId: string } => Boolean(row.actorId))
+      .map((row) => [row.actorId, row.tokenId]),
+  );
+
+  return rows.map(({ actor }) =>
+    rollerFromActor(actor, actor.name, null, onBoard.get(actor.id) ?? null),
+  );
 }
 
 /**
@@ -1153,6 +1188,7 @@ async function creatureRollers(campaignId: string, tokenIds: string[]): Promise<
       actor,
       token.name || actor.name,
       actor.srdMonsterId ? (published.get(actor.srdMonsterId) ?? null) : null,
+      token.id,
     ),
   );
 }
@@ -1224,6 +1260,7 @@ function rollRow(
     name: roller.name,
     // Nothing left to ask: the DM rolled it.
     actorId: null,
+    tokenId: roller.tokenId,
     ...rollWithModifier(groupModifier(roller, kind, key), roller.name, dc),
   };
 }

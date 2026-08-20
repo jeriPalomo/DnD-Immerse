@@ -269,6 +269,17 @@ than guessed.
 written on the sheet to already include them, so adding them again would
 double-count. The green chip is a reminder of what the species grants.
 
+**A save is applied where its answer already is.** A group roll card carries a
+`tokenId` per row, so the damage the save was against is applied from the card
+rather than by reading who failed and then hunting each of them down on the
+board. Two `applyDamage` calls, never one: `halved` applies to every id in a
+call, so the failures and the successes cannot travel together. Offered rather
+than applied automatically, the same rule `RollCard` follows - damage gets
+rolled for things that turn out not to land. Only once every row has been
+answered, and only against a DC, because a check with no target number has no
+failures to act on. A character with nothing on the active scene carries a null
+`tokenId` and is **named as skipped** rather than silently dropped.
+
 **Initiative follows the same split: monsters roll, characters are asked.**
 "Roll monsters, ask the players" starts the fight and puts everyone in it in one
 press - the DM's creatures roll immediately because they have nobody to ask, so
