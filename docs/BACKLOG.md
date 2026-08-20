@@ -25,6 +25,24 @@ audio system rather than extending it.
 
 ---
 
+## Pausing on a ford cost you five feet — 2026-08-19
+
+Found by checking the obvious question - do two creatures with different speeds
+actually get different ground - and then checking the less obvious one, whether
+moving in stages costs the same as moving in one go. It did not.
+
+The budget converted feet to whole squares and then to half squares, flooring at
+the first step. A 30 ft creature crosses four squares of shallow water in one
+drag; stopping on the first spends 7.5 ft and leaves 22.5, which is four and a
+half squares, floored to four - and the creature then managed only three more.
+Five feet gone for pausing.
+
+Floored in half squares instead. Whole speeds on a five-foot grid are unchanged,
+which is why nothing else moved; the loss only ever showed on a remainder that
+was not a whole square, and only water produces those.
+
+---
+
 ## Movement costs a turn, once a fight is running — 2026-08-19
 
 The overlay has drawn a movement range for a while, and `token:commit` enforced

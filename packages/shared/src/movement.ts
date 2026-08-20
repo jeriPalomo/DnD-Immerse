@@ -99,8 +99,15 @@ export function reachableCosts(
    * In half squares, because shallow water costs one and a half of them. The
    * budget is converted once, here, and every cost below is in the same unit -
    * mixing the two is how a ford would end up free.
+   *
+   * Rounded down in HALF squares, not in whole ones. Flooring the division
+   * first threw away any half square the budget had left, which cost a creature
+   * movement for pausing: 30 ft crosses four squares of shallow water in one
+   * drag, but stopping on the first spends 7.5 ft and leaves 22.5 - four and a
+   * half squares, floored to four, and the same creature then managed only
+   * three more. Moving in two goes is the same distance as moving in one.
    */
-  const budget = Math.floor(speedFeet / feetPerSquare) * COST_NORMAL;
+  const budget = Math.floor((speedFeet / feetPerSquare) * COST_NORMAL);
   if (budget <= 0) return standingStill;
 
   /**

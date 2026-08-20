@@ -67,6 +67,46 @@ describe('movement over painted terrain', () => {
     expect(has(cells, 10, 5)).toBe(false);
   });
 
+  it('costs the same to cross in two goes as in one', () => {
+    // The budget is rounded down in half squares, not whole ones. Flooring the
+    // division first threw away the half square 22.5 ft leaves, so a creature
+    // that paused on the first square of a ford managed three more rather than
+    // four - it lost five feet for stopping.
+    const terrain = paintTerrain(createTerrain(20, 20), band(6, 15), 'water');
+    const far = (from: number, speedFeet: number) =>
+      Math.max(
+        ...reachableSquares({
+          ...base,
+          origin: { x: from, y: 5, w: 1, h: 1 },
+          speedFeet,
+          terrain,
+        })
+          .filter(([, y]) => y === 5)
+          .map(([x]) => x),
+      );
+
+    // Thirty feet is four squares of water; the first costs 7.5 of them.
+    expect(far(5, 30)).toBe(9);
+    expect(far(6, 22.5)).toBe(9);
+  });
+
+  it('gives a faster creature more ground, on every kind', () => {
+    // The plain reading of a speed. Water quantises coarsely - it costs 7.5 ft
+    // a square - so 30 and 35 buy the same four, which is correct rather than a
+    // rounding slip: 35 ft is four squares and five feet left over.
+    const reach = (speedFeet: number, kind: 'mud' | 'water' | null) =>
+      reachableSquares({
+        ...base,
+        speedFeet,
+        terrain: kind ? paintTerrain(createTerrain(20, 20), band(6, 15), kind) : undefined,
+      }).filter(([, y]) => y === 5).length;
+
+    for (const kind of [null, 'water', 'mud'] as const) {
+      expect(reach(60, kind)).toBeGreaterThan(reach(30, kind));
+      expect(reach(30, kind)).toBeGreaterThan(reach(15, kind));
+    }
+  });
+
   it('is dearer through mud than through the same width of water', () => {
     // Stated as a comparison as well as as two numbers. The two brushes exist
     // to differ, and a copy-paste that gave them one cost would still pass the

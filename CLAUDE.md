@@ -520,7 +520,11 @@ it, the mistake `active_effects` avoids by naming a condition rather than
 copying its mechanics. **Movement is counted in half squares**, because one and
 a half is not expressible in whole ones and a search that rounded it would make
 a ford either free or a marsh; `reachableSquares` converts its budget once, and
-every cost below that line is in the same unit. A 30 ft creature therefore gets
+every cost below that line is in the same unit. **The budget is floored in half
+squares, not in whole ones** — flooring the division first discarded whatever
+half square was left, so a creature that paused halfway across a ford lost five
+feet for stopping. Moving in two goes must cover the same ground as moving in
+one, or the budget punishes thinking. A 30 ft creature therefore gets
 six squares of floor, four of water, three of mud.
 
 **A Konva stage is not mounted until its container has been measured.** Konva
