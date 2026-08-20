@@ -29,7 +29,8 @@ the desktop and the laptop.
 ## Commands
 
 ```bash
-npm start            # Production: one process, everything on :3001
+npm run serve        # Production: backs up, builds, starts, restarts on crash
+npm start            # One process, everything on :3001, no supervision
 npm run dev          # Development: API :3001 + client :5173, hot reload
 npm test             # Vitest: rules5e + grid math
 npm run db:generate  # New migration after editing schema.ts
@@ -42,6 +43,33 @@ npm run seed         # Example campaign: DM + 3 players, gear, NPCs
 disturb real data.
 
 The SRD import is idempotent — re-running replaces the compendium in place.
+
+## Running it for real
+
+**[docs/RUNNING.md](docs/RUNNING.md) is the operational guide.** A scheduled
+task starts `scripts/serve.mjs` at logon; that supervisor backs up, builds,
+starts the server and restarts it if it exits. Two layers because they fail
+differently: the supervisor cannot restart itself from a machine that rebooted
+for updates, and the task cannot notice a process that is up but wedged.
+
+**A restart is the recovery, not a failure.** There is deliberately no
+`uncaughtException` handler to sit alongside `unhandledRejection`: a rejection
+is usually one request going wrong, while a synchronous throw reaching the top
+is the process in a state nobody reasoned about. Carrying on from there is how
+a table ends up with quietly wrong data. Dying and coming back in two seconds is
+cleaner, and every client reconnects, re-joins and is re-sent the scene, the
+encounter and the chat history on its own.
+
+**The backup happens before anything opens the database for writing.** That is
+the moment a pending migration is about to run, which is exactly when you want
+yesterday's copy. Restarts do not re-backup and do not rebuild - a crash loop
+that recompiled every time would take the machine down with it.
+
+**`SECURE_COOKIES` is a warning, never a default.** `Secure` is a restriction:
+the browser then refuses to send the cookie over plain HTTP, so setting it while
+the table is reached at `http://100.x.y.z:3001` breaks every login. Which is
+right depends on how it is served and only the person serving it knows, so the
+server says so at boot and changes nothing.
 
 ## Invariants
 

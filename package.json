@@ -20,7 +20,8 @@
     "dev:shared": "npm run dev --workspace=@dnd/shared",
     "start": "npm run build && npm run start --workspace=@dnd/server",
     "pretest": "npm run build --workspace=@dnd/shared",
-    "playtest": "node scripts/playtest.mjs"
+    "playtest": "node scripts/playtest.mjs",
+    "serve": "node scripts/serve.mjs"
   },
   "engines": {
     "node": ">=20"
