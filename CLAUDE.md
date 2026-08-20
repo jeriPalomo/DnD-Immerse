@@ -635,6 +635,15 @@ to agree: `campaignMembers.role === 'dm'` (what `requireDM` reads) and
 creation and nothing reassigns either, so they cannot currently diverge — but
 anything that transfers a campaign has to write both.
 
+**The way round is proportional to the move, with no constant.** `routeExists`
+used to allow `direct * 3 + 8` steps, and that constant is what let a player
+walk through a shut door: the straight line was refused, then a three-step walk
+round the end of the door justified a step of one, and the door appeared to do
+nothing. A single step now gets two - enough to cut a corner past the end of a
+wall, which is genuinely one L-shaped step, and not enough to go *around*
+anything. **A door with no walls either side is a door frame in a field**: it is
+not a barrier and correctly stops nobody, whatever the search allows.
+
 **A refused move asks whether there is a way round, not whether the straight
 line is clear.** `token:commit` tested one segment from centre to centre against
 walls and painted ground, so dragging a token round a corner or along the shore

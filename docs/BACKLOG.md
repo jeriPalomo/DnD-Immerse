@@ -25,6 +25,26 @@ audio system rather than extending it.
 
 ---
 
+## Walking through a shut door — 2026-08-20
+
+Reported from a real session. The straight-line check was refusing it correctly;
+what let the move through was the fallback that asks whether there is any way
+round, which allowed `direct * 3 + 8` steps. For a step of *one* square that is
+eleven - and going round the end of a lone door is three. So the step landed and
+the door looked broken.
+
+Fixed by dropping the constant: `max(2, direct * 2)`. One step gets two, which
+still cuts a corner past the end of a wall - genuinely one L-shaped step - and
+does not go around anything. Long drags are unaffected: eight squares of travel
+still allow sixteen, and the jetty case the fallback exists for still passes.
+
+Two things worth knowing beyond the fix:
+
+- **The DM is never refused.** Collision runs only for players, deliberately, so
+  testing this from the DM's chair will always show a token going anywhere.
+- **A door with no walls either side is a door frame in a field.** It is not a
+  barrier and correctly stops nobody. Doors want walls attached.
+
 ## Full review — 2026-08-20
 
 Drove the whole product as a DM and as a player, 48 checks over two passes, plus

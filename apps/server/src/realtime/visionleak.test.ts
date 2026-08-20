@@ -651,6 +651,45 @@ describe('walls stop movement', () => {
     expect(corrected?.token.x).toBeLessThan(10);
   });
 
+  /**
+   * Reported from a real session: "even though the door was closed I could
+   * still walk through it - I just put a door and stepped onto the tile".
+   *
+   * The straight line was refused correctly. What let it through was the
+   * fallback that asks whether there is any way round, which allowed eleven
+   * squares of detour to justify a step of one. Here the room is sealed so no
+   * detour exists at all, which is the case that always worked; the unit test
+   * in `movementRoute.test.ts` covers the lone door in open ground.
+   */
+  it('refuses a step straight through a shut door', async () => {
+    // Back to the square just inside the door.
+    dmSocket.emit('token:commit', { tokenId: aliceTokenId, x: 9, y: 4 });
+    await new Promise((r) => setTimeout(r, 300));
+
+    dmSocket.emit('wall:update', { wallId: doorId, doorState: 0 });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const failure = next<{ message: string }>(aliceSocket, 'error');
+    aliceSocket.emit('token:commit', { tokenId: aliceTokenId, x: 10, y: 4 });
+    expect((await failure)?.message).toMatch(/no way through/i);
+  });
+
+  it('allows the very same step once the door is opened', async () => {
+    const opened = next<{ door: { id: string } }>(aliceSocket, 'door:updated', 2000);
+    aliceSocket.emit('door:toggle', { wallId: doorId });
+    await opened;
+    await new Promise((r) => setTimeout(r, 300));
+
+    const moved = next<{ token: WireToken }>(dmSocket, 'token:updated');
+    aliceSocket.emit('token:commit', { tokenId: aliceTokenId, x: 10, y: 4 });
+    expect((await moved)?.token.x).toBe(10);
+
+    // Put it back for whatever runs next.
+    dmSocket.emit('wall:update', { wallId: doorId, doorState: 0 });
+    dmSocket.emit('token:commit', { tokenId: aliceTokenId, x: 5, y: 5 });
+    await new Promise((r) => setTimeout(r, 300));
+  });
+
   it('allows movement within the room', async () => {
     const moved = next<{ token: WireToken }>(dmSocket, 'token:updated');
     aliceSocket.emit('token:commit', { tokenId: aliceTokenId, x: 8, y: 8 });

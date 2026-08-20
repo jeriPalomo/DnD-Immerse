@@ -141,3 +141,73 @@ describe('finding a way round', () => {
     expect(performance.now() - started).toBeLessThan(50);
   });
 });
+
+/**
+ * Reported from a real session: "even though the door was closed, I was still
+ * able to walk through it - I just put a door and stepped onto the tile".
+ *
+ * The straight line *was* refused. What let the move through is the fallback
+ * that asks whether there is any way round, which allowed a detour of eleven
+ * squares to justify a step of one. Going round the end of a lone door is three
+ * steps, so the step landed and the door appeared to do nothing.
+ *
+ * A single step has no meaningful way round: either the thing between the two
+ * squares stops you or it does not.
+ */
+describe('a step of one square is not a detour', () => {
+  const door = (x1: number, y1: number, x2: number, y2: number): VisionWall => ({
+    x1, y1, x2, y2,
+    blocksSight: 1,
+    blocksMovement: 1,
+    door: 1,
+    doorState: 0,
+  });
+
+  const open = createTerrain(20, 20);
+
+  it('refuses a single step straight through a closed door', () => {
+    // A door across the gridline at x = 3, spanning the square at y = 5. The
+    // creature is beside it and steps onto the square on the far side.
+    expect(
+      routeExists({
+        origin: { x: 2, y: 5, w: 1, h: 1 },
+        destination: { x: 3, y: 5 },
+        walls: [door(3, 5, 3, 6)],
+        bounds: { width: 20, height: 20 },
+        terrain: open,
+      }),
+    ).toBe(false);
+  });
+
+  it('lets the same step through once the door is opened', () => {
+    const opened = { ...door(3, 5, 3, 6), doorState: 1 };
+    expect(
+      routeExists({
+        origin: { x: 2, y: 5, w: 1, h: 1 },
+        destination: { x: 3, y: 5 },
+        walls: [opened],
+        bounds: { width: 20, height: 20 },
+        terrain: open,
+      }),
+    ).toBe(true);
+  });
+
+  it('still allows a real drag round a real obstacle', () => {
+    // The case the fallback exists for: a long move past the end of a jetty.
+    expect(routeExists({ ...base, destination: { x: 8, y: 5 }, terrain: jetty() })).toBe(true);
+  });
+
+  it('lets a diagonal past a wall corner through, which is one L-shaped step', () => {
+    // A wall ending exactly at the corner being cut. Two steps is a route; the
+    // creature is not squeezing through anything.
+    expect(
+      routeExists({
+        origin: { x: 2, y: 5, w: 1, h: 1 },
+        destination: { x: 3, y: 6 },
+        walls: [wall(3, 4, 3, 5)],
+        bounds: { width: 20, height: 20 },
+        terrain: open,
+      }),
+    ).toBe(true);
+  });
+});

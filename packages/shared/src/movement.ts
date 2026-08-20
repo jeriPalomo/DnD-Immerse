@@ -301,7 +301,20 @@ export function routeExists(input: RouteInput): boolean {
   if (footprintBlocked(terrain, goal[0], goal[1], w, h)) return false;
 
   const direct = Math.max(Math.abs(goal[0] - start[0]), Math.abs(goal[1] - start[1]));
-  const maxSteps = Math.min(MAX_ROUTE_STEPS, direct * 3 + 8);
+  /**
+   * How far round the creature may go to justify this move.
+   *
+   * Proportional, with **no constant added**. A constant is what let a step of
+   * one square detour eleven, which meant a player could step straight through
+   * a closed door: the straight line was refused, and then a three-step walk
+   * round the end of the door justified it. The door appeared to do nothing.
+   *
+   * A single step therefore gets two, which is enough to cut a corner past the
+   * end of a wall - genuinely one L-shaped step - and not enough to go around
+   * anything. Longer drags still get plenty: the point of this search is a
+   * token dragged past a jetty, and eight squares of travel allow sixteen.
+   */
+  const maxSteps = Math.min(MAX_ROUTE_STEPS, Math.max(2, direct * 2));
 
   /**
    * Only the walls that could possibly be crossed, for the reason the vision
