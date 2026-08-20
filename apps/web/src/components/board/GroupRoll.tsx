@@ -10,9 +10,10 @@ import { useTable } from '../../store/table.js';
  * holding - the arithmetic is the DM's least interesting job and the one most
  * likely to go wrong at eleven at night.
  *
- * Rolling for the *party* is the other half, and it is deliberately not the
- * default: it takes the moment off the players, which is why it was cut once
- * already. It stays because a corridor full of traps is a real use for it.
+ * The party half does not roll at all: it *asks*. The request goes out with a
+ * row per character and each player presses their own button, because throwing
+ * their dice for them is the thing that got this feature deleted once. The DM
+ * can still fill in from the card for whoever is not at the table.
  */
 export function GroupRoll() {
   const { tokens, groupRoll } = useTable();
@@ -64,7 +65,7 @@ export function GroupRoll() {
             title={
               value === 'creatures'
                 ? 'Rolls for the creatures you tick below, off their own stat blocks'
-                : 'Rolls for every character in this campaign - dice thrown on the players behalf'
+                : 'Asks every character in this campaign - each player rolls their own'
             }
             className={`flex-1 rounded px-1.5 py-1 text-[10px] transition-colors ${
               who === value ? 'bg-ink-800 text-ink-100' : 'text-ink-500 hover:text-ink-300'
@@ -177,17 +178,22 @@ export function GroupRoll() {
           aria-label="Difficulty class"
           className="w-14 rounded border border-ink-600 bg-ink-850 px-1.5 py-1 text-center text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
         />
-        <button
-          onClick={() => setSecret(!secret)}
-          title="Only you see the results"
-          className={`rounded border px-1.5 py-1 text-[10px] transition-colors ${
+        {/* Meaningless on a request: somebody who cannot see it cannot press
+            the button. Hidden rather than disabled, and ignored on the server
+            too, so the two cannot disagree. */}
+        {who === 'creatures' && (
+          <button
+            onClick={() => setSecret(!secret)}
+            title="Only you see the results"
+            className={`rounded border px-1.5 py-1 text-[10px] transition-colors ${
+              secret
+                ? 'border-arcane-500/60 bg-arcane-500/15 text-arcane-400'
+                : 'border-ink-700 text-ink-500 hover:text-ink-300'
+            }`}
+          >
             secret
-              ? 'border-arcane-500/60 bg-arcane-500/15 text-arcane-400'
-              : 'border-ink-700 text-ink-500 hover:text-ink-300'
-          }`}
-        >
-          secret
-        </button>
+          </button>
+        )}
         <button
           disabled={!canRoll}
           onClick={() =>
@@ -203,7 +209,7 @@ export function GroupRoll() {
           className="flex-1 rounded border border-ember-500/60 bg-ember-500/15 px-2 py-1 text-[11px] text-ember-300 transition-colors hover:bg-ember-500/25 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {who === 'party'
-            ? 'Roll for the party'
+            ? 'Ask the party'
             : `Roll for ${chosen.length || 'no'} creature${chosen.length === 1 ? '' : 's'}`}
         </button>
       </div>

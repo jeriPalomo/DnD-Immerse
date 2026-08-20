@@ -30,6 +30,7 @@ import type {
 } from '@dnd/shared';
 import {
   abilityModifier,
+  groupAnswerSchema,
   groupRollSchema,
   publishedMonsterBonus,
   savingThrowBonus,
@@ -342,11 +343,13 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
   /**
    * One check, rolled for several creatures at once.
    *
-   * The half that earns this is `creatures`: a fireball lands on six goblins
-   * and that is six saves the DM otherwise rolls by hand, off a stat block the
-   * app is already holding. `party` is the older half, kept because a corridor
-   * full of traps is a real use for it - but it rolls dice on the players'
-   * behalf, which is a moment taken off them, so it is not the default.
+   * The two halves behave differently on purpose. `creatures` **rolls**: the
+   * DM's own monsters have nobody to ask, and a fireball landing on six goblins
+   * is six saves otherwise done by hand off a stat block the app is already
+   * holding. `party` **asks**: it posts the request with a row per character
+   * and waits for each player to press their own button, because rolling their
+   * dice for them takes the moment off them - which is why asking the party was
+   * removed once already, and the reason it is back in this shape.
    *
    * Modifiers come from the same rules functions each sheet displays, so a
    * group Perception check agrees with what a player sees on their own
@@ -381,22 +384,25 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
     }
 
     const label = describeGroupRoll(input);
-    const rows: WireGroupRoll['rows'] = [];
-    const lines: string[] = [];
 
-    for (const roller of rollers) {
-      const modifier = groupModifier(roller, input.kind, input.key);
-      const expression = modifier >= 0 ? `1d20+${modifier}` : `1d20${modifier}`;
-      const roll = rollExpression(expression, roller.name);
-
-      const passed = input.dc === null ? null : roll.total >= input.dc;
-      rows.push({ name: roller.name, dice: roll.rolls, modifier, total: roll.total, passed });
-
-      const verdict = passed === null ? '' : passed ? '  ✓' : '  ✗';
-      lines.push(`${roller.name}: ${roll.output}${verdict}`);
-    }
-
-    const header = input.dc === null ? label : `${label} (DC ${input.dc})`;
+    // The party is asked and the DM's creatures are rolled. That is the only
+    // difference between the two halves once the rollers are in hand.
+    const rows: WireGroupRoll['rows'] = rollers.map((roller) =>
+      input.who === 'party'
+        ? {
+            name: roller.name,
+            // Left open for its owner to answer. The modifier is worked out
+            // now rather than at answer time, so the request can show what the
+            // player is about to add - and it is public anyway, since the party
+            // panel already prints it beside every name.
+            actorId: roller.actorId,
+            dice: [],
+            modifier: groupModifier(roller, input.kind, input.key),
+            total: null,
+            passed: null,
+          }
+        : rollRow(roller, input.kind, input.key, input.dc),
+    );
 
     await persistAndDeliver(
       io,
@@ -407,7 +413,7 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         kind: 'system',
         // Written out as text as well as sent as rows. A log that predates the
         // column, or a client that has not been rebuilt, still reads.
-        body: [header, ...lines].join(String.fromCharCode(10)),
+        body: groupBody(label, input.dc, rows),
         groupData: { label, dc: input.dc, rows },
         // Flagged on the check, not on who rolled. "A save landing is combat"
         // is the rule `postLine` already follows for a single one, and six
@@ -416,10 +422,95 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         // A group Perception check in a corridor is a conversation either way.
         combat: input.kind === 'save',
         // A secret group roll reaches only the DM, like a secret single roll.
-        whisperToUserId: input.secret ? user.id : null,
+        // Never on a request: somebody who cannot see it cannot answer it, and
+        // the panel hides the toggle for that scope rather than relying on this.
+        whisperToUserId: input.secret && input.who === 'creatures' ? user.id : null,
       },
       { authorName: user.displayName, actorName: null },
     );
+  });
+
+  /**
+   * One person answering a group roll that is waiting on them.
+   *
+   * The pending state lives in the message rather than in a table of its own or
+   * in memory: there is one source of truth, it survives a reload and a
+   * restart, and somebody who joins late finds the request in their history
+   * with the button still on it. The die is thrown here, on the server, like
+   * every other die in this app.
+   */
+  socket.on('chat:groupAnswer', async (payload) => {
+    const campaignId = activeCampaign();
+    if (!campaignId) return;
+
+    const input = groupAnswerSchema.parse(payload);
+
+    // Scoped to the campaign, like every other client-supplied id.
+    const found = await db
+      .select()
+      .from(chatMessages)
+      .where(and(eq(chatMessages.id, input.messageId), eq(chatMessages.campaignId, campaignId)))
+      .limit(1);
+
+    const message = found[0];
+    const group = message?.groupData as WireGroupRoll | null | undefined;
+    if (!message || !group) return;
+
+    // A creature row carries a null `actorId` and so can never match: those are
+    // rolled when the DM asks and there is nobody left to ask.
+    const index = group.rows.findIndex(
+      (row) => row.actorId === input.actorId && row.total === null,
+    );
+    // Already answered, or never asked. Silently, because two tabs racing the
+    // same button is one person pressing it once, not an error worth showing.
+    if (index === -1) return;
+
+    // Yours to roll, or the DM's. The DM fills in for whoever is not at the
+    // table tonight - a request that can never be completed would otherwise sit
+    // open on the card for the rest of the session.
+    const membership = await getMembership(campaignId, user.id);
+    const mine = await resolveActor(input.actorId, user.id);
+    if (!mine && !membership?.isDM) {
+      socket.emit('error', { message: 'That roll is not yours to make' });
+      return;
+    }
+
+    // The modifier already on the row, not a fresh one: it is what the player
+    // was shown when they were asked, and recomputing it here would let a sheet
+    // edited mid-request change the number under them.
+    const rolled = rollWithModifier(group.rows[index].modifier, group.rows[index].name, group.dc);
+    const rows = group.rows.map((row, at) => (at === index ? { ...row, ...rolled } : row));
+    const next: WireGroupRoll = { ...group, rows };
+    const body = groupBody(group.label, group.dc, rows);
+
+    await db
+      .update(chatMessages)
+      .set({ groupData: next as unknown as Record<string, unknown>, body })
+      .where(eq(chatMessages.id, message.id));
+
+    // Re-delivered under the same id, so the client replaces rather than
+    // appends - one card that fills in, not a card per answer.
+    const author = await db
+      .select({ displayName: users.displayName })
+      .from(users)
+      .where(eq(users.id, message.userId))
+      .limit(1);
+
+    deliver(io, campaignId, {
+      id: message.id,
+      campaignId,
+      userId: message.userId,
+      authorName: author[0]?.displayName ?? 'Table',
+      actorName: null,
+      kind: message.kind,
+      body,
+      rollData: message.rollData ?? null,
+      cardData: (message.cardData ?? null) as WireCard | null,
+      groupData: next,
+      whisperToUserId: message.whisperToUserId ?? null,
+      combat: message.combat,
+      createdAt: message.createdAt,
+    });
   });
 
   socket.on('chat:roll', async (payload) => {
@@ -971,6 +1062,8 @@ async function resolveSave(
  */
 interface GroupRoller {
   name: string;
+  /** The sheet behind it, so a request knows whose row is whose. */
+  actorId: string;
   scores: AbilityScores;
   level: number;
   skillProficiencies: Actor['skillProficiencies'];
@@ -982,6 +1075,7 @@ interface GroupRoller {
 function rollerFromActor(actor: Actor, name: string, published: unknown): GroupRoller {
   return {
     name,
+    actorId: actor.id,
     scores: {
       str: actor.str, dex: actor.dex, con: actor.con,
       int: actor.int, wis: actor.wis, cha: actor.cha,
@@ -1096,6 +1190,60 @@ function groupModifier(
 
   const proficiency = (roller.skillProficiencies?.[key as never] ?? 0) as 0 | 1 | 2;
   return skillBonus(roller.scores, roller.level, key as never, proficiency);
+}
+
+/**
+ * One rolled row.
+ *
+ * Shared by the creature path, which rolls every row at once, and by a single
+ * answer arriving later - so a goblin's line and a player's line cannot come
+ * out shaped differently.
+ */
+function rollWithModifier(
+  modifier: number,
+  label: string,
+  dc: number | null,
+): Pick<WireGroupRoll['rows'][number], 'dice' | 'modifier' | 'total' | 'passed'> {
+  const expression = modifier >= 0 ? `1d20+${modifier}` : `1d20${modifier}`;
+  const roll = rollExpression(expression, label);
+  return {
+    dice: roll.rolls,
+    modifier,
+    total: roll.total,
+    passed: dc === null ? null : roll.total >= dc,
+  };
+}
+
+function rollRow(
+  roller: GroupRoller,
+  kind: GroupRollPayload['kind'],
+  key: string,
+  dc: number | null,
+): WireGroupRoll['rows'][number] {
+  return {
+    name: roller.name,
+    // Nothing left to ask: the DM rolled it.
+    actorId: null,
+    ...rollWithModifier(groupModifier(roller, kind, key), roller.name, dc),
+  };
+}
+
+/**
+ * The card written out as text.
+ *
+ * Rebuilt from the rows every time one is answered rather than appended to, so
+ * the body and the rows cannot drift apart - and a request nobody ever answers
+ * still reads as a request rather than as an empty roll.
+ */
+function groupBody(label: string, dc: number | null, rows: WireGroupRoll['rows']): string {
+  const header = dc === null ? label : `${label} (DC ${dc})`;
+  const lines = rows.map((row) => {
+    if (row.total === null) return `${row.name}: waiting`;
+    const sign = row.modifier >= 0 ? `+${row.modifier}` : `${row.modifier}`;
+    const verdict = row.passed === null ? '' : row.passed ? '  ✓' : '  ✗';
+    return `${row.name}: [${row.dice.join(' + ')}]${sign} = ${row.total}${verdict}`;
+  });
+  return [header, ...lines].join(String.fromCharCode(10));
 }
 
 /** A readable title for the group roll card. */

@@ -83,6 +83,36 @@ function next<T>(socket: Socket, event: string, timeoutMs = 1200): Promise<T | n
   });
 }
 
+/**
+ * The next event that is actually the one being waited for.
+ *
+ * A plain `next` takes whatever arrives first, which in a suite of back-to-back
+ * tests is often the tail of the previous one - a group roll answered in one
+ * test broadcasts to every socket, and the listener the next test registers a
+ * millisecond later catches it. That failure looks like the feature being
+ * broken and is the test being wrong.
+ */
+function nextWhere<T>(
+  socket: Socket,
+  event: string,
+  matches: (payload: T) => boolean,
+  timeoutMs = 1500,
+): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      socket.off(event, handler);
+      resolve(null);
+    }, timeoutMs);
+    const handler = (payload: T) => {
+      if (!matches(payload)) return;
+      clearTimeout(timer);
+      socket.off(event, handler);
+      resolve(payload);
+    };
+    socket.on(event, handler);
+  });
+}
+
 /** Collects every matching event for a window, to prove absence as well as presence. */
 function collect<T>(socket: Socket, event: string, ms = 700): Promise<T[]> {
   const seen: T[] = [];
@@ -363,13 +393,25 @@ describe('NPCs stay off the player roster', () => {
   });
 });
 
-describe('group rolls', () => {
+/**
+ * The party is *asked*, never rolled for.
+ *
+ * Rolling a player's dice for them is the thing that got this feature deleted
+ * once. The request goes out with a row per character and each of them presses
+ * their own button - so what has to hold is that nothing is rolled until
+ * somebody answers, that only the right person can answer a row, and that the
+ * DM can still fill in for whoever is not at the table.
+ */
+describe('group rolls put to the party', () => {
+  let alicePcId: string;
+
   beforeAll(async () => {
     // This suite otherwise only creates NPCs, and a group roll needs a party.
     const pc = await api<{ actor: { id: string } }>(
       'POST', '/api/actors', { name: 'Alice PC', type: 'character', wis: 14 }, alice.cookie,
     );
-    await api('POST', `/api/actors/${pc.actor.id}/campaigns/${campaignId}`, {}, alice.cookie);
+    alicePcId = pc.actor.id;
+    await api('POST', `/api/actors/${alicePcId}/campaigns/${campaignId}`, {}, alice.cookie);
 
     // An NPC in the same campaign, which must not appear in any result.
     const npc = await api<{ actor: { id: string } }>(
@@ -378,36 +420,153 @@ describe('group rolls', () => {
     await api('POST', `/api/actors/${npc.actor.id}/campaigns/${campaignId}`, {}, dm.cookie);
   });
 
-  it('rolls once for each player character and nothing for NPCs', async () => {
+  /**
+   * Put a request to the party and hand back the message that carries it.
+   *
+   * Waits for a message with an *unanswered* row rather than for the next
+   * message of any kind: answering one broadcasts to every socket, so the plain
+   * waiter routinely caught the tail of the previous test.
+   */
+  async function askParty(
+    kind: string,
+    key: string,
+    dc: number | null = null,
+    secret = false,
+  ): Promise<WireChatMessage> {
+    const waiting = nextWhere<{ message: WireChatMessage }>(
+      aliceSocket,
+      'chat:message',
+      (payload) => Boolean(payload.message.groupData?.rows.some((row) => row.total === null)),
+    );
+    dmSocket.emit('chat:groupRoll', { kind, key, dc, secret } as never);
+    const message = await waiting;
+    expect(message).not.toBeNull();
+    return message!.message;
+  }
 
-    const waiting = next<{ message: { body: string } }>(aliceSocket, 'chat:message');
-    dmSocket.emit('chat:groupRoll', { kind: 'skill', key: 'perception', dc: null, secret: false });
+  /** Wait for the same message to come back with that row filled in. */
+  function answered(messageId: string, actorId: string, timeoutMs = 1500) {
+    return nextWhere<{ message: WireChatMessage }>(
+      dmSocket,
+      'chat:message',
+      (payload) =>
+        payload.message.id === messageId &&
+        Boolean(
+          payload.message.groupData?.rows.some(
+            (row) => row.actorId === actorId && row.total !== null,
+          ),
+        ),
+      timeoutMs,
+    );
+  }
 
-    const body = (await waiting)?.message.body ?? '';
-    expect(body).toMatch(/Group Perception check/i);
-    expect(body).toContain('Alice PC');
+  it('asks once for each player character and nothing for NPCs', async () => {
+    const message = await askParty('skill', 'perception');
+    expect(message.body).toMatch(/Group Perception check/i);
+    expect(message.groupData?.rows.some((row) => row.name === 'Alice PC')).toBe(true);
     // The bestiary stays the DM's business.
-    expect(body).not.toContain('Tavern Keeper');
+    expect(message.body).not.toContain('Tavern Keeper');
   });
 
-  it('marks each line against a DC when one is given', async () => {
-    const waiting = next<{ message: { body: string } }>(aliceSocket, 'chat:message');
-    dmSocket.emit('chat:groupRoll', { kind: 'save', key: 'dex', dc: 15, secret: false });
-
-    const body = (await waiting)?.message.body ?? '';
-    expect(body).toMatch(/DC 15/);
-    expect(body).toMatch(/[✓✗]/);
+  it('rolls nothing until somebody answers', async () => {
+    const message = await askParty('save', 'dex', 15);
+    expect(message.body).toMatch(/DC 15/);
+    // Nothing has been thrown: this is a request, not a result.
+    for (const row of message.groupData!.rows) {
+      expect(row.total).toBeNull();
+      expect(row.passed).toBeNull();
+      expect(row.dice).toEqual([]);
+      // And it names whose row it is, so a prompt can find it.
+      expect(row.actorId).toBeTruthy();
+    }
+    expect(message.body).toMatch(/waiting/);
   });
 
-  it('keeps a secret group roll away from players', async () => {
-    const toPlayer = next<{ message: { body: string } }>(aliceSocket, 'chat:message', 1200);
-    const toDm = next<{ message: { body: string } }>(dmSocket, 'chat:message');
+  it('fills the row in when its owner presses the button', async () => {
+    const request = await askParty('save', 'wis', 12);
 
-    dmSocket.emit('chat:groupRoll', { kind: 'skill', key: 'stealth', dc: null, secret: true });
+    const waiting = answered(request.id, alicePcId);
+    aliceSocket.emit('chat:groupAnswer', { messageId: request.id, actorId: alicePcId });
+    const filled = (await waiting)!.message;
 
-    expect((await toDm)?.message.body).toMatch(/Group Stealth/i);
-    // A secret roll is routed to the DM alone, never flagged and broadcast.
-    expect(await toPlayer).toBeNull();
+    // Same message, updated - one card that fills in, not a card per answer.
+    expect(filled.id).toBe(request.id);
+
+    const row = filled.groupData!.rows.find((r) => r.actorId === alicePcId)!;
+    expect(row.dice).toHaveLength(1);
+    expect(row.total).toBe(row.dice[0] + row.modifier);
+    expect(row.passed).toBe(row.total! >= 12);
+    expect(filled.body).not.toMatch(/Alice PC: waiting/);
+  });
+
+  it('refuses a row that is not yours', async () => {
+    const request = await askParty('skill', 'stealth');
+
+    const failure = next<{ message: string }>(bobSocket, 'error');
+    bobSocket.emit('chat:groupAnswer', { messageId: request.id, actorId: alicePcId });
+    expect((await failure)?.message).toMatch(/not yours/i);
+  });
+
+  it('lets the DM fill in for whoever is not at the table', async () => {
+    const request = await askParty('skill', 'survival');
+
+    const waiting = answered(request.id, alicePcId);
+    dmSocket.emit('chat:groupAnswer', { messageId: request.id, actorId: alicePcId });
+
+    const row = (await waiting)!.message.groupData!.rows.find((r) => r.actorId === alicePcId)!;
+    expect(row.total).not.toBeNull();
+  });
+
+  it('answers a row once, however many times the button is pressed', async () => {
+    const request = await askParty('skill', 'arcana');
+
+    const first = answered(request.id, alicePcId);
+    aliceSocket.emit('chat:groupAnswer', { messageId: request.id, actorId: alicePcId });
+    const settled = (await first)!.message.groupData!.rows.find((r) => r.actorId === alicePcId)!;
+    expect(settled.total).not.toBeNull();
+
+    // Two tabs racing the same button is one person pressing it once. Any
+    // further echo of this message would carry a second, different total.
+    const again = nextWhere<{ message: WireChatMessage }>(
+      dmSocket,
+      'chat:message',
+      (payload) => payload.message.id === request.id,
+      900,
+    );
+    aliceSocket.emit('chat:groupAnswer', { messageId: request.id, actorId: alicePcId });
+    expect(await again).toBeNull();
+  });
+
+  it('does not find a request from another campaign', async () => {
+    const request = await askParty('skill', 'nature');
+
+    // A real request, answered by a real owner, through a socket acting in a
+    // campaign it does not belong to. Ids are scoped, so it is not found.
+    const other = await api<{ campaign: { id: string; inviteCode: string } }>(
+      'POST', '/api/campaigns', { name: 'Another Table' }, bob.cookie,
+    );
+    const outsiderSocket = await open(bob);
+    outsiderSocket.emit('campaign:join', { campaignId: other.campaign.id });
+    await new Promise((r) => setTimeout(r, 400));
+
+    const echoed = nextWhere<{ message: WireChatMessage }>(
+      dmSocket,
+      'chat:message',
+      (payload) => payload.message.id === request.id,
+      900,
+    );
+    outsiderSocket.emit('chat:groupAnswer', { messageId: request.id, actorId: alicePcId });
+    expect(await echoed).toBeNull();
+    outsiderSocket.close();
+  });
+
+  it('never makes a request secret, since nobody could answer it', async () => {
+    // The toggle is hidden for this scope in the panel, and ignored here as
+    // well: a player who cannot see the request cannot press the button - and
+    // `askParty` waits on the *player's* socket, so this only resolves at all
+    // because the request reached them.
+    const request = await askParty('skill', 'religion', null, true);
+    expect(request.whisperToUserId).toBeNull();
   });
 
   it('refuses to let a player call for one', async () => {
@@ -566,7 +725,7 @@ describe('group rolls for the creatures the DM runs', () => {
       kind: 'save', key: 'dex', dc: 15, secret: false, who: 'creatures', tokenIds: goblinTokens,
     } as never);
     for (const row of (await withDc)!.message.groupData!.rows) {
-      expect(row.passed).toBe(row.total >= 15);
+      expect(row.passed).toBe(row.total! >= 15);
     }
 
     const without = next<{ message: WireChatMessage }>(dmSocket, 'chat:message');

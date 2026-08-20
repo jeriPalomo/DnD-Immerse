@@ -145,11 +145,21 @@ export interface WireGroupRoll {
   dc: number | null;
   rows: {
     name: string;
-    /** The d20 faces. One today, two the day advantage reaches this. */
+    /**
+     * Whose row it is to answer, when it is still waiting on somebody.
+     *
+     * A creature the DM already rolled carries null: the row is finished and
+     * there is nobody left to ask. This is what the prompt on a player's screen
+     * matches against, so it is the actor rather than the user - a player with
+     * two characters is asked twice, which is correct.
+     */
+    actorId: string | null;
+    /** The d20 faces. Empty while the row is still waiting. */
     dice: number[];
     modifier: number;
-    total: number;
-    /** Null when no DC was named - a check with no target number. */
+    /** Null until somebody has actually rolled it. */
+    total: number | null;
+    /** Null when no DC was named, or when the row has not been rolled yet. */
     passed: boolean | null;
   }[];
 }
@@ -450,6 +460,14 @@ export const groupRollSchema = z.object({
    */
   who: z.enum(['party', 'creatures']).default('party'),
   /**
+   * `creatures` rolls at once; `party` posts the request and waits.
+   *
+   * That difference is the whole point of having both. Rolling the players'
+   * dice for them takes the moment off them, which is why asking the party was
+   * cut once already - so the party half asks, and each player presses their
+   * own button. The DM's own monsters have nobody to ask.
+   */
+  /**
    * Tokens to roll for when `who` is `creatures`.
    *
    * Ids from a client are a claim: these are looked up through the scene's
@@ -463,6 +481,15 @@ export const groupRollSchema = z.object({
 });
 
 export type GroupRollPayload = z.infer<typeof groupRollSchema>;
+
+/** One person answering a group roll that is waiting on them. */
+export const groupAnswerSchema = z.object({
+  messageId: z.string(),
+  /** Which row - a player with two characters can be asked for both. */
+  actorId: z.string(),
+});
+
+export type GroupAnswerPayload = z.infer<typeof groupAnswerSchema>;
 
 export const templateCreateSchema = z.object({
   sceneId: z.string(),
@@ -637,6 +664,7 @@ export interface ClientToServerEvents {
   'chat:send': (payload: z.infer<typeof sendMessageSchema>) => void;
   'chat:roll': (payload: z.infer<typeof rollRequestSchema>) => void;
   'chat:groupRoll': (payload: GroupRollPayload) => void;
+  'chat:groupAnswer': (payload: GroupAnswerPayload) => void;
   'chat:card': (payload: z.infer<typeof cardRequestSchema>) => void;
   'chat:cardAction': (payload: z.infer<typeof cardActionSchema>) => void;
   /** DM only. Deletes the campaign's log outright - chat and battle alike. */

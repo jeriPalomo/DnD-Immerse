@@ -269,11 +269,20 @@ than guessed.
 written on the sheet to already include them, so adding them again would
 double-count. The green chip is a reminder of what the species grants.
 
-**A group roll is for the creatures the DM runs, and the party is the other
-half.** "Ask the party" was removed because rolling on the players' behalf takes
-the moment off them - but a fireball landing on six goblins is six saves the DM
-rolls by hand off a stat block this app is already holding, which is the
-arithmetic worth automating. `who: 'creatures'` takes tokens the DM *controls* -
+**The DM's creatures are rolled; the party is asked.** Those are two different
+behaviours behind one control, and the difference is the whole point. A fireball
+landing on six goblins is six saves the DM otherwise rolls by hand off a stat
+block this app is already holding - nobody to ask, so `who: 'creatures'` rolls
+them at once. `who: 'party'` posts the request with a row per character and
+waits: each player presses their own button, because throwing their dice for
+them is exactly what got this feature deleted the first time. The pending state
+lives in the message rather than in a table or in memory - one source of truth
+that survives a reload, a restart and a late join, and the card fills in under
+its own id rather than the log growing a copy per answer. **The DM may fill in
+any unanswered row**, or a player who is not at the table tonight leaves a
+request open all session. A request is never secret: somebody who cannot see it
+cannot answer it, so the toggle is hidden for that scope *and* ignored on the
+server. `who: 'creatures'` takes tokens the DM *controls* -
 filtered on `ownerUserId`, never on disposition, so a friendly NPC travelling
 with the party is included and a player's own token is not, whatever colour its
 ring is. Ids are scoped through `scenes.campaignId` like every other

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { InitiativeTracker } from './InitiativeTracker.js';
 import { CreaturePanel } from './CreaturePanel.js';
 import { GroupRoll } from './GroupRoll.js';
+import { GroupRollPrompt } from './GroupRollPrompt.js';
 import { EnemyHealth } from './EnemyHealth.js';
 import { TurnPrompt } from './TurnPrompt.js';
 
@@ -19,9 +20,22 @@ import { TurnPrompt } from './TurnPrompt.js';
  * version of this app stacked everything and put the wall tool several screens
  * from the initiative order.
  */
-export function RunPanel({ campaignId, isDM }: { campaignId: string; isDM: boolean }) {
+export function RunPanel({
+  campaignId,
+  isDM,
+  myActorIds = [],
+}: {
+  campaignId: string;
+  isDM: boolean;
+  /** The sheets this person may answer a group roll for. */
+  myActorIds?: string[];
+}) {
   return (
     <div className="space-y-2">
+      {/* Above the tracker on purpose: it is the one thing here that is waiting
+          on the person reading it, and it disappears the moment they answer. */}
+      <GroupRollPrompt myActorIds={myActorIds} />
+
       {isDM && <TurnPrompt campaignId={campaignId} />}
 
       <InitiativeTracker isDM={isDM} />

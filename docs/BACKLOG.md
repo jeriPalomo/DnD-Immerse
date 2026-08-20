@@ -25,6 +25,26 @@ audio system rather than extending it.
 
 ---
 
+## The party is asked, not rolled for — 2026-08-20
+
+The group roll came back pointed at the DM's monsters, and the party half still
+rolled everyone's dice at once - which is the thing that got it deleted. It now
+**asks**: the request posts with a row per character and each player presses
+their own button, in a banner at the top of their Combat panel and on the card
+in the log. The card fills in live under its own message id.
+
+The pending state is the message itself, not a table or a map in memory: it
+survives a reload, a restart and a late join, and there is nothing to keep in
+sync. The DM can fill in any row for whoever is not at the table, so a request
+cannot sit open all session. A request is never secret - somebody who cannot see
+it cannot answer it - so the toggle is hidden for that scope and ignored on the
+server as well.
+
+Verified in two browser windows: the DM asked for a DC 14 Perception check, the
+player's banner offered "Roll for Elaria Moonwhisper (+1)", pressing it filled
+their row in on both screens, and the DM was left holding "Roll +4" buttons on
+the two absent players.
+
 ## Group rolls, back and pointed at the monsters — 2026-08-20
 
 **Asked for after the feature was removed.** "Ask the party" went out on the

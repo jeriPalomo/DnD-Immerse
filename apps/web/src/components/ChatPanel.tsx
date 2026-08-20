@@ -12,9 +12,17 @@ import { useTable } from '../store/table.js';
 import { useAuth } from '../store/auth.js';
 import type { WireCard, WireChatMessage } from '@dnd/shared';
 
-export function ChatPanel({ isDM = false }: { isDM?: boolean }) {
+export function ChatPanel({
+  isDM = false,
+  myActorIds = [],
+}: {
+  isDM?: boolean;
+  /** The sheets this viewer may answer a group roll for. */
+  myActorIds?: string[];
+}) {
   const ask = useConfirm();
   const { messages, members, connected, send, roll, cardAction, clearChat, error } = useTable();
+  const { answerGroupRoll } = useTable();
   const { tokens, targetTokenId, applyDamage } = useTable();
   const { user } = useAuth();
 
@@ -172,6 +180,9 @@ export function ChatPanel({ isDM = false }: { isDM?: boolean }) {
               // Untyped: the roll card does not know which of a weapon's damage
               // types this was, and the server treats '' as no resistance match.
               onApply={(amount) => target && applyDamage([target.id], amount, '')}
+              myActorIds={myActorIds}
+              isDM={isDM}
+              onAnswer={answerGroupRoll}
             />
           ))
         )}
@@ -328,9 +339,15 @@ function Message({
   onAction,
   applyTo,
   onApply,
+  myActorIds,
+  isDM,
+  onAnswer,
 }: {
   message: WireChatMessage;
   selfId: string;
+  myActorIds: string[];
+  isDM: boolean;
+  onAnswer: (messageId: string, actorId: string) => void;
   onAction: (
     itemId: string,
     actorId: string,
@@ -375,7 +392,13 @@ function Message({
       ) : message.kind === 'card' && message.cardData ? (
         <ItemCard card={message.cardData} onAction={onAction} />
       ) : message.groupData ? (
-        <GroupRollCard group={message.groupData} />
+        <GroupRollCard
+          group={message.groupData}
+          messageId={message.id}
+          myActorIds={myActorIds}
+          isDM={isDM}
+          onAnswer={onAnswer}
+        />
       ) : (
         // `whitespace-pre-line`, because some bodies are several lines and were
         // arriving as one run-on sentence. A group roll is written as a line per
@@ -399,8 +422,23 @@ function Message({
  * Rows scroll past eight, because a fireball can catch a dozen and a card that
  * pushes the rest of the log off the screen is its own problem.
  */
-function GroupRollCard({ group }: { group: NonNullable<WireChatMessage['groupData']> }) {
-  const passes = group.rows.filter((row) => row.passed).length;
+function GroupRollCard({
+  group,
+  messageId,
+  myActorIds,
+  isDM,
+  onAnswer,
+}: {
+  group: NonNullable<WireChatMessage['groupData']>;
+  messageId: string;
+  /** The sheets this viewer may roll for. */
+  myActorIds: string[];
+  isDM: boolean;
+  onAnswer: (messageId: string, actorId: string) => void;
+}) {
+  const rolled = group.rows.filter((row) => row.total !== null);
+  const passes = rolled.filter((row) => row.passed).length;
+  const waiting = group.rows.length - rolled.length;
 
   return (
     <div className="mt-1 rounded-lg border border-ink-700 bg-ink-850 px-3 py-2">
@@ -412,40 +450,66 @@ function GroupRollCard({ group }: { group: NonNullable<WireChatMessage['groupDat
       </div>
 
       <ul className="mt-1 max-h-64 space-y-0.5 overflow-y-auto">
-        {group.rows.map((row, index) => (
-          // Index in the key because two creatures can legitimately share a
-          // name - an unnumbered pair placed by hand - and this list is never
-          // reordered or filtered after it is written.
-          <li key={`${row.name}-${index}`} className="flex items-baseline gap-2">
-            <span className="min-w-0 flex-1 truncate text-[11px] text-ink-300">{row.name}</span>
+        {group.rows.map((row, index) => {
+          // Yours to press, or the DM's - they fill in for whoever is not at
+          // the table, so a request cannot sit open all session.
+          const canAnswer =
+            row.total === null &&
+            row.actorId !== null &&
+            (isDM || myActorIds.includes(row.actorId));
 
-            <span className="shrink-0 font-mono text-[10px] text-ink-600">
-              [{row.dice.join(', ')}]
-              {row.modifier >= 0 ? `+${row.modifier}` : row.modifier}
-            </span>
+          return (
+            // Index in the key because two creatures can legitimately share a
+            // name - an unnumbered pair placed by hand - and this list is never
+            // reordered or filtered after it is written.
+            <li key={`${row.name}-${index}`} className="flex items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate text-[11px] text-ink-300">{row.name}</span>
 
-            <span className="w-7 shrink-0 text-right font-display text-base font-bold text-ink-100">
-              {row.total}
-            </span>
-
-            {/* Kept as a fixed-width cell whether or not there is a DC, so the
-                totals stay in one column between a check and a save. */}
-            <span className="w-3 shrink-0 text-center text-xs">
-              {row.passed === null ? (
-                ''
-              ) : row.passed ? (
-                <span className="text-emerald-400">✓</span>
+              {row.total === null ? (
+                canAnswer ? (
+                  <button
+                    onClick={() => onAnswer(messageId, row.actorId!)}
+                    className="shrink-0 rounded border border-ember-500/60 bg-ember-500/15 px-2 py-0.5 text-[10px] text-ember-300 transition-colors hover:bg-ember-500/25"
+                  >
+                    Roll {row.modifier >= 0 ? `+${row.modifier}` : row.modifier}
+                  </button>
+                ) : (
+                  <span className="shrink-0 text-[10px] text-ink-600">waiting…</span>
+                )
               ) : (
-                <span className="text-red-400">✗</span>
+                <>
+                  <span className="shrink-0 font-mono text-[10px] text-ink-600">
+                    [{row.dice.join(', ')}]
+                    {row.modifier >= 0 ? `+${row.modifier}` : row.modifier}
+                  </span>
+
+                  <span className="w-7 shrink-0 text-right font-display text-base font-bold text-ink-100">
+                    {row.total}
+                  </span>
+
+                  {/* Kept as a fixed-width cell whether or not there is a DC, so
+                      the totals stay in one column between a check and a save. */}
+                  <span className="w-3 shrink-0 text-center text-xs">
+                    {row.passed === null ? (
+                      ''
+                    ) : row.passed ? (
+                      <span className="text-emerald-400">✓</span>
+                    ) : (
+                      <span className="text-red-400">✗</span>
+                    )}
+                  </span>
+                </>
               )}
-            </span>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
 
-      {group.dc !== null && (
+      {(group.dc !== null || waiting > 0) && (
         <div className="mt-1 border-t border-ink-800 pt-1 text-[10px] text-ink-500">
-          {passes} of {group.rows.length} made it
+          {waiting > 0
+            ? `waiting on ${waiting} of ${group.rows.length}`
+            : `${passes} of ${group.rows.length} made it`}
         </div>
       )}
     </div>

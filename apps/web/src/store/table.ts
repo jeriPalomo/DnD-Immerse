@@ -144,6 +144,8 @@ interface TableState {
   placeTemplate: (payload: Record<string, unknown>) => void;
   clearTemplate: (templateId: string) => void;
   groupRoll: (payload: GroupRollPayload) => void;
+  /** Answer a row of a group roll that is waiting on you. */
+  answerGroupRoll: (messageId: string, actorId: string) => void;
   rollDeathSave: (tokenId: string) => void;
   showHandout: (pageId: string) => void;
   /** A handout being shown large right now. */
@@ -291,8 +293,20 @@ export const useTable = create<TableState>((set, get) => ({
 
     socket.on('chat:history', ({ messages }) => set({ messages }));
     socket.on('chat:message', ({ message }) => {
+      const current = get().messages;
+
+      // A group roll comes back under its own id each time somebody answers it,
+      // so the card fills in rather than the log growing a copy per player.
+      const at = current.findIndex((existing) => existing.id === message.id);
+      if (at !== -1) {
+        const replaced = [...current];
+        replaced[at] = message;
+        set({ messages: replaced });
+        return;
+      }
+
       // Trim the backlog so a long session does not grow without bound.
-      const next = [...get().messages, message];
+      const next = [...current, message];
       set({ messages: next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next });
     });
     socket.on('presence', ({ members }) => set({ members }));
@@ -532,6 +546,10 @@ export const useTable = create<TableState>((set, get) => ({
 
   groupRoll(payload) {
     get().socket?.emit('chat:groupRoll', payload);
+  },
+
+  answerGroupRoll(messageId, actorId) {
+    get().socket?.emit('chat:groupAnswer', { messageId, actorId });
   },
 
   rollDeathSave(tokenId) {

@@ -222,6 +222,17 @@ export default function CampaignTable() {
    * monster on the board, so "the DM's creature" is a question about the
    * current click, not about ownership.
    */
+  /**
+   * The sheets this person may roll for when the DM asks the party.
+   *
+   * From the roster rather than from their tokens, because a character with
+   * nothing on the board is still theirs to roll - and a player with two
+   * characters is asked for both.
+   */
+  const myActorIds = party
+    .filter((member) => member.ownerUserId === user?.id && member.type === 'character')
+    .map((member) => member.id);
+
   const actingActor = isDM ? dmActor : myActor;
   const actingItems = isDM ? dmItems : myItems;
   const actingActorId = isDM ? (dmActor?.id ?? null) : activeActorId;
@@ -405,7 +416,11 @@ export default function CampaignTable() {
           {isDM && id ? (
             <SidebarTabs
               tabs={[
-                { id: 'run', label: 'Combat', node: <RunPanel campaignId={id} isDM /> },
+                {
+                  id: 'run',
+                  label: 'Combat',
+                  node: <RunPanel campaignId={id} isDM myActorIds={myActorIds} />,
+                },
                 { id: 'prep', label: 'Map', node: <SceneManager campaignId={id} /> },
                 { id: 'journal', label: 'Journal', node: <JournalPanel campaignId={id} isDM /> },
               ]}
@@ -413,7 +428,11 @@ export default function CampaignTable() {
           ) : id ? (
             <SidebarTabs
               tabs={[
-                { id: 'run', label: 'Combat', node: <RunPanel campaignId={id} isDM={false} /> },
+                {
+                  id: 'run',
+                  label: 'Combat',
+                  node: <RunPanel campaignId={id} isDM={false} myActorIds={myActorIds} />,
+                },
                 {
                   id: 'journal',
                   label: 'Journal',
@@ -443,7 +462,7 @@ export default function CampaignTable() {
         {/* Chat */}
         <div className={`h-[calc(100vh-8rem)] min-h-[420px] ${focusBoard ? 'hidden' : ''}`}>
           <ErrorBoundary label="Chat">
-            <ChatPanel isDM={Boolean(isDM)} />
+            <ChatPanel isDM={Boolean(isDM)} myActorIds={myActorIds} />
           </ErrorBoundary>
         </div>
       </div>
