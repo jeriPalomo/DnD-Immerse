@@ -36,6 +36,8 @@ export type BoardTool =
   | 'note'
   | 'draw'
   | 'arrow'
+  /** Click a wall or a pin to delete it, without holding a modifier down. */
+  | 'erase'
   | TerrainBrush;
 
 interface TableState {

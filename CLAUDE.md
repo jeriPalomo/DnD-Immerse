@@ -663,6 +663,24 @@ and the panel says "by hand" for them instead of pretending. Unit tests check
 the table against `CONDITIONS` in both directions, because a curated table
 checked against itself proves nothing.
 
+**A stamped monster's stat block is the compendium's, not the DM's.** An actor
+carrying `srdMonsterId` refuses edits to its six scores, hit points, armour class
+and speed — on the server, not merely hidden on the sheet, because a hidden input
+is a layout decision and this is a rule. Its name, portrait and notes stay
+editable: "Grix the goblin" is a reasonable thing to write on a stamped goblin.
+Retyping the numbers would leave the sheet disagreeing with the entry it claims
+to be, while every token stamped from that entry afterwards still carried the
+published ones. Write an NPC by hand to own its numbers.
+
+**Damage goes through `applyDamage`, wherever it is applied from.** The token
+HUD used to write hit points straight onto the token, which skipped resistances
+off the sheet, the concentration check a hurt caster owes, and the battle-log
+line — all of which lived only in the initiative tracker's own copy of the same
+buttons. So the obvious place to damage a creature was the one that did it
+least well, and the DM had to know which of two identical-looking controls to
+use. There is one now, on the creature; the tracker keeps only the AoE case,
+which is the one thing a single token cannot answer for.
+
 **The DM's panel is split by when a tool is used, not by what it is.** Building
 a map, calibrating a grid and drawing walls are done alone between sessions;
 initiative, damage and dropping a monster in are done with four people

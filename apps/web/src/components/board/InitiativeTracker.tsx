@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { CONDITION_SUMMARY, tokensInTemplate } from '@dnd/shared';
 import { Button } from '../ui.js';
 import { useTable } from '../../store/table.js';
-import { GroupRoll } from './GroupRoll.js';
 
 /**
  * The turn order.
@@ -33,7 +32,6 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
             Start encounter
           </Button>
         </div>
-        <GroupRoll />
       </div>
     );
   }
@@ -313,6 +311,28 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
                   </span>
                 ))}
               </div>
+              {/* Its own amount, now that the shared one has gone. Damaging a
+                  single creature belongs on that creature - click it and the
+                  HUD does it, resistances and concentration and all - but a
+                  fireball is the one thing a token cannot answer for, so this
+                  is the only place several are hit at once. */}
+              <div className="mb-1.5 flex gap-1">
+                <input
+                  type="number"
+                  min={0}
+                  value={damage}
+                  onChange={(e) => setDamage(e.target.value)}
+                  placeholder="0"
+                  aria-label="Damage amount"
+                  className="w-14 rounded border border-ink-600 bg-ink-850 px-1.5 py-1 text-center text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
+                />
+                <input
+                  value={damageType}
+                  onChange={(e) => setDamageType(e.target.value)}
+                  aria-label="Damage type"
+                  className="min-w-0 flex-1 rounded border border-ink-600 bg-ink-850 px-1.5 py-1 text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
+                />
+              </div>
               <div className="flex gap-1">
                 {([['All', false], ['Half (saved)', true]] as const).map(([label, halved]) => (
                   <button
@@ -334,62 +354,6 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
             </div>
           )}
 
-          {/* Damage the active combatant, or whoever is selected. */}
-          <div>
-            <div className="mb-1 text-[10px] tracking-wide text-ink-500 uppercase">
-              Apply to {selectedTokenId ? 'selected' : (active?.name ?? 'active')}
-            </div>
-            <div className="flex gap-1">
-              <input
-                type="number"
-                min={0}
-                value={damage}
-                onChange={(e) => setDamage(e.target.value)}
-                placeholder="0"
-                aria-label="Damage amount"
-                className="w-14 rounded border border-ink-600 bg-ink-850 px-1.5 py-1 text-center text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
-              />
-              <input
-                value={damageType}
-                onChange={(e) => setDamageType(e.target.value)}
-                aria-label="Damage type"
-                className="min-w-0 flex-1 rounded border border-ink-600 bg-ink-850 px-1.5 py-1 text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
-              />
-            </div>
-            <div className="mt-1 flex gap-1">
-              {(
-                [
-                  ['Damage', false, false],
-                  ['Half', false, true],
-                  ['Heal', true, false],
-                ] as const
-              ).map(([label, healing, halved]) => (
-                <button
-                  key={label}
-                  onClick={() => {
-                    const target = selectedTokenId ?? active?.tokenId;
-                    const amount = Number(damage) || 0;
-                    if (!target || !amount) return;
-                    useTable.getState().applyDamage([target], amount, damageType, healing, halved);
-                    setDamage('');
-                  }}
-                  className={`flex-1 rounded border px-1.5 py-1 text-[10px] transition-colors ${
-                    healing
-                      ? 'border-emerald-900/60 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-900/40'
-                      : 'border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/40'
-                  }`}
-                  title={halved ? 'Half damage, for a successful save' : undefined}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1 text-[9px] text-ink-600">
-              Resistances come from the sheet. A concentrating target rolls to hold it.
-            </p>
-          </div>
-
-          <GroupRoll />
 
           <Button size="sm" variant="ghost" onClick={() => endEncounter()} className="w-full">
             End encounter

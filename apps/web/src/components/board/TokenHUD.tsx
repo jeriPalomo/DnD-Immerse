@@ -46,18 +46,28 @@ export function TokenHUD({
   }
 
   const [delta, setDelta] = useState('');
+  const [damageType, setDamageType] = useState('slashing');
   const [showConditions, setShowConditions] = useState(false);
   const [showSight, setShowSight] = useState(false);
   /** Rounds the next condition is applied for. Blank means until removed. */
   const [rounds, setRounds] = useState('');
-  const { applyEffect, updateEffect, removeEffect } = useTable();
+  const { applyEffect, updateEffect, removeEffect, applyDamage } = useTable();
 
-  function applyDelta(sign: 1 | -1) {
+  /**
+   * Damage and healing, through the same path the rest of the app uses.
+   *
+   * This used to write hit points straight onto the token, which skipped
+   * everything that makes a damage roll interesting: resistances off the sheet,
+   * the concentration check a hurt caster owes, and the battle-log line. Those
+   * lived only in the initiative tracker's own copy of these buttons - so the
+   * obvious place to damage a creature was the one that did it least well, and
+   * the DM had to know which of the two to use.
+   */
+  function apply(kind: 'damage' | 'half' | 'heal') {
     const amount = Math.abs(Number(delta) || 0);
-    if (!amount || token.maxHp === null) return;
+    if (!amount) return;
 
-    const next = Math.max(0, Math.min(token.maxHp, (token.hp ?? 0) + sign * amount));
-    onUpdate({ hp: next });
+    applyDamage([token.id], amount, damageType, kind === 'heal', kind === 'half');
     setDelta('');
   }
 
@@ -206,29 +216,48 @@ export function TokenHUD({
           </div>
 
           {canEdit && (
-            <div className="mt-2 flex gap-1.5">
-              <input
-                type="number"
-                min={0}
-                value={delta}
-                onChange={(e) => setDelta(e.target.value)}
-                placeholder="0"
-                aria-label="Hit point change"
-                className="w-16 rounded border border-ink-600 bg-ink-850 px-2 py-1 text-center text-sm text-ink-100 focus:border-arcane-400 focus:outline-none"
-              />
-              <button
-                onClick={() => applyDelta(-1)}
-                className="flex-1 rounded border border-red-900/60 bg-red-950/40 px-2 py-1 text-xs text-red-200 hover:bg-red-900/40"
-              >
-                Damage
-              </button>
-              <button
-                onClick={() => applyDelta(1)}
-                className="flex-1 rounded border border-emerald-900/60 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-900/40"
-              >
-                Heal
-              </button>
-            </div>
+            <>
+              <div className="mt-2 flex gap-1.5">
+                <input
+                  type="number"
+                  min={0}
+                  value={delta}
+                  onChange={(e) => setDelta(e.target.value)}
+                  placeholder="0"
+                  aria-label="Hit point change"
+                  className="w-16 rounded border border-ink-600 bg-ink-850 px-2 py-1 text-center text-sm text-ink-100 focus:border-arcane-400 focus:outline-none"
+                />
+                <input
+                  value={damageType}
+                  onChange={(e) => setDamageType(e.target.value)}
+                  aria-label="Damage type"
+                  title="Read against the sheet's resistances and immunities"
+                  className="min-w-0 flex-1 rounded border border-ink-600 bg-ink-850 px-2 py-1 text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
+                />
+              </div>
+              <div className="mt-1.5 flex gap-1.5">
+                {(
+                  [
+                    ['Damage', 'damage', 'Full damage, read against resistances'],
+                    ['Half', 'half', 'Half damage, for a successful save'],
+                    ['Heal', 'heal', 'Restore hit points, capped at the maximum'],
+                  ] as const
+                ).map(([label, kind, hint]) => (
+                  <button
+                    key={kind}
+                    onClick={() => apply(kind)}
+                    title={hint}
+                    className={`flex-1 rounded border px-2 py-1 text-xs transition-colors ${
+                      kind === 'heal'
+                        ? 'border-emerald-900/60 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-900/40'
+                        : 'border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/40'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
         </>
       )}

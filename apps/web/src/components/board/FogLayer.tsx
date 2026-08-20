@@ -180,10 +180,13 @@ export function DoorLayer({
 export function WallLayer({
   walls,
   grid,
+  erasing,
   onDelete,
 }: {
   walls: { id: string; x1: number; y1: number; x2: number; y2: number; door: number }[];
   grid: { gridSize: number; offsetX: number; offsetY: number };
+  /** The Erase tool is on, so a plain click deletes. */
+  erasing: boolean;
   onDelete: (wallId: string) => void;
 }) {
   return (
@@ -205,8 +208,11 @@ export function WallLayer({
               hitStrokeWidth={Math.max(14, grid.gridSize * 0.3)}
               onClick={(e) => {
                 e.cancelBubble = true;
-                // Alt-click removes a wall, matching alt-click to ping.
-                if (e.evt.altKey) onDelete(wall.id);
+                // A plain click deletes while Erase is the chosen tool. Alt-click
+                // still does it from any tool, but a modifier nobody is told
+                // about is folklore - "I cannot erase my walls" is what that
+                // costs, and the tool button is the affordance that fixes it.
+                if (erasing || e.evt.altKey) onDelete(wall.id);
               }}
               onMouseEnter={(e) => {
                 const stage = e.target.getStage();
@@ -231,12 +237,15 @@ export function NoteLayer({
   notes,
   grid,
   isDM,
+  erasing,
   onToggle,
   onRemove,
 }: {
   notes: { id: string; label: string; x: number; y: number; hidden: boolean }[];
   grid: { gridSize: number; offsetX: number; offsetY: number };
   isDM: boolean;
+  /** The Erase tool is on, so a plain click deletes rather than reveals. */
+  erasing: boolean;
   onToggle: (noteId: string, hidden: boolean) => void;
   onRemove: (noteId: string) => void;
 }) {
@@ -255,8 +264,9 @@ export function NoteLayer({
             onClick={(e) => {
               e.cancelBubble = true;
               if (!isDM) return;
-              // Alt-click removes; a plain click reveals or hides.
-              if (e.evt.altKey) onRemove(note.id);
+              // Erase deletes on a plain click; otherwise a click reveals or
+              // hides the pin and alt-click still removes it.
+              if (erasing || e.evt.altKey) onRemove(note.id);
               else onToggle(note.id, !note.hidden);
             }}
             onMouseEnter={(e) => {

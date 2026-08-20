@@ -4,7 +4,6 @@ import { CreaturePanel } from './CreaturePanel.js';
 import { EnemyHealth } from './EnemyHealth.js';
 import { TurnPrompt } from './TurnPrompt.js';
 import { ConditionsReference } from './ConditionsReference.js';
-import { JournalPanel } from './JournalPanel.js';
 
 /**
  * Everything used with players watching, in one column.
@@ -39,10 +38,6 @@ export function RunPanel({ campaignId, isDM }: { campaignId: string; isDM: boole
           the same question. */}
       <Section title="What conditions do">
         <ConditionsReference />
-      </Section>
-
-      <Section title="Journal">
-        <JournalPanel campaignId={campaignId} isDM={isDM} />
       </Section>
     </div>
   );

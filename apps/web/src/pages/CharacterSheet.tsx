@@ -99,6 +99,16 @@ export default function CharacterSheet() {
   if (!actor) return null;
 
   const editable = sheet.access >= OWNERSHIP.owner;
+  /**
+   * A creature stamped from the bestiary keeps the compendium's numbers.
+   *
+   * Its name, portrait and notes are still yours - "Grix the goblin" is a
+   * reasonable thing to write on a stamped goblin - but the stat block is not,
+   * and the server refuses the write as well as this hiding the inputs. Write an
+   * NPC by hand to have one whose numbers you own.
+   */
+  const statsLocked = Boolean(actor?.srdMonsterId);
+  const statsEditable = editable && !statsLocked;
   const weapons = sheet.items.filter((i) => i.type === 'weapon');
   const spells = sheet.items.filter((i) => i.type === 'spell');
   const gear = sheet.items.filter((i) => i.type === 'equipment' || i.type === 'consumable');
@@ -148,11 +158,18 @@ export default function CharacterSheet() {
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
         {/* Left rail: the derived numbers */}
         <div className="space-y-4">
-          {editable && <AbilityRoller actorId={actor.id} onApply={sheet.patch} />}
+          {statsEditable && <AbilityRoller actorId={actor.id} onApply={sheet.patch} />}
+
+          {statsLocked && (
+            <p className="rounded-lg border border-ink-700 bg-ink-850 px-2 py-1.5 text-[11px] text-ink-500">
+              From the bestiary, so its numbers are the compendium's. Name, portrait
+              and notes are yours.
+            </p>
+          )}
 
           <AbilityScoresBlock
             actor={actor}
-            editable={editable}
+            editable={statsEditable}
             onChange={(key: AbilityKey, value) => sheet.patch({ [key]: value })}
           />
           <SavingThrows
@@ -180,7 +197,7 @@ export default function CharacterSheet() {
           <DerivedStats actor={actor} />
           <CombatStats
             actor={actor}
-            editable={editable}
+            editable={statsEditable}
             onChange={sheet.patch}
             rest={
               <RestControl

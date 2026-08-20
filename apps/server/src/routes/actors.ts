@@ -203,12 +203,41 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
     return { actor };
   });
 
+/**
+ * What a bestiary sheet will not let you change.
+ *
+ * Its name, portrait and notes are yours - "Grix the goblin" is a perfectly
+ * reasonable thing to write on a stamped goblin. The numbers are the
+ * compendium's.
+ */
+const STAT_BLOCK_FIELDS = [
+  'str', 'dex', 'con', 'int', 'wis', 'cha',
+  'hpCurrent', 'hpMax', 'armorClass', 'speed',
+] as const;
+
   app.patch('/api/actors/:id', async (request) => {
     const user = assertUser(request);
     const { id } = request.params as { id: string };
-    await requireActorWrite(id, user.id);
+    const { actor } = await requireActorWrite(id, user.id);
 
     const patch = actorInputSchema.partial().parse(request.body);
+
+    // A stamped monster's numbers are the compendium's, not the DM's. Editing
+    // them here would make the sheet disagree with the bestiary it came from
+    // while still claiming to be that creature - and every token stamped from
+    // it afterwards would carry the published numbers anyway. Refused rather
+    // than dropped: a save that silently keeps the old value is a save that
+    // looks like it worked.
+    if (actor.srdMonsterId) {
+      const locked = STAT_BLOCK_FIELDS.filter((field) => patch[field] !== undefined);
+      if (locked.length > 0) {
+        throw new HttpError(
+          400,
+          `${actor.name} came from the bestiary, so its stat block is the compendium's. Write an NPC by hand to change these.`,
+        );
+      }
+    }
+
     await db
       .update(actors)
       .set({ ...patch, updatedAt: Date.now() })

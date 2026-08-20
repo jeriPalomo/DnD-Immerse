@@ -7,6 +7,12 @@ export type Actor = ActorInput & {
   ownerUserId: string;
   campaignId: string | null;
   portraitUrl: string | null;
+  /**
+   * Which bestiary entry this was stamped from, if any. Set, the stat block is
+   * the compendium's: the sheet hides the inputs and the server refuses the
+   * write.
+   */
+  srdMonsterId: string | null;
   createdAt: number;
   updatedAt: number;
 };

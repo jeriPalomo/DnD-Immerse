@@ -20,6 +20,7 @@ import { HandoutReveal } from '../components/board/HandoutReveal.js';
 import { Toast } from '../components/board/Toast.js';
 import { SidebarTabs } from '../components/board/SidebarTabs.js';
 import { RunPanel } from '../components/board/RunPanel.js';
+import { JournalPanel } from '../components/board/JournalPanel.js';
 import { TurnBar, TURN_BAR_HEIGHT_REM } from '../components/board/TurnBar.js';
 import { useHotkeys } from '../lib/useHotkeys.js';
 import type { Actor, Item } from '../store/sheet.js';
@@ -387,31 +388,39 @@ export default function CampaignTable() {
           {/*
             Split by WHEN a tool is used, not by what it is.
 
-            Everything under Run is touched with four people watching: whose
+            Everything under Combat is touched with four people watching: whose
             turn it is, what just took damage, dropping a goblin in. Everything
-            under Prep is done alone between sessions: building a map,
-            calibrating its grid, drawing walls. Placing a creature used to sit
-            two clicks inside the prep panel, so a mid-fight addition meant
-            leaving the initiative order and finding your way back.
+            under Map is done alone between sessions: building it, calibrating
+            its grid, drawing walls. Placing a creature used to sit two clicks
+            inside the prep panel, so a mid-fight addition meant leaving the
+            initiative order and finding your way back.
 
-            A player has no prep tools at all, so they get the Run panel
-            directly with no switch above it - the same three-tab column they
-            have always had.
+            The journal is neither. It was a collapsed section at the bottom of
+            the combat panel, which is both the wrong place to keep notes and the
+            wrong place to look for them.
+
+            A player gets Combat and Journal; there are no map tools to give
+            them, and one tab is not worth a switch, so the fight sits bare.
           */}
           {isDM && id ? (
             <SidebarTabs
               tabs={[
-                { id: 'run', label: 'Run', node: <RunPanel campaignId={id} isDM /> },
-                { id: 'prep', label: 'Prep', node: <SceneManager campaignId={id} /> },
+                { id: 'run', label: 'Combat', node: <RunPanel campaignId={id} isDM /> },
+                { id: 'prep', label: 'Map', node: <SceneManager campaignId={id} /> },
+                { id: 'journal', label: 'Journal', node: <JournalPanel campaignId={id} isDM /> },
               ]}
             />
           ) : id ? (
-            // No prep tools for a player, so no switch to put above them.
-            <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-ink-700 bg-ink-900 p-1.5">
-              <ErrorBoundary label="The table">
-                <RunPanel campaignId={id} isDM={false} />
-              </ErrorBoundary>
-            </div>
+            <SidebarTabs
+              tabs={[
+                { id: 'run', label: 'Combat', node: <RunPanel campaignId={id} isDM={false} /> },
+                {
+                  id: 'journal',
+                  label: 'Journal',
+                  node: <JournalPanel campaignId={id} isDM={false} />,
+                },
+              ]}
+            />
           ) : (
             <InitiativeTracker isDM={false} />
           )}

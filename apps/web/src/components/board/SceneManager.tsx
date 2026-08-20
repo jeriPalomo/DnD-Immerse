@@ -32,6 +32,8 @@ interface GridGuess {
 
 export function SceneManager({ campaignId }: { campaignId: string }) {
   const ask = useConfirm();
+  /** Door, secret door and the pens, which are not wanted every session. */
+  const [moreTools, setMoreTools] = useState(false);
   const { scene, activateScene, revealFog, resetFog, wallTool, setWallTool, walls, eraseDrawing, terrain } =
     useTable();
   const [scenes, setScenes] = useState<SceneRow[]>([]);
@@ -339,36 +341,59 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
               <span>Wall tool</span>
               <span className="text-ink-600">{walls.length} walls</span>
             </div>
-            {/* Two rows, split the way the tools are used: architecture you
-                click out as runs of points, and ground you drag over. Eleven
-                buttons in one row of a 320px column came out 29px wide and ran
-                off the end of the panel. */}
+            {/* The four that get used every session. Doors, secret doors and
+                the pens are real and stay, but they were sharing one row with
+                these and turning it into a wall of identical buttons - so they
+                sit behind a disclosure and this row reads at a glance. */}
             <div className="flex flex-wrap gap-1.5">
               {(
                 [
-                  ['off', 'Off'],
-                  ['wall', 'Wall'],
-                  ['door', 'Door'],
-                  // A wall players are never sent. Reveal it from the door's
-                  // own controls and it becomes an ordinary door.
-                  ['secret', 'Secret'],
-                  ['note', 'Pin'],
-                  ['draw', 'Pen'],
-                  ['arrow', 'Arrow'],
+                  ['off', 'Off', 'Click and drag the board normally'],
+                  ['wall', 'Wall', 'Click to place points; each click continues the run, double-click ends it'],
+                  ['note', 'Pin', 'Click to drop a pin; click a pin to reveal it to the players'],
+                  ['erase', 'Erase', 'Click a wall or a pin to delete it'],
                 ] as const
-              ).map(([value, label]) => (
+              ).map(([value, label, hint]) => (
                 <ToolButton
                   key={value}
                   label={label}
+                  hint={hint}
                   active={wallTool === value}
                   onClick={() => setWallTool(value)}
                 />
               ))}
             </div>
-            <p className="mt-1.5 text-[10px] text-ink-600">
-              Click to place points; each click continues the run. Double-click to
-              finish a run, alt-click a wall to delete it.
-            </p>
+
+            <button
+              onClick={() => setMoreTools((open) => !open)}
+              aria-expanded={moreTools}
+              className="mt-1.5 flex items-center gap-1 text-[10px] text-ink-600 transition-colors hover:text-ink-300"
+            >
+              <span>{moreTools ? '▾' : '▸'}</span> More
+            </button>
+
+            {moreTools && (
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {(
+                  [
+                    ['door', 'Door', 'A wall the party can open and close'],
+                    // A wall players are never sent. Reveal it from the door's
+                    // own controls and it becomes an ordinary door.
+                    ['secret', 'Secret', 'A wall players are never sent — reveal it to turn it into a door'],
+                    ['draw', 'Pen', 'Draw freehand on the map'],
+                    ['arrow', 'Arrow', 'Drag to point at something'],
+                  ] as const
+                ).map(([value, label, hint]) => (
+                  <ToolButton
+                    key={value}
+                    label={label}
+                    hint={hint}
+                    active={wallTool === value}
+                    onClick={() => setWallTool(value)}
+                  />
+                ))}
+              </div>
+            )}
 
             <div className="mt-2.5 mb-1.5 text-[11px] text-ink-400">Ground</div>
             <div className="flex flex-wrap gap-1.5">
@@ -377,26 +402,21 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
                   // Ground, not architecture: a pillar is four wall segments
                   // and that is fine, but a lake or a cave's ragged edge is not
                   // worth tracing.
-                  ['blocked', 'Block'],
-                  ['mud', 'Mud'],
-                  ['water', 'Water'],
-                  ['clear', 'Erase'],
+                  ['blocked', 'Block', 'Drag over squares nobody can enter'],
+                  ['mud', 'Mud', 'Double cost to cross — a 30 ft creature gets 3 squares of it'],
+                  ['water', 'Water', 'Half again to cross — a 30 ft creature gets 4 squares of it'],
+                  ['clear', 'Erase', 'Drag to wipe painted ground back to open floor'],
                 ] as const
-              ).map(([value, label]) => (
+              ).map(([value, label, hint]) => (
                 <ToolButton
                   key={value}
                   label={label}
+                  hint={hint}
                   active={wallTool === value}
                   onClick={() => setWallTool(value)}
                 />
               ))}
             </div>
-            <p className="mt-1.5 text-[10px] text-ink-600">
-              Painted by dragging over squares. Nobody enters a blocked square; mud
-              costs double to cross and shallow water half again, so a 30 ft creature
-              gets 3 squares through mud or 4 through a ford. Players never see the
-              paint — their movement range simply shortens over it.
-            </p>
 
             {!terrain.matchesGrid && (
               // Said out loud rather than drawn wrong. The bits are indexed by
@@ -720,19 +740,28 @@ function GridCalibration({
   );
 }
 
-/** One board tool. Extracted when the row was split in two, not before. */
+/**
+ * One board tool.
+ *
+ * The hint is a `title` rather than a paragraph under the row. Eight standing
+ * explanations in this panel were describing controls that were right there,
+ * and the reader had to match sentence to button themselves.
+ */
 function ToolButton({
   label,
+  hint,
   active,
   onClick,
 }: {
   label: string;
+  hint: string;
   active: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
+      title={hint}
       // `basis` with a floor rather than a bare `flex-1`: seven buttons in a
       // 320px column squeezed "Arrow" off the end of the panel, and a button
       // whose label is clipped is a button nobody presses.

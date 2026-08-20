@@ -371,3 +371,55 @@ describe('hand-entered items', () => {
     ).rejects.toThrow();
   });
 });
+
+describe('a bestiary sheet keeps the compendium’s numbers', () => {
+  /**
+   * A stamped monster's stat block is not the DM's to retype. Editing it would
+   * make the sheet disagree with the entry it claims to be, while every token
+   * stamped from that entry afterwards still carries the published numbers.
+   *
+   * Enforced here as well as hidden on the sheet, because a hidden input is a
+   * layout decision and this is a rule.
+   */
+  let goblinId: string;
+
+  beforeAll(async () => {
+    const made = await api<{ actor: { id: string } }>('POST', '/api/actors', {
+      name: 'Goblin',
+      type: 'npc',
+    }).catch(() => api<{ actor: { id: string } }>('POST', '/api/actors', { name: 'Goblin' }));
+    goblinId = made.actor.id;
+
+    // Stamped, without rebuilding the whole from-monster flow to say so.
+    const { db } = await import('../db/index.js');
+    const { actors } = await import('../db/schema.js');
+    const { eq } = await import('drizzle-orm');
+    await db.update(actors).set({ srdMonsterId: 'srd-goblin' }).where(eq(actors.id, goblinId));
+  });
+
+  it('refuses an edit to its ability scores', async () => {
+    await expect(api('PATCH', `/api/actors/${goblinId}`, { str: 18 })).rejects.toThrow(/bestiary/i);
+  });
+
+  it('refuses an edit to its hit points, armour class or speed', async () => {
+    for (const patch of [{ hpMax: 99 }, { armorClass: 22 }, { speed: 60 }]) {
+      await expect(api('PATCH', `/api/actors/${goblinId}`, patch)).rejects.toThrow(/bestiary/i);
+    }
+  });
+
+  it('still lets its name and notes be changed', async () => {
+    // "Grix the goblin" is a perfectly reasonable thing to write on one.
+    const saved = await api<{ actor: { name: string } }>('PATCH', `/api/actors/${goblinId}`, {
+      name: 'Grix',
+    });
+    expect(saved.actor.name).toBe('Grix');
+  });
+
+  it('leaves a hand-written NPC alone', async () => {
+    const made = await api<{ actor: { id: string } }>('POST', '/api/actors', { name: 'Innkeeper' });
+    const saved = await api<{ actor: { str: number } }>('PATCH', `/api/actors/${made.actor.id}`, {
+      str: 18,
+    });
+    expect(saved.actor.str).toBe(18);
+  });
+});

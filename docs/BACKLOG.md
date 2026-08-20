@@ -25,6 +25,35 @@ audio system rather than extending it.
 
 ---
 
+## The DM's panel, from the same punch list — 2026-08-20
+
+- **Run → Combat, Prep → Map, and Journal is its own tab.** The journal was a
+  collapsed section at the bottom of the combat panel, which is both the wrong
+  place to keep notes and the wrong place to look for them. Players get Combat
+  and Journal.
+- **"Apply to active" is gone from the tracker.** Clicking a creature and
+  damaging it there is the obvious move, so the tracker's copy was a second way
+  to do the same thing - except the HUD's version wrote hit points directly and
+  skipped resistances, concentration and the battle log. The HUD now goes
+  through `applyDamage` and has Half beside Damage and Heal; the tracker keeps
+  only the AoE block, which is the one case a single token cannot answer for.
+- **"Ask the party" is gone.** Rolling for the players ruins the immersion it
+  was meant to serve.
+- **Wall tools are Off / Wall / Pin / Erase**, with Door, Secret, Pen and Arrow
+  behind "More". Erase is a real tool: click a wall or a pin to delete it, with
+  no modifier to know about. Alt-click still works for anyone who learned it -
+  but a modifier nobody is told about is folklore, and "I cannot erase my walls"
+  is what that costs. The ground rubber is "Clear" again, because two buttons
+  reading "Erase" in one panel is a coin toss rather than a choice.
+- **A bestiary sheet is read-only** where it matters; see CLAUDE.md.
+
+Noted while verifying, not fixed: on a scene with **no map image**, the board's
+click guard accepts only the map node or the stage itself, so walls and pins
+cannot be placed at all. Every real scene has art, so this is a curiosity rather
+than a bug worth changing the guard for.
+
+---
+
 ## Movement measured from where the turn began — 2026-08-20
 
 "I moved a token, and when I went to move it again — still my turn — it was

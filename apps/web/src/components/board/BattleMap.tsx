@@ -122,6 +122,8 @@ export function BattleMap({
   const myColor = isDM ? DM_COLOR : actorColor(activeActorId ?? user?.id ?? '');
   const drawingMode = wallTool === 'draw' || wallTool === 'arrow';
   /** Painting ground is a drag over squares, so it suspends panning too. */
+  /** Click a wall or a pin to delete it, with no modifier to know about. */
+  const erasing = wallTool === 'erase';
   const groundBrush: TerrainBrush | null = TERRAIN_BRUSHES.includes(wallTool as TerrainBrush)
     ? (wallTool as TerrainBrush)
     : null;
@@ -491,7 +493,7 @@ export function BattleMap({
 
         {isDM && (
           <Layer>
-            <WallLayer walls={walls} grid={grid} onDelete={deleteWall} />
+            <WallLayer walls={walls} grid={grid} erasing={erasing} onDelete={deleteWall} />
           </Layer>
         )}
 
@@ -508,6 +510,7 @@ export function BattleMap({
             notes={notes}
             grid={grid}
             isDM={isDM}
+            erasing={erasing}
             onToggle={(id, hidden) => void toggleNote(id, hidden)}
             onRemove={(id) => void removeNote(id)}
           />
@@ -731,7 +734,9 @@ export function BattleMap({
                     // a run of points, so it needs its own line - this one read
                     // "drawing waters — click to place points", which describes
                     // the wall tool and nothing the brush actually does.
-                    groundBrush
+                    erasing
+                    ? 'click a wall or a pin to delete it'
+                    : groundBrush
                     ? groundHint(groundBrush)
                     : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
               : isDM
