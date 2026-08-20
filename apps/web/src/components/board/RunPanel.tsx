@@ -7,7 +7,7 @@ import { EnemyHealth } from './EnemyHealth.js';
 import { TurnPrompt } from './TurnPrompt.js';
 
 /**
- * Everything used with players watching, in one column.
+ * Everything used with players watching, in one column, in two regions.
  *
  * Stacked rather than tabbed on purpose. The fight is the thing you must never
  * lose sight of, so the tracker stays on screen while you drop a creature in or
@@ -15,10 +15,12 @@ import { TurnPrompt } from './TurnPrompt.js';
  * made impossible, since placing a monster meant navigating away from the
  * initiative order and back.
  *
- * The bulky parts are collapsed by default so the fight keeps the top of the
- * column. That is the one thing stacking gets wrong if you let it: an earlier
- * version of this app stacked everything and put the wall tool several screens
- * from the initiative order.
+ * But stacking alone was not enough: with the tools open, the whole column
+ * became one long scroll and the turn order went off the top of it - which is
+ * the failure this panel exists to prevent, arriving by a different route. So
+ * the fight is **pinned** and only the tools below it scroll. The panel owns
+ * that scroll rather than `SidebarTabs`, because a pinned region needs
+ * something to pin against.
  */
 export function RunPanel({
   campaignId,
@@ -31,29 +33,35 @@ export function RunPanel({
   myActorIds?: string[];
 }) {
   return (
-    <div className="space-y-2">
-      {/* Above the tracker on purpose: it is the one thing here that is waiting
-          on the person reading it, and it disappears the moment they answer. */}
-      <GroupRollPrompt myActorIds={myActorIds} />
+    <div className="flex h-full flex-col gap-2">
+      {/* Pinned: whose turn it is, and anything waiting on the person reading
+          this. Never scrolls away, however much is open underneath. */}
+      <div className="shrink-0 space-y-2">
+        {/* Above the tracker on purpose: it is the one thing here that is
+            waiting on the reader, and it goes the moment they answer. */}
+        <GroupRollPrompt myActorIds={myActorIds} />
 
-      {isDM && <TurnPrompt campaignId={campaignId} />}
+        {isDM && <TurnPrompt campaignId={campaignId} />}
 
-      <InitiativeTracker isDM={isDM} />
+        <InitiativeTracker isDM={isDM} />
+      </div>
 
-      {isDM && <EnemyHealth />}
-
+      {/* The tools. `min-h-0` is load-bearing: a flex child defaults to a
+          min-height of its content, so without it this refuses to shrink and
+          pushes the pinned region off the screen instead of scrolling. */}
       {isDM && (
-        <Section title="Place a creature">
-          <CreaturePanel campaignId={campaignId} />
-        </Section>
-      )}
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+          <EnemyHealth />
 
-      {isDM && (
-        <Section title="Roll for a group">
-          <GroupRoll />
-        </Section>
-      )}
+          <Section title="Place a creature">
+            <CreaturePanel campaignId={campaignId} />
+          </Section>
 
+          <Section title="Roll for a group">
+            <GroupRoll />
+          </Section>
+        </div>
+      )}
     </div>
   );
 }

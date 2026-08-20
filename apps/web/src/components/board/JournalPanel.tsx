@@ -105,7 +105,9 @@ export function JournalPanel({ campaignId, isDM }: { campaignId: string; isDM: b
   if (!isDM && entries.length === 0) return null;
 
   return (
-    <div className="p-2">
+    // Owns its own scrolling: the tab body stopped doing it so that
+    // `RunPanel` could pin the turn order against something.
+    <div className="h-full overflow-y-auto p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 className="font-display text-sm text-ink-100">Journal</h2>
         {isDM && (

@@ -357,10 +357,33 @@ export default function CampaignTable() {
           </ErrorBoundary>
         </div>
 
-        {/* Contextual column. Transient panels sit above the tabs: a token
-            HUD you have to hunt for after clicking a token is worse than one
-            that is simply always in the same place. */}
-        <div className={`flex flex-col gap-3 xl:h-[calc(100vh-8rem)] ${focusBoard ? 'hidden' : ''}`}>
+        {/*
+          Contextual column. Transient panels sit above the tabs: a token HUD you
+          have to hunt for after clicking a token is worse than one that is
+          simply always in the same place.
+
+          `min-h-0` is load-bearing next to the fixed height. Without it a flex
+          child will not shrink below its content, so a selected token plus six
+          characters in the party pushed the bottom of this column off the
+          screen - with no overflow rule anywhere to scroll it back.
+        */}
+        <div
+          className={`flex min-h-0 flex-col gap-3 xl:h-[calc(100vh-8rem)] ${
+            focusBoard ? 'hidden' : ''
+          }`}
+        >
+          {/*
+            The transient panels, capped together. A spell list on the target
+            panel is arbitrarily long, and left uncapped it squeezes the tab
+            stack underneath to nothing - so they share a slice and scroll
+            within it.
+
+            A third rather than a half, measured rather than guessed: at 45% the
+            token HUD took 370px of an 822px column, the party another 278, and
+            the tab stack was left with 150 - which is a Combat panel you cannot
+            work in. The tabs are the working surface and get the largest share.
+          */}
+          <div className="max-h-[34%] shrink-0 space-y-3 overflow-y-auto">
           {/* What the move made possible, before anything is targeted. */}
           {scene && (
             <ReachPanel
@@ -395,6 +418,7 @@ export default function CampaignTable() {
               onDelete={() => table.deleteToken(selected.id)}
             />
           )}
+          </div>
 
           {/*
             Split by WHEN a tool is used, not by what it is.
@@ -444,13 +468,16 @@ export default function CampaignTable() {
             <InitiativeTracker isDM={false} />
           )}
 
-          {/* Pinned below the tabs: the party is for glancing at, not working in. */}
+          {/* Pinned below the tabs: the party is for glancing at, not working
+              in - so it is capped rather than allowed to grow. Six characters
+              used to take the whole column and push its own tail off the
+              bottom of the window. */}
           <Card className="shrink-0 p-3">
             <h2 className="mb-2 font-display text-sm text-ink-100">Party</h2>
             {party.length === 0 ? (
               <p className="text-xs text-ink-500">No characters assigned yet.</p>
             ) : (
-              <ul className="space-y-1.5">
+              <ul className="max-h-40 space-y-1.5 overflow-y-auto">
                 {party.map((member) => (
                   <PartyRow key={member.id} member={member} isSelf={member.ownerUserId === user?.id} />
                 ))}
@@ -505,7 +532,13 @@ function PartyRow({ member, isSelf }: { member: PartyMember; isSelf: boolean }) 
           {member.name}
         </Link>
         {detailed && member.dex !== undefined && (
-          <span className="text-[10px] text-ink-600">
+          // Labelled, because the bare number reads as "this character's
+          // number". It is the Dexterity modifier, which is what 5e initiative
+          // adds to the d20 - the same thing `initiativeExpression` rolls.
+          <span
+            title="Initiative modifier — a d20 plus this"
+            className="text-[10px] text-ink-600"
+          >
             {formatModifier(abilityModifier(member.dex))}
           </span>
         )}

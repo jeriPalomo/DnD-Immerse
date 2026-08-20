@@ -51,7 +51,10 @@ export function SidebarTabs({ tabs }: { tabs: SidebarTab[] }) {
         })}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+      {/* The body does not scroll; each panel owns its own scrolling. `RunPanel`
+          pins the turn order and scrolls only the tools under it, and it cannot
+          pin against a container that is itself scrolling. */}
+      <div className="min-h-0 flex-1 overflow-hidden p-1.5">
         {/* Keyed on the tab so switching away from a crashed panel resets it. */}
         <ErrorBoundary key={current.id} label={current.label}>
           {current.node}

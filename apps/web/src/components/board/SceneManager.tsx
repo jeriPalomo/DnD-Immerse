@@ -170,7 +170,9 @@ export function SceneManager({ campaignId }: { campaignId: string }) {
   const hiddenScenes = scenes.filter((row) => row.hidden);
 
   return (
-    <div className="p-2">
+    // Owns its own scrolling: the tab body stopped doing it so that
+    // `RunPanel` could pin the turn order against something.
+    <div className="h-full overflow-y-auto p-2">
       <div className="mb-3 flex gap-1">
         {(['scenes', 'grid', 'vision'] as const).map((key) => (
           <button
