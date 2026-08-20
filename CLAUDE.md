@@ -564,6 +564,32 @@ share. **The threat union is deliberately not gated**: it covers hostiles only,
 it is a union rather than one creature's answer, and offering it is the whole
 point of the overlay.
 
+**A turn's movement is counted only while a fight is running.** Out of combat
+nothing spends: players have free rein of the scene and the overlay is advice.
+Once an encounter is active the overlay becomes a promise — the squares it draws
+are the squares `token:commit` will accept — because that is the only reading of
+it worth anything when a round is being counted. `tokens.movedFeet` is charged
+the same `reachableCosts` price the overlay is drawn from, so the two cannot
+disagree about what a route through mud cost, and `refillMovement` zeroes it on
+every turn change and at both ends of a fight. **A player may only move the
+creature whose turn it is**, or the budget is refilled by waiting for someone
+else's turn and means nothing. **The DM is never refused** — placing things
+anywhere is the DM's, as it is for walls and painted ground — but a DM drag past
+what a creature had spends everything it had, because the search cannot price a
+square it could not reach.
+
+**The Dash exists because the app has no action economy.** Nothing here knows a
+creature took the Dash action, and a budget with no way to say so makes a legal
+turn impossible — which is worse than not counting at all. `extraMoveFeet` is
+feet rather than a flag so a DM could grant ten of them later; the button is a
+toggle rather than a counter because a mis-click has to be undoable.
+
+**A remaining budget is stat block data.** Left plus spent is a creature's
+speed, so `movement:range` carries `leftFeet` only in the reply to the socket
+that asked — already gated on control or `mayReadStats` — and never on
+`WireToken`, where it would reach everyone. The meter draws for a creature you
+control, and for the DM.
+
 **Reachability is computed on the server, for the same reason vision is.**
 Players never receive wall geometry, so a browser cannot know what stops a
 step. `movement:query` answers the asking socket alone, and a player's threat

@@ -2,6 +2,7 @@ import { Fragment, useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { useTable } from '../../store/table.js';
 import type { WireInitiativeEntry } from '@dnd/shared';
 import { FACE_GAP_PX, layoutTurnBar, stackOpacity } from './turnBarLayout.js';
+import { MovementMeter } from './MovementMeter.js';
 
 /** Fixed, because the board's height calculation has to subtract it. */
 export const TURN_BAR_HEIGHT_REM = 4.5;
@@ -27,7 +28,7 @@ const SLIDE_MS = 320;
  * have needed one shape for the DM and another for players, whose payload has
  * enemy hit points redacted.
  */
-export function TurnBar() {
+export function TurnBar({ isDM }: { isDM: boolean }) {
   const { encounter } = useTable();
   const stripRef = useRef<HTMLDivElement | null>(null);
   const positions = useRef(new Map<string, number>());
@@ -186,6 +187,11 @@ export function TurnBar() {
         ))}
       </div>
 
+      {/* What the creature acting has left to spend, for whoever is running it.
+          Here rather than in a side panel: this is read mid-turn, and a number
+          nobody sees until the server refuses a drag is an argument rather than
+          information. */}
+      <MovementMeter isDM={isDM} />
     </div>
   );
 }

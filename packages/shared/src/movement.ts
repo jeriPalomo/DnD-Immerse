@@ -68,13 +68,32 @@ const NEIGHBOURS = [
  * overlay reads wrong without it.
  */
 export function reachableSquares(input: ReachableInput): [number, number][] {
+  return [...reachableCosts(input).values()].map(({ x, y }) => [x, y]);
+}
+
+/**
+ * The same search, keeping what each square cost to reach.
+ *
+ * `token:commit` needs the price of the square a token was dropped on, and the
+ * overlay needs the set of squares that are affordable at all. Two searches
+ * would be two chances to disagree about whether a drop is legal - which is
+ * exactly the disagreement between the overlay and the old straight-line check
+ * that made a drag round a corner illegal. Keyed `x:y`, and the cost is in half
+ * squares like everything else below the conversion.
+ */
+export function reachableCosts(
+  input: ReachableInput,
+): Map<string, { x: number; y: number; cost: number }> {
   const { origin, speedFeet, feetPerSquare, walls, occupied, bounds, terrain } = input;
 
   const w = Math.max(1, Math.round(origin.w));
   const h = Math.max(1, Math.round(origin.h));
   const start: [number, number] = [Math.round(origin.x), Math.round(origin.y)];
+  const standingStill = new Map([
+    [`${start[0]}:${start[1]}`, { x: start[0], y: start[1], cost: 0 }],
+  ]);
 
-  if (speedFeet <= 0 || feetPerSquare <= 0) return [start];
+  if (speedFeet <= 0 || feetPerSquare <= 0) return standingStill;
 
   /**
    * In half squares, because shallow water costs one and a half of them. The
@@ -82,7 +101,7 @@ export function reachableSquares(input: ReachableInput): [number, number][] {
    * mixing the two is how a ford would end up free.
    */
   const budget = Math.floor(speedFeet / feetPerSquare) * COST_NORMAL;
-  if (budget <= 0) return [start];
+  if (budget <= 0) return standingStill;
 
   /**
    * A footprint at (x, y) fits if it is on the map, nothing is standing there,
@@ -110,7 +129,7 @@ export function reachableSquares(input: ReachableInput): [number, number][] {
 
   const key = (x: number, y: number) => `${x}:${y}`;
   const spent = new Map<string, number>([[key(start[0], start[1]), 0]]);
-  const found: [number, number][] = [start];
+  const found = new Map<string, { x: number; y: number; cost: number }>(standingStill);
 
   /**
    * Cheapest-first, because a step no longer always costs the same.
@@ -150,14 +169,25 @@ export function reachableSquares(input: ReachableInput): [number, number][] {
         // actually be said to sit across.
         if (movementBlocked(centreOf(cx, cy, w, h), centreOf(nx, ny, w, h), walls)) continue;
 
-        if (!spent.has(key(nx, ny))) found.push([nx, ny]);
         spent.set(key(nx, ny), next);
+        found.set(key(nx, ny), { x: nx, y: ny, cost: next });
         push([nx, ny], next);
       }
     }
   }
 
   return found;
+}
+
+/**
+ * What one square of ground costs a creature, in feet.
+ *
+ * The search counts in half squares so shallow water can cost one and a half of
+ * them; a turn's movement is counted in feet, because that is the unit a speed
+ * is written in and a scene is not always five feet to the square.
+ */
+export function costToFeet(cost: number, feetPerSquare: number): number {
+  return (cost / COST_NORMAL) * feetPerSquare;
 }
 
 /**
@@ -218,8 +248,9 @@ export function footprintBlocked(
  * the board offered a square and the server then bounced you off it.
  *
  * A route, not a budget: this asks "could you get there at all", never "how
- * far is it". Out of combat nothing spends movement, and in combat the overlay
- * is the honest picture of what a turn buys.
+ * far is it". What a turn can afford is a separate question, asked by
+ * `reachableCosts` in `token:commit` and only while a fight is running - out of
+ * combat nothing spends movement at all.
  *
  * Occupancy is deliberately ignored. A creature ringed by its own party would
  * otherwise be unable to move at all, and 5e lets you pass through an ally's

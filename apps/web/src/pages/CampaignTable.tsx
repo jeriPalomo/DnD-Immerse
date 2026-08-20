@@ -305,7 +305,7 @@ export default function CampaignTable() {
         </button>
       </div>
 
-      <TurnBar />
+      <TurnBar isDM={isDM} />
 
       <div
         className={

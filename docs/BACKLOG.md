@@ -25,6 +25,37 @@ audio system rather than extending it.
 
 ---
 
+## Movement costs a turn, once a fight is running — 2026-08-19
+
+The overlay has drawn a movement range for a while, and `token:commit` enforced
+no distance at all — so it was advice, in combat as much as out of it. Asked to
+make it real while a fight is running.
+
+- **In combat only.** Out of combat nothing spends; exploration keeps its free
+  rein. `turnStateFor` returns null when no encounter is active, when it is
+  running on another scene, or when the creature is not in the order — a
+  familiar nobody rolled for, or a monster being staged mid-fight.
+- **Priced by the search that draws the overlay.** `reachableCosts` is the same
+  flood fill `reachableSquares` was, keeping what each square cost, so the
+  squares drawn and the squares accepted are one answer. Mud costs double and a
+  ford half again, exactly as the overlay shows.
+- **Only on your turn.** A budget that refills while you wait for someone else's
+  turn is not a budget.
+- **The DM is exempt**, as with walls and painted ground. A DM drag beyond a
+  creature's budget spends the lot rather than a price the search cannot name.
+- **Dash**, because the app has no action economy and cannot infer one. Without
+  it a legal turn would be impossible, which is worse than not counting.
+- **Refilled** on every turn change and at both ends of a fight. Rewinding a
+  turn hands out a fresh budget rather than the old one — generous, which is the
+  right direction to be wrong in when the DM is fixing something.
+
+The meter sits in the turn bar rather than a side panel: it is read mid-turn,
+and a number nobody sees until the server refuses a drag is an argument rather
+than information. It draws only for a creature you control, because remaining
+plus spent is a speed and speed is stat block data.
+
+---
+
 ## Five bugs from an audit — 2026-08-19
 
 Asked to fix all bugs, so this is an audit rather than a symptom. Each one is

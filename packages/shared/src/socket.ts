@@ -311,6 +311,12 @@ export const movementQuerySchema = z.object({
   threat: z.boolean().default(false),
 });
 
+export const movementDashSchema = z.object({
+  tokenId: z.string(),
+  /** A toggle, not a counter: a mis-click has to be undoable. */
+  on: z.boolean(),
+});
+
 export const pingSchema = z.object({
   sceneId: z.string(),
   x: z.number(),
@@ -521,6 +527,18 @@ export interface ServerToClientEvents {
     tokenId: string | null;
     threat: boolean;
     squares: [number, number][];
+    /**
+     * What this creature has left of its turn, and what a full turn is worth.
+     *
+     * Null outside combat, and null for a threat union - a turn's movement
+     * belongs to one creature. Sent only in the reply to the socket that asked,
+     * which is already gated on control or `mayReadStats`, so this does not
+     * widen who can work out a monster's speed.
+     */
+    leftFeet: number | null;
+    maxFeet: number | null;
+    /** Whether the Dash is already spent, so the button reads true. */
+    dashed: boolean;
   }) => void;
 
   /**
@@ -571,6 +589,14 @@ export interface ClientToServerEvents {
   /** DM only. Deletes the campaign's log outright - chat and battle alike. */
   'chat:clear': (payload: Record<string, never>) => void;
   'movement:query': (payload: z.infer<typeof movementQuerySchema>) => void;
+  /**
+   * Doubles this turn's movement for one creature.
+   *
+   * The app has no action economy, so it cannot know a creature Dashed - and
+   * enforcing a budget without a way to say so would make a legal turn
+   * impossible. Whoever controls the creature may set it, on its own turn.
+   */
+  'movement:dash': (payload: z.infer<typeof movementDashSchema>) => void;
 
   'initiative:update': (payload: InitiativeUpdatePayload) => void;
   'encounter:start': (payload: { sceneId: string | null }) => void;

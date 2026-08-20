@@ -102,6 +102,8 @@ interface TableState {
   revealFog: (sceneId: string) => void;
   resetFog: (sceneId: string) => void;
   paintTerrain: (sceneId: string, brush: TerrainBrush, cells: [number, number][]) => void;
+  /** Doubles this turn's movement; the app cannot know a creature Dashed. */
+  dash: (tokenId: string, on: boolean) => void;
   createToken: (payload: Record<string, unknown>) => void;
   moveToken: (tokenId: string, x: number, y: number) => void;
   commitToken: (tokenId: string, x: number, y: number) => void;
@@ -181,7 +183,22 @@ interface TableState {
    * receive, so both of these are answers from the server rather than anything
    * the client works out.
    */
-  moveRange: { tokenId: string | null; squares: [number, number][] };
+  /**
+   * The selected creature's reach, and what its turn has left.
+   *
+   * `leftFeet` is null out of combat, where nothing is counted. It arrives with
+   * the squares rather than on the token, because a remaining budget plus what
+   * has been spent is a creature's speed - and speed is stat block data. The
+   * reply is sent only to the socket that asked, which the server has already
+   * checked may ask.
+   */
+  moveRange: {
+    tokenId: string | null;
+    squares: [number, number][];
+    leftFeet: number | null;
+    maxFeet: number | null;
+    dashed: boolean;
+  };
   threatRange: [number, number][];
   showThreat: boolean;
   queryMovement: (tokenId: string | null) => void;
@@ -243,7 +260,7 @@ export const useTable = create<TableState>((set, get) => ({
   encounter: null,
   lastDamage: null,
   journalVersion: 0,
-  moveRange: { tokenId: null, squares: [] },
+  moveRange: { tokenId: null, squares: [], leftFeet: null, maxFeet: null, dashed: false },
   threatRange: [],
   showThreat: getPref('board-threat', false),
   undoStack: [],
@@ -296,7 +313,7 @@ export const useTable = create<TableState>((set, get) => ({
       // A door opening or a token moving changes what is reachable, so any
       // range on screen is now a lie. Drop it and ask again.
       const { moveRange, showThreat } = get();
-      set({ moveRange: { tokenId: moveRange.tokenId, squares: [] }, threatRange: [] });
+      set({ moveRange: { ...moveRange, squares: [] }, threatRange: [] });
       if (moveRange.tokenId) get().queryMovement(moveRange.tokenId);
       if (showThreat) socket.emit('movement:query', { tokenId: null, threat: true });
     });
@@ -313,14 +330,27 @@ export const useTable = create<TableState>((set, get) => ({
     socket.on('door:updated', ({ door }) =>
       set({ doors: get().doors.map((d) => (d.id === door.id ? door : d)) }),
     );
-    socket.on('initiative:state', ({ encounter }) => set({ encounter }));
+    socket.on('initiative:state', ({ encounter }) => {
+      // A turn change refills whoever is up next, so any range on screen is now
+      // wrong in the generous direction. Ask again rather than leave a stale
+      // budget where someone can act on it.
+      const before = get().encounter;
+      const turned =
+        before?.activeIndex !== encounter?.activeIndex || before?.round !== encounter?.round;
+
+      set({ encounter });
+
+      const { moveRange, showThreat } = get();
+      if (turned && moveRange.tokenId) get().queryMovement(moveRange.tokenId);
+      if (turned && showThreat) socket.emit('movement:query', { tokenId: null, threat: true });
+    });
     socket.on('template:state', ({ templates }) => set({ templates }));
     socket.on('journal:changed', () => set({ journalVersion: get().journalVersion + 1 }));
     socket.on('chat:cleared', () => set({ messages: [] }));
 
-    socket.on('movement:range', ({ tokenId, threat, squares }) => {
+    socket.on('movement:range', ({ tokenId, threat, squares, leftFeet, maxFeet, dashed }) => {
       if (threat) set({ threatRange: squares });
-      else set({ moveRange: { tokenId, squares } });
+      else set({ moveRange: { tokenId, squares, leftFeet, maxFeet, dashed } });
     });
     socket.on('handout:reveal', (reveal) => {
       set({ reveal });
@@ -656,6 +686,10 @@ export const useTable = create<TableState>((set, get) => ({
 
   queryMovement(tokenId) {
     get().socket?.emit('movement:query', { tokenId, threat: false });
+  },
+
+  dash(tokenId, on) {
+    get().socket?.emit('movement:dash', { tokenId, on });
   },
 
   toggleThreat() {

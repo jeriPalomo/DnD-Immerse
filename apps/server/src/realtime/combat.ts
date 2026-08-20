@@ -59,6 +59,28 @@ async function activeEncounter(campaignId: string) {
 }
 
 /**
+ * Gives every creature on a scene its turn's movement back.
+ *
+ * Called whenever the turn changes and whenever a fight starts or ends, so
+ * `movedFeet` and the Dash mean nothing outside the turn they were spent in.
+ * The whole scene rather than the initiative order: a token added to the board
+ * mid-fight has no entry yet, and one removed from the order should not carry a
+ * spent budget into the next encounter.
+ *
+ * Rewinding a turn hands the creature a fresh budget rather than the one it had
+ * - what it spent is gone, and being generous is the right direction to be
+ * wrong in when the DM is correcting something.
+ */
+async function refillMovement(sceneId: string | null): Promise<void> {
+  if (!sceneId) return;
+  await db
+    .update(tokens)
+    .set({ movedFeet: 0, extraMoveFeet: 0 })
+    .where(eq(tokens.sceneId, sceneId));
+  invalidateDragCache(sceneId);
+}
+
+/**
  * The tracker, projected for one audience.
  *
  * Players see enemy names and conditions but not their exact hit points -
@@ -235,6 +257,9 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       createdAt: Date.now(),
     });
 
+    // Everyone starts the fight with a full turn, whatever the last one left.
+    await refillMovement(sceneId);
+
     await broadcastEncounter(io, ctx.campaignId);
   });
 
@@ -242,10 +267,17 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
     const ctx = await requireDM();
     if (!ctx) return;
 
+    // Read before it is closed, so the scene it was fought on is still known.
+    const ending = await activeEncounter(ctx.campaignId);
+
     await db
       .update(encounters)
       .set({ isActive: false })
       .where(eq(encounters.campaignId, ctx.campaignId));
+
+    // Nothing counts movement out of combat, and a budget left half spent would
+    // be waiting for whoever starts the next fight on this scene.
+    await refillMovement(ending?.sceneId ?? null);
 
     await broadcastEncounter(io, ctx.campaignId);
   });
@@ -378,6 +410,9 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
         .update(encounters)
         .set({ activeIndex: next.activeIndex, round: next.round })
         .where(eq(encounters.id, encounter.id));
+
+      // The turn that just ended took its movement with it.
+      await refillMovement(encounter.sceneId);
 
       // Timed effects fall off at the top of the round they expire in,
       // rather than lingering until someone remembers them.

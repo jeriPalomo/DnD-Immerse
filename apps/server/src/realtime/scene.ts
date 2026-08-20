@@ -27,8 +27,11 @@ import {
   terrainMatchesGrid,
   movementQuerySchema,
   pingSchema,
+  reachableCosts,
   reachableSquares,
   routeExists,
+  costToFeet,
+  movementDashSchema,
   unionOfReach,
   snapTokenPosition,
   tokenCenter,
@@ -60,7 +63,9 @@ import {
   actors,
   campaignMembers,
   campaigns,
+  encounters,
   fogExploration,
+  initiativeEntries,
   sceneTerrain,
   drawings as drawingsTable,
   mapNotes,
@@ -316,6 +321,59 @@ async function terrainOf(scene: Scene): Promise<TerrainMap> {
   return terrainForGrid(rows[0], gridWidth, gridHeight);
 }
 
+/**
+ * Where a token stands in the fight, if there is one on its scene.
+ *
+ * Null when no encounter is running, when it is running somewhere else, or when
+ * this creature is not in the order - a familiar the DM never rolled for is not
+ * in the fight, and staging a monster mid-combat should not be refused.
+ *
+ * Entries are read in `sortOrder`, which is the order `broadcastEncounter`
+ * builds the tracker with. Any other ordering here names a different creature
+ * as the one acting, and the turn bar and the server would disagree about whose
+ * turn it is.
+ */
+async function turnStateFor(
+  token: Token,
+  campaignId: string,
+): Promise<{ encounterId: string; sceneId: string; isActing: boolean } | null> {
+  const rows = await db
+    .select()
+    .from(encounters)
+    .where(and(eq(encounters.campaignId, campaignId), eq(encounters.isActive, true)))
+    .limit(1);
+
+  const encounter = rows[0];
+  if (!encounter || encounter.sceneId !== token.sceneId) return null;
+
+  const order = await db
+    .select({ tokenId: initiativeEntries.tokenId })
+    .from(initiativeEntries)
+    .where(eq(initiativeEntries.encounterId, encounter.id))
+    .orderBy(asc(initiativeEntries.sortOrder));
+
+  const index = order.findIndex((entry) => entry.tokenId === token.id);
+  if (index === -1) return null;
+
+  return {
+    encounterId: encounter.id,
+    sceneId: encounter.sceneId,
+    isActing: index === encounter.activeIndex,
+  };
+}
+
+/**
+ * What a creature has left of its turn, in feet.
+ *
+ * Speed is folded through conditions first, so a creature that was restrained
+ * after moving is held to the speed it has now. Clamped at zero: the DM is
+ * never refused a move, so a monster dragged across the map can have spent more
+ * than it had.
+ */
+function movementLeft(token: Token, speedFeet: number): number {
+  return Math.max(0, speedFeet + token.extraMoveFeet - token.movedFeet);
+}
+
 async function sceneOf(sceneId: string): Promise<Scene | null> {
   const rows = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1);
   return rows[0] ?? null;
@@ -355,9 +413,9 @@ export async function tokenIn(tokenId: string, campaignId: string): Promise<Toke
 async function speedOf(token: Token, conditions: string[]): Promise<number> {
   const base = await baseSpeedOf(token);
   // Folded through the same pure function the HUD uses. Read raw, this reported
-  // a paralyzed token's full 30 ft while the HUD beside it said 0 - and since
-  // `token:commit` does not check speed at all, this overlay is the only place
-  // speed is enforced, so the unconditioned number was the whole enforcement.
+  // a paralyzed token's full 30 ft while the HUD beside it said 0 - and this is
+  // the number a turn's movement is measured against, so an unconditioned one
+  // would hand a paralyzed creature a full turn of walking.
   return deriveToken({ conditions }, base).speed;
 }
 
@@ -909,9 +967,81 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       }
     }
 
+    /**
+     * A turn's movement, which only exists while a fight is running.
+     *
+     * Out of combat nothing spends: players have free rein of the scene and
+     * the overlay is advice. In combat the overlay becomes a promise - the
+     * squares it draws are the squares the server will accept - which is the
+     * only reading of it that is any use when a round is being counted.
+     *
+     * Priced with the same search that draws the overlay, so the two cannot
+     * disagree about what a route through mud costs.
+     */
+    const turn = await turnStateFor(token, ctx.campaignId);
+
+    if (turn && !ctx.isDM && !turn.isActing) {
+      socket.emit('error', { message: 'It is not their turn' });
+      await broadcastToken(io, ctx.campaignId, token);
+      return;
+    }
+
+    let spend = 0;
+
+    if (turn && scene) {
+      const { walls: turnWalls, tokens: sceneTokens, effects: turnEffects } = await dragState(
+        token.sceneId,
+        ctx.campaignId,
+      );
+      const { gridWidth, gridHeight } = gridExtent(scene);
+      const speed = await speedOf(token, conditionsOf(turnEffects.byToken.get(token.id)));
+      const left = movementLeft(token, speed);
+
+      const affordable = reachableCosts({
+        origin: { x: token.x, y: token.y, w, h },
+        speedFeet: left,
+        feetPerSquare: scene.feetPerSquare,
+        walls: turnWalls,
+        // Creatures do not block a *drop* - `token:commit` has never refused a
+        // move for occupancy, and starting now would strand anyone the party
+        // has surrounded. They only shape what a route costs.
+        occupied: [],
+        bounds: { width: gridWidth, height: gridHeight },
+        terrain: await terrainOf(scene),
+      });
+
+      const landed = affordable.get(`${snapped.x}:${snapped.y}`);
+
+      if (!landed && !ctx.isDM) {
+        socket.emit('error', {
+          message:
+            left > 0
+              ? `That is further than ${token.name || 'this creature'} can move this turn — ${Math.round(left)} ft left`
+              : `${token.name || 'This creature'} has no movement left this turn`,
+        });
+        await broadcastToken(io, ctx.campaignId, token);
+        return;
+      }
+
+      // The DM is never refused, so a monster dragged past what it had spends
+      // everything it had rather than a price this search cannot name.
+      spend = landed ? costToFeet(landed.cost, scene.feetPerSquare) : left;
+
+      // Unused tokens are ignored deliberately: this is about the creature
+      // being moved, and reading the rest would be a query per drop.
+      void sceneTokens;
+    }
+
     await db
       .update(tokens)
-      .set({ x: snapped.x, y: snapped.y, w, h, rotation: input.rotation ?? token.rotation })
+      .set({
+        x: snapped.x,
+        y: snapped.y,
+        w,
+        h,
+        rotation: input.rotation ?? token.rotation,
+        ...(turn ? { movedFeet: token.movedFeet + spend } : {}),
+      })
       .where(eq(tokens.id, input.tokenId));
 
     invalidateDragCache(token.sceneId);
@@ -1334,6 +1464,51 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
    * players are never sent wall geometry, so a client cannot know what stops a
    * step.
    */
+  /**
+   * Doubles this turn's movement, because the app has no action economy.
+   *
+   * Nothing here knows a creature took the Dash action - so a budget with no
+   * way to say so would make a legal turn impossible, which is a worse kind of
+   * wrong than not counting at all. A toggle rather than a counter: a mis-click
+   * has to be undoable, and a second Dash is rare enough for the DM to drag.
+   *
+   * Whoever controls the creature may set it, on that creature's own turn. The
+   * DM may set it whenever, the way the DM may do everything else here.
+   */
+  socket.on('movement:dash', async (payload) => {
+    const ctx = await context();
+    if (!ctx) return;
+
+    const input = movementDashSchema.parse(payload);
+    const token = await tokenIn(input.tokenId, ctx.campaignId);
+    if (!token || !mayControl(token, ctx.isDM, user.id)) {
+      socket.emit('error', { message: 'You cannot move that token' });
+      return;
+    }
+
+    const turn = await turnStateFor(token, ctx.campaignId);
+    if (!turn || (!ctx.isDM && !turn.isActing)) {
+      socket.emit('error', { message: 'A Dash is something you take on your own turn' });
+      return;
+    }
+
+    const scene = await sceneOf(token.sceneId);
+    const { effects } = await dragState(token.sceneId, ctx.campaignId);
+    const speed = await speedOf(token, conditionsOf(effects.byToken.get(token.id)));
+
+    await db
+      .update(tokens)
+      .set({ extraMoveFeet: input.on ? speed : 0 })
+      .where(eq(tokens.id, token.id));
+
+    invalidateDragCache(token.sceneId);
+    void scene;
+
+    // The overlay is now a lie either way round, so push the scene and let the
+    // client ask again - the same thing a door opening does.
+    await broadcastSceneState(io, ctx.campaignId);
+  });
+
   socket.on('movement:query', async (payload) => {
     const ctx = await context();
     if (!ctx) return;
@@ -1392,10 +1567,24 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
     const terrain = await terrainOf(scene);
 
+    /**
+     * What a creature may still spend.
+     *
+     * A full turn's speed out of combat, where nothing is counted, and what is
+     * left of the turn once a fight is running - so the overlay shrinks as a
+     * creature walks and the squares it draws stay the squares `token:commit`
+     * will accept.
+     */
+    const budgetFor = async (token: Token): Promise<{ left: number; max: number }> => {
+      const max = await speedOf(token, conditionsOf(effects.byToken.get(token.id)));
+      const turn = await turnStateFor(token, ctx.campaignId);
+      return { left: turn ? movementLeft(token, max) : max, max: max + token.extraMoveFeet };
+    };
+
     const rangeFor = async (token: Token) =>
       reachableSquares({
         origin: { x: token.x, y: token.y, w: token.w, h: token.h },
-        speedFeet: await speedOf(token, conditionsOf(effects.byToken.get(token.id))),
+        speedFeet: (await budgetFor(token)).left,
         feetPerSquare: scene.feetPerSquare,
         walls: sceneWalls,
         occupied: blockers.filter((t) => t.id !== token.id),
@@ -1447,7 +1636,21 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       squares = squares.filter(([x, y]) => explored.has(`${x}:${y}`));
     }
 
-    socket.emit('movement:range', { tokenId: input.tokenId, threat: input.threat, squares });
+    // Only for one creature's own range, and only while a fight is running.
+    // A threat union is several creatures at once, so a single budget would be
+    // a number about nobody.
+    const asked = input.threat || !input.tokenId ? null : visible.find((t) => t.id === input.tokenId);
+    const inFight = asked ? await turnStateFor(asked, ctx.campaignId) : null;
+    const budget = asked && inFight ? await budgetFor(asked) : null;
+
+    socket.emit('movement:range', {
+      tokenId: input.tokenId,
+      threat: input.threat,
+      squares,
+      leftFeet: budget ? budget.left : null,
+      maxFeet: budget ? budget.max : null,
+      dashed: Boolean(asked && asked.extraMoveFeet > 0),
+    });
   });
 
   /**

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { io as connect, type Socket } from 'socket.io-client';
-import type { WireScene, WireToken, WireVision } from '@dnd/shared';
+import type { WireEncounter, WireScene, WireToken, WireVision } from '@dnd/shared';
 
 /**
  * The three invariants the design rests on:
@@ -910,6 +910,174 @@ describe('a malformed brush is refused, not thrown', () => {
     const cleared = next<{ terrain: Record<string, unknown> }>(dmSocket, 'terrain:state');
     dmSocket.emit('terrain:paint', { sceneId, brush: 'clear', cells: [[1, 1]] } as never);
     expect((await cleared)?.terrain.mud).toEqual([]);
+  });
+});
+
+describe('a turn buys a fixed amount of movement', () => {
+  /**
+   * Out of combat nothing is counted: players have free rein of the scene, and
+   * the overlay is advice. Once a fight is running the overlay becomes a
+   * promise - the squares it draws are the squares the server will accept -
+   * which is the only reading of it that is any use when a round is being
+   * counted.
+   *
+   * Alice's token has no sheet behind it, so it moves at the default 30 ft:
+   * six squares at five feet each.
+   */
+  const put = async (tokenId: string, x: number, y: number) => {
+    dmSocket.emit('token:commit', { tokenId, x, y });
+    await new Promise((r) => setTimeout(r, 300));
+  };
+
+  const playerMoveTo = async (x: number, y: number) => {
+    const moved = next<{ token: WireToken }>(dmSocket, 'token:updated', 1500);
+    const failed = next<{ message: string }>(aliceSocket, 'error', 1500);
+    aliceSocket.emit('token:commit', { tokenId: myTokenId, x, y });
+    return { moved: await moved, failure: await failed };
+  };
+
+  const budget = async (): Promise<{ left: number | null; max: number | null }> => {
+    const reply = next<{ leftFeet: number | null; maxFeet: number | null }>(
+      aliceSocket,
+      'movement:range',
+    );
+    aliceSocket.emit('movement:query', { tokenId: myTokenId, threat: false });
+    const got = await reply;
+    return { left: got?.leftFeet ?? null, max: got?.maxFeet ?? null };
+  };
+
+  const trackerNow = async () =>
+    (await new Promise<{ encounter: WireEncounter | null }>((resolve) => {
+      dmSocket.once('initiative:state', resolve as never);
+      dmSocket.emit('initiative:update', { encounterId } as never);
+    })).encounter;
+
+  let encounterId: string;
+
+  beforeAll(async () => {
+    await api('PATCH', `/api/scenes/${sceneId}`, { visionEnabled: false }, dm.cookie);
+    dmSocket.emit('token:update', { tokenId: myTokenId, conditions: [] } as never);
+    await new Promise((r) => setTimeout(r, 300));
+    await put(myTokenId, 30, 30);
+    await put(farTokenId, 50, 50);
+
+    const started = next<{ encounter: WireEncounter | null }>(dmSocket, 'initiative:state');
+    dmSocket.emit('encounter:start', { sceneId });
+    encounterId = (await started)!.encounter!.id;
+
+    // Entered rather than rolled, so the order is the same every run.
+    const added = next<{ encounter: WireEncounter | null }>(dmSocket, 'initiative:state');
+    dmSocket.emit('initiative:add', { tokenIds: [myTokenId, farTokenId], roll: false } as never);
+    const entries = (await added)!.encounter!.entries;
+
+    const mine = entries.find((e) => e.tokenId === myTokenId)!;
+    const theirs = entries.find((e) => e.tokenId === farTokenId)!;
+
+    const ordered = next<{ encounter: WireEncounter | null }>(dmSocket, 'initiative:state');
+    dmSocket.emit('initiative:update', {
+      encounterId,
+      entries: [
+        { id: mine.id, initiative: 20 },
+        { id: theirs.id, initiative: 10 },
+      ],
+    } as never);
+    await ordered;
+  });
+
+  afterAll(async () => {
+    dmSocket.emit('encounter:end', {});
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Both creatures back where the rest of this file expects to find them:
+    // the blinded block below stands Alice beside the Lurker deliberately, so
+    // that its control case is "she can plainly see it".
+    await put(farTokenId, 20, 5);
+    await api('PATCH', `/api/scenes/${sceneId}`, { visionEnabled: true }, dm.cookie);
+    await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+  });
+
+  it('opens on the creature that rolled highest', async () => {
+    const encounter = await trackerNow();
+    expect(encounter?.entries[encounter.activeIndex]?.tokenId).toBe(myTokenId);
+  });
+
+  it('starts the turn with a full speed to spend', async () => {
+    expect(await budget()).toEqual({ left: 30, max: 30 });
+  });
+
+  it('allows a move inside the budget and charges what it cost', async () => {
+    // Four squares east of (30,30) is 20 ft of the 30 available.
+    const { moved } = await playerMoveTo(34, 30);
+    expect(moved?.token.x).toBe(34);
+    expect((await budget()).left).toBe(10);
+  });
+
+  it('refuses the second move once the budget is spent', async () => {
+    // Ten feet left, and this asks for twenty.
+    const { failure } = await playerMoveTo(38, 30);
+    expect(failure?.message).toMatch(/further than|no movement left/i);
+
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    expect(player.tokens.find((t) => t.id === myTokenId)?.x).toBe(34);
+  });
+
+  it('allows what is left of it', async () => {
+    const { moved } = await playerMoveTo(36, 30);
+    expect(moved?.token.x).toBe(36);
+    expect((await budget()).left).toBe(0);
+  });
+
+  it('draws an overlay that empties as the budget does', async () => {
+    const reply = next<{ squares: [number, number][] }>(aliceSocket, 'movement:range');
+    aliceSocket.emit('movement:query', { tokenId: myTokenId, threat: false });
+
+    // Standing still is always legal, so its own square is what remains.
+    expect((await reply)?.squares).toEqual([[36, 30]]);
+  });
+
+  it('doubles the budget for a Dash, and takes it back', async () => {
+    aliceSocket.emit('movement:dash', { tokenId: myTokenId, on: true });
+    await new Promise((r) => setTimeout(r, 400));
+    expect(await budget()).toEqual({ left: 30, max: 60 });
+
+    const { moved } = await playerMoveTo(40, 30);
+    expect(moved?.token.x).toBe(40);
+
+    aliceSocket.emit('movement:dash', { tokenId: myTokenId, on: false });
+    await new Promise((r) => setTimeout(r, 400));
+    expect((await budget()).left).toBe(0);
+  });
+
+  it('gives the movement back when the turn changes', async () => {
+    dmSocket.emit('turn:next', {});
+    await new Promise((r) => setTimeout(r, 500));
+
+    expect(await budget()).toEqual({ left: 30, max: 30 });
+  });
+
+  it('refuses a player moving a creature whose turn it is not', async () => {
+    // The turn moved on to the Lurker above, so Alice may not act - a budget
+    // that refilled on someone else's turn would be no budget at all.
+    const { failure } = await playerMoveTo(41, 30);
+    expect(failure?.message).toMatch(/not their turn/i);
+  });
+
+  it('lets the DM move anything, however far, and never refuses them', async () => {
+    // The DM places things; that has never been budgeted and is not now.
+    const moved = next<{ token: WireToken }>(dmSocket, 'token:updated');
+    dmSocket.emit('token:commit', { tokenId: farTokenId, x: 70, y: 40 });
+    expect((await moved)?.token.x).toBe(70);
+  });
+
+  it('counts nothing once the fight is over', async () => {
+    dmSocket.emit('encounter:end', {});
+    await new Promise((r) => setTimeout(r, 500));
+
+    // No budget at all out of combat, and a long drag is allowed again.
+    expect(await budget()).toEqual({ left: null, max: null });
+
+    const { moved } = await playerMoveTo(45, 30);
+    expect(moved?.token.x).toBe(45);
   });
 });
 
