@@ -31,7 +31,6 @@ import {
   reachableSquares,
   routeExists,
   costToFeet,
-  movementDashSchema,
   unionOfReach,
   snapTokenPosition,
   tokenCenter,
@@ -371,7 +370,7 @@ async function turnStateFor(
  * than it had.
  */
 function movementLeft(token: Token, speedFeet: number): number {
-  return Math.max(0, speedFeet + token.extraMoveFeet - token.movedFeet);
+  return Math.max(0, speedFeet - token.movedFeet);
 }
 
 async function sceneOf(sceneId: string): Promise<Scene | null> {
@@ -1464,51 +1463,6 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
    * players are never sent wall geometry, so a client cannot know what stops a
    * step.
    */
-  /**
-   * Doubles this turn's movement, because the app has no action economy.
-   *
-   * Nothing here knows a creature took the Dash action - so a budget with no
-   * way to say so would make a legal turn impossible, which is a worse kind of
-   * wrong than not counting at all. A toggle rather than a counter: a mis-click
-   * has to be undoable, and a second Dash is rare enough for the DM to drag.
-   *
-   * Whoever controls the creature may set it, on that creature's own turn. The
-   * DM may set it whenever, the way the DM may do everything else here.
-   */
-  socket.on('movement:dash', async (payload) => {
-    const ctx = await context();
-    if (!ctx) return;
-
-    const input = movementDashSchema.parse(payload);
-    const token = await tokenIn(input.tokenId, ctx.campaignId);
-    if (!token || !mayControl(token, ctx.isDM, user.id)) {
-      socket.emit('error', { message: 'You cannot move that token' });
-      return;
-    }
-
-    const turn = await turnStateFor(token, ctx.campaignId);
-    if (!turn || (!ctx.isDM && !turn.isActing)) {
-      socket.emit('error', { message: 'A Dash is something you take on your own turn' });
-      return;
-    }
-
-    const scene = await sceneOf(token.sceneId);
-    const { effects } = await dragState(token.sceneId, ctx.campaignId);
-    const speed = await speedOf(token, conditionsOf(effects.byToken.get(token.id)));
-
-    await db
-      .update(tokens)
-      .set({ extraMoveFeet: input.on ? speed : 0 })
-      .where(eq(tokens.id, token.id));
-
-    invalidateDragCache(token.sceneId);
-    void scene;
-
-    // The overlay is now a lie either way round, so push the scene and let the
-    // client ask again - the same thing a door opening does.
-    await broadcastSceneState(io, ctx.campaignId);
-  });
-
   socket.on('movement:query', async (payload) => {
     const ctx = await context();
     if (!ctx) return;
@@ -1578,7 +1532,7 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
     const budgetFor = async (token: Token): Promise<{ left: number; max: number }> => {
       const max = await speedOf(token, conditionsOf(effects.byToken.get(token.id)));
       const turn = await turnStateFor(token, ctx.campaignId);
-      return { left: turn ? movementLeft(token, max) : max, max: max + token.extraMoveFeet };
+      return { left: turn ? movementLeft(token, max) : max, max };
     };
 
     const rangeFor = async (token: Token) =>
@@ -1649,7 +1603,6 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
       squares,
       leftFeet: budget ? budget.left : null,
       maxFeet: budget ? budget.max : null,
-      dashed: Boolean(asked && asked.extraMoveFeet > 0),
     });
   });
 

@@ -43,8 +43,9 @@ make it real while a fight is running.
   turn is not a budget.
 - **The DM is exempt**, as with walls and painted ground. A DM drag beyond a
   creature's budget spends the lot rather than a price the search cannot name.
-- **Dash**, because the app has no action economy and cannot infer one. Without
-  it a legal turn would be impossible, which is worse than not counting.
+- **No way to grant extra movement.** A Dash toggle was built and taken out at
+  the DM's request. A creature that legitimately moves twice its speed is
+  therefore moved by the DM, who is exempt from the budget.
 - **Refilled** on every turn change and at both ends of a fight. Rewinding a
   turn hands out a fresh budget rather than the old one — generous, which is the
   right direction to be wrong in when the DM is fixing something.

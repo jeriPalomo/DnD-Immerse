@@ -578,11 +578,12 @@ anywhere is the DM's, as it is for walls and painted ground — but a DM drag pa
 what a creature had spends everything it had, because the search cannot price a
 square it could not reach.
 
-**The Dash exists because the app has no action economy.** Nothing here knows a
-creature took the Dash action, and a budget with no way to say so makes a legal
-turn impossible — which is worse than not counting at all. `extraMoveFeet` is
-feet rather than a flag so a DM could grant ten of them later; the button is a
-toggle rather than a counter because a mis-click has to be undoable.
+**There is no way to grant a creature extra movement, deliberately.** The
+handbook's Dash was built and removed at the DM's request. It means a creature
+that legitimately moves twice its speed cannot be moved by its player — the DM
+drags it, which they may always do. If this is rebuilt, the column was
+`extraMoveFeet` in feet rather than a flag, so that a grant of ten is expressible
+too.
 
 **A remaining budget is stat block data.** Left plus spent is a creature's
 speed, so `movement:range` carries `leftFeet` only in the reply to the socket

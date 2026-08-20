@@ -62,7 +62,7 @@ async function activeEncounter(campaignId: string) {
  * Gives every creature on a scene its turn's movement back.
  *
  * Called whenever the turn changes and whenever a fight starts or ends, so
- * `movedFeet` and the Dash mean nothing outside the turn they were spent in.
+ * `movedFeet` means nothing outside the turn it was spent in.
  * The whole scene rather than the initiative order: a token added to the board
  * mid-fight has no entry yet, and one removed from the order should not carry a
  * spent budget into the next encounter.
@@ -75,7 +75,7 @@ async function refillMovement(sceneId: string | null): Promise<void> {
   if (!sceneId) return;
   await db
     .update(tokens)
-    .set({ movedFeet: 0, extraMoveFeet: 0 })
+    .set({ movedFeet: 0 })
     .where(eq(tokens.sceneId, sceneId));
   invalidateDragCache(sceneId);
 }

@@ -377,16 +377,14 @@ export const tokens = sqliteTable(
     statsHidden: integer('stats_hidden', { mode: 'boolean' }).notNull().default(false),
 
     /**
-     * Movement spent on the current turn, and movement granted beyond the
-     * creature's speed - a Dash, which the app has no action economy to infer.
+     * Movement spent on the current turn.
      *
-     * Both are zeroed whenever the turn changes and whenever a fight starts or
-     * ends, so they mean nothing outside combat and cost nothing to carry. In
-     * feet rather than squares because speed is in feet and a scene may not be
-     * five feet to the square.
+     * Zeroed whenever the turn changes and whenever a fight starts or ends, so
+     * it means nothing outside combat and costs nothing to carry. In feet
+     * rather than squares because speed is in feet and a scene may not be five
+     * feet to the square.
      */
     movedFeet: real('moved_feet').notNull().default(0),
-    extraMoveFeet: real('extra_move_feet').notNull().default(0),
     createdAt: epoch('created_at'),
   },
   (t) => [index('tokens_scene_idx').on(t.sceneId)],

@@ -1035,19 +1035,6 @@ describe('a turn buys a fixed amount of movement', () => {
     expect((await reply)?.squares).toEqual([[36, 30]]);
   });
 
-  it('doubles the budget for a Dash, and takes it back', async () => {
-    aliceSocket.emit('movement:dash', { tokenId: myTokenId, on: true });
-    await new Promise((r) => setTimeout(r, 400));
-    expect(await budget()).toEqual({ left: 30, max: 60 });
-
-    const { moved } = await playerMoveTo(40, 30);
-    expect(moved?.token.x).toBe(40);
-
-    aliceSocket.emit('movement:dash', { tokenId: myTokenId, on: false });
-    await new Promise((r) => setTimeout(r, 400));
-    expect((await budget()).left).toBe(0);
-  });
-
   it('gives the movement back when the turn changes', async () => {
     dmSocket.emit('turn:next', {});
     await new Promise((r) => setTimeout(r, 500));
