@@ -481,7 +481,19 @@ export function BattleMap({
             <KonvaImage image={mapImage} name="map" width={scene.mapWidth} height={scene.mapHeight} />
           )}
           {!mapImage && (
-            <Rect width={scene.mapWidth || 1400} height={scene.mapHeight || 900} fill="#121017" />
+            // `name="map"` matters as much here as on the image: the stage's
+            // click handler accepts the stage itself or the map, and this Rect
+            // covers the whole board. Without the name it was neither, so on a
+            // scene with no map uploaded *every* tool silently did nothing -
+            // walls, pins, pings and click-to-deselect alike. A grid-only scene
+            // is a perfectly ordinary way to run a fight, and this made it look
+            // like the board was broken.
+            <Rect
+              name="map"
+              width={scene.mapWidth || 1400}
+              height={scene.mapHeight || 900}
+              fill="#121017"
+            />
           )}
         </Layer>
 

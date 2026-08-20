@@ -628,6 +628,27 @@ feet for stopping. Moving in two goes must cover the same ground as moving in
 one, or the budget punishes thinking. A 30 ft creature therefore gets
 six squares of floor, four of water, three of mud.
 
+**The board's no-map fallback is named `map`, exactly like the map.** The stage
+click handler accepts the stage itself or a node named `map`, and the `Rect`
+drawn when no map has been uploaded is neither unless it says so - it covers the
+whole board, so it swallowed every click. On a grid-only scene *nothing* worked:
+no walls, no pins, no pings, not even click-to-deselect. A grid with no picture
+is an ordinary way to run a fight, and this made the board look broken to
+anyone who made a scene before uploading art - which is the first thing a new DM
+does.
+
+**`npm run seed` builds a scene, not just a party.** A campaign with no scene
+opens on "No active scene", which is the right message and a poor first
+impression - the battle map is the thing worth showing and it was the one thing
+the example campaign did not have. The map is *drawn* at seed time as an SVG
+rasterised through the same `sharp` the upload route uses, so there is no binary
+in the repository and the art always matches the grid it is calibrated to. Its
+filename is fixed rather than campaign-scoped, so re-seeding overwrites one file
+instead of leaving a PNG behind on every run. Walls and a shut door are part of
+it deliberately: with vision on, the party's room is lit and the goblins behind
+the door are absent from a player's payload entirely, which demonstrates the
+one invariant this project is built around.
+
 **A Konva stage is not mounted until its container has been measured.** Konva
 draws each layer by handing its canvas to `drawImage`, and a canvas of zero
 width throws `InvalidStateError` — which it did on every board mount, because

@@ -25,6 +25,28 @@ audio system rather than extending it.
 
 ---
 
+## Ready to show somebody — 2026-08-20
+
+**A grid-only scene had a dead board.** The stage click handler accepts the
+stage or a node named `map`; the placeholder `Rect` drawn when no map is
+uploaded had no name and covers the whole board, so it ate every click. Walls,
+pins, pings and click-to-deselect all silently did nothing. This was filed as a
+test curiosity earlier and is a real bug for the first scene anybody makes -
+fixed by naming the Rect. Verified: three clicks on a mapless scene went from 0
+walls to 2.
+
+**The seeded campaign now has a map.** `npm run seed` builds "The Sunken Crypt"
+- two rooms, a corridor, a shut door, the party in the west room with torches
+and three goblins in the east one - drawn as an SVG rasterised by `sharp` rather
+than shipped as a binary. Dynamic vision is on, so the DM sees the whole crypt
+while a player sees only their lit room and the word "Goblin" appears nowhere in
+their payload. That makes `npm run playtest` a table somebody can be shown.
+
+**Checked the whole new-user path on an empty database**: register, create a
+campaign, invite code, a second account joining, making a character, and both
+views of a table with no scene. No console errors, no 500s, and every empty
+state says what to do next.
+
 ## Fireball, applied from the card — 2026-08-20
 
 Resolving one used to be four moves: ask for saves, read who failed, find each
