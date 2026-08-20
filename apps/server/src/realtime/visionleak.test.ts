@@ -394,6 +394,28 @@ describe('invariant: a threat range never draws a map', () => {
     expect(squares.some(([x, y]) => x === 6 && y === 5)).toBe(true);
   });
 
+  it('still draws a range on a scene with dynamic vision off', async () => {
+    // The clip to explored ground filtered against `view.vision.explored`, and
+    // `computePlayerView` returns null when a scene has vision off - so the
+    // filter ran against an empty set and threw the whole range away. Since
+    // `visionEnabled` defaults to false, a player on an ordinary scene selected
+    // their token and saw nothing at all. Nothing is hidden on such a scene, so
+    // there is nothing to clip against and nothing to leak.
+    await api('PATCH', `/api/scenes/${sceneId}`, { visionEnabled: false }, dm.cookie);
+    const player = await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+    const mine = player.tokens.find((t) => t.name === 'Alice PC');
+
+    const reply = next<{ squares: [number, number][] }>(aliceSocket, 'movement:range');
+    aliceSocket.emit('movement:query', { tokenId: mine!.id, threat: false });
+    const squares = (await reply)?.squares ?? [];
+
+    expect(squares.length).toBeGreaterThan(0);
+
+    // Put it back: the rest of this suite is about what vision hides.
+    await api('PATCH', `/api/scenes/${sceneId}`, { visionEnabled: true }, dm.cookie);
+    await refresh(aliceSocket, () => dmSocket.emit('scene:activate', { sceneId }));
+  });
+
   it('gives the DM the unclipped truth', async () => {
     const reply = next<{ squares: [number, number][] }>(dmSocket, 'movement:range');
     dmSocket.emit('movement:query', { tokenId: null, threat: true });

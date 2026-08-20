@@ -494,6 +494,14 @@ to agree: `campaignMembers.role === 'dm'` (what `requireDM` reads) and
 creation and nothing reassigns either, so they cannot currently diverge — but
 anything that transfers a campaign has to write both.
 
+**A movement range is clipped to explored ground only when there is a view to
+clip against.** `computePlayerView` returns null on a scene with dynamic vision
+off, and the clip filtered against `view?.vision.explored ?? []` - an empty set,
+which threw the entire range away. `visionEnabled` defaults to false, so on an
+ordinary scene a player selected their token and saw no overlay at all, and the
+feature looked like it had never been built. Nothing is hidden on such a scene,
+so there is nothing to clip and nothing to leak.
+
 **Reachability is computed on the server, for the same reason vision is.**
 Players never receive wall geometry, so a browser cannot know what stops a
 step. `movement:query` answers the asking socket alone, and a player's threat

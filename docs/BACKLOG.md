@@ -25,6 +25,29 @@ audio system rather than extending it.
 
 ---
 
+## The movement overlay was invisible to players — 2026-08-19
+
+Found by checking whether rough terrain really shrinks a player's range, rather
+than trusting the unit tests. It does - but the player was seeing nothing at
+all, and had been all along.
+
+The range is clipped to ground the player has explored, which is right when
+something is hidden. `computePlayerView` returns null when a scene has dynamic
+vision off, so the clip ran against an empty set and discarded the whole range.
+`visionEnabled` defaults to false, so on an ordinary scene selecting your token
+produced an empty overlay - the feature looked unbuilt. Now clipped only when
+there is a view to clip against; nothing is hidden on such a scene anyway.
+
+This predates the terrain work and had nothing to do with it. It also means an
+earlier claim in this log that movement range "already works for players" was
+true of the calculation and false of what anyone could see.
+
+The arithmetic itself checks out. With rough ground from x=2 and a 30 ft
+creature at x=1, the reachable squares along that row are 0,1,2,3,4 - three
+squares into the rubble at two apiece, against six on open ground.
+
+---
+
 ## Blocked ground stopped standing, not crossing — 2026-08-19
 
 Found while explaining the terrain tools rather than by a failure: the commit

@@ -1392,7 +1392,14 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
 
     // Clipped to ground this player has already walked or seen. Without it a
     // goblin's reach spilling round a corner is a free map of the corridor.
-    if (!ctx.isDM && squares.length > 0) {
+    //
+    // Only when there is a view to clip against. `computePlayerView` returns
+    // null on a scene with dynamic vision off, and the clip then filtered
+    // against an empty set and threw the whole range away - so on a scene with
+    // vision off, which is the default, a player selected their token and saw
+    // nothing at all. Nothing is hidden on such a scene, so there is nothing to
+    // leak by drawing the range in full.
+    if (!ctx.isDM && view && squares.length > 0) {
       const explored = new Set((view?.vision.explored ?? []).map(([x, y]) => `${x}:${y}`));
       squares = squares.filter(([x, y]) => explored.has(`${x}:${y}`));
     }
