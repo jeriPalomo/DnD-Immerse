@@ -110,11 +110,17 @@ if (!runScript('backup')) {
 let child = null;
 let stopping = false;
 let failures = 0;
+/** A restart waiting on its backoff, so stopping can cancel it. */
+let pending = null;
 
 function stop(signal) {
   if (stopping) return;
   stopping = true;
   say(`${signal} received, stopping the server`);
+  if (pending) {
+    clearTimeout(pending);
+    pending = null;
+  }
   if (child) {
     child.kill('SIGTERM');
     // If it has not gone in ten seconds it is wedged; take it down.
@@ -126,8 +132,20 @@ function stop(signal) {
 
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
+// Windows delivers Ctrl-Break separately, and closing the console window sends
+// SIGHUP. Both mean the same thing here.
+process.on('SIGBREAK', () => stop('SIGBREAK'));
+process.on('SIGHUP', () => stop('SIGHUP'));
 
 function start() {
+  // Ctrl-C reaches the server as well as this process - they share a console -
+  // so the child often exits *before* this process has handled its own SIGINT.
+  // The exit handler then sees `stopping` still false and schedules a restart
+  // with a zero-second backoff, which is how you end up with a fresh server
+  // holding port 3001 and no supervisor left to stop it. Checked here as well
+  // as there, because the race is about which of the two runs first.
+  if (stopping) return;
+
   const startedAt = Date.now();
   say(`starting the server on port ${PORT}`);
 
@@ -164,7 +182,10 @@ function start() {
     failures += 1;
     say(`server exited (${signal ?? `code ${code}`}) - restarting in ${wait}s`);
     pruneLogs();
-    setTimeout(start, wait * 1000);
+    // The handle is kept so `stop` can cancel a restart that is still waiting
+    // out its backoff, rather than letting a server come up behind a supervisor
+    // already on its way out.
+    pending = setTimeout(start, wait * 1000);
   });
 
   child.on('error', (error) => {

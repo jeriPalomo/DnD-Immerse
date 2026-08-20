@@ -21,7 +21,8 @@
     "start": "npm run build && npm run start --workspace=@dnd/server",
     "pretest": "npm run build --workspace=@dnd/shared",
     "playtest": "node scripts/playtest.mjs",
-    "serve": "node scripts/serve.mjs"
+    "serve": "node scripts/serve.mjs",
+    "stop": "node scripts/stop.mjs"
   },
   "engines": {
     "node": ">=20"

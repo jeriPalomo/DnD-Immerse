@@ -29,7 +29,8 @@ the desktop and the laptop.
 ## Commands
 
 ```bash
-npm run serve        # Production: backs up, builds, starts, restarts on crash
+npm run serve        # Play: backs up, builds, starts, restarts on crash
+npm run stop         # Stop it when Ctrl-C is not an option
 npm start            # One process, everything on :3001, no supervision
 npm run dev          # Development: API :3001 + client :5173, hot reload
 npm test             # Vitest: rules5e + grid math
@@ -46,11 +47,12 @@ The SRD import is idempotent — re-running replaces the compendium in place.
 
 ## Running it for real
 
-**[docs/RUNNING.md](docs/RUNNING.md) is the operational guide.** A scheduled
-task starts `scripts/serve.mjs` at logon; that supervisor backs up, builds,
-starts the server and restarts it if it exits. Two layers because they fail
-differently: the supervisor cannot restart itself from a machine that rebooted
-for updates, and the task cannot notice a process that is up but wedged.
+**[docs/RUNNING.md](docs/RUNNING.md) is the operational guide.** `npm run serve`
+is the thing to run: it backs up, builds, starts the server and restarts it if
+it crashes. Started by hand for a session and stopped afterwards - Ctrl-C, or
+`npm run stop` when the window is already gone. `scripts/install-startup.ps1`
+registers a scheduled task for anyone who would rather it were always up; it is
+not installed by default.
 
 **A restart is the recovery, not a failure.** There is deliberately no
 `uncaughtException` handler to sit alongside `unhandledRejection`: a rejection
