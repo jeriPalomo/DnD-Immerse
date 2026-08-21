@@ -38,9 +38,26 @@ export async function storeImage(
     throw new HttpError(413, `File too large (max ${Math.round(MAX_BYTES[kind] / 1024 / 1024)}MB)`);
   }
 
-  let pipeline = sharp(buffer, { limitInputPixels: 400_000_000 }).rotate();
-
-  const meta = await pipeline.metadata();
+  /**
+   * Opening the file is where a wrong one announces itself.
+   *
+   * The dimension check below was already here and could not be reached: sharp
+   * *throws* on anything it cannot decode rather than handing back metadata
+   * with no width - "unsupported image format" from `metadata()` for a text
+   * file, and "Input Buffer is empty" from the constructor for an empty one.
+   * Both escaped as a 500, so somebody who picked the wrong file was told
+   * "Something went wrong", which is the least useful true sentence available.
+   *
+   * Both are wrapped, because they throw from different places.
+   */
+  let pipeline: sharp.Sharp;
+  let meta: sharp.Metadata;
+  try {
+    pipeline = sharp(buffer, { limitInputPixels: 400_000_000 }).rotate();
+    meta = await pipeline.metadata();
+  } catch {
+    throw new HttpError(400, 'That file is not an image this can read');
+  }
   if (!meta.width || !meta.height) throw new HttpError(400, 'Not a readable image');
 
   const limit = options.maxDimension;
