@@ -697,6 +697,29 @@ if (thorin) {
     earned > 0 && afterFight.body.actor.experience === earned,
     `${afterFight.body.actor.experience} on the sheet, ${earned} from this fight`);
   check('and the log says it landed', /added to their sheets/.test(summaryBody), summaryBody);
+
+  /**
+   * Divided among who fought, not among who is on the roster.
+   *
+   * Three characters are assigned to this campaign and exactly one - Thorin -
+   * was ever put in the initiative order. Dividing by the roster would read
+   * "across 3 characters" and pay each of them a third; dividing by the
+   * combatants reads "across 1" and pays the whole share to the one who was
+   * there. The two differ by a factor of three, which is what makes this
+   * worth asserting rather than eyeballing.
+   */
+  const across = Number(summaryBody.match(/each across (\d+) character/)?.[1] ?? 0);
+  const total = Number(summaryBody.match(/EXP gain: (\d+)/)?.[1] ?? 0);
+  check('the share is divided among the combatants, not the roster',
+    across === 1, `across ${across} — the campaign has 3 characters assigned`);
+  check('so the one who fought takes all of it',
+    earned === total && afterFight.body.actor.experience === total,
+    `${total} total, ${earned} each, ${afterFight.body.actor.experience} on the sheet`);
+
+  // A friendly NPC fights alongside the party and still has no sheet to earn
+  // onto; the goblins are not characters either. Neither may swell the divisor.
+  check('and no NPC is counted among the earners', across === 1,
+    'three goblins were in the same order');
 }
 check('filed with the fight rather than the conversation', ended?.message?.combat === true,
   `combat: ${ended?.message?.combat}`);

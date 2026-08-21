@@ -33,7 +33,6 @@ import type {
 } from '@dnd/shared';
 import { db } from '../db/index.js';
 import {
-  actorCampaigns,
   activeEffects,
   actors,
   encounters,
@@ -331,6 +330,8 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
           publishedXp: srdMonsters.xp,
           publishedCr: srdMonsters.challengeRating,
           challengeRating: actors.challengeRating,
+          actorId: actors.id,
+          actorType: actors.type,
         })
         .from(initiativeEntries)
         .leftJoin(tokens, eq(initiativeEntries.tokenId, tokens.id))
@@ -340,20 +341,30 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
 
       // A fight nobody was ever in is a mis-press, not an encounter.
       if (fought.length > 0) {
-        // The party as the campaign has it, exactly as the difficulty
-        // suggestions read it - four level 3s and a level 1 is a real party,
-        // and the share is divided across whoever is actually assigned.
-        const party = await db
-          .select({ id: actors.id })
-          .from(actorCampaigns)
-          .innerJoin(actors, eq(actorCampaigns.actorId, actors.id))
-          .where(
-            and(eq(actorCampaigns.campaignId, ctx.campaignId), eq(actors.type, 'character')),
-          );
+        /**
+         * Who the share is divided among: the characters who were in the fight.
+         *
+         * Read from the initiative order rather than from the campaign, so
+         * somebody who missed the session earns nothing from it. On
+         * `actors.type` and never on `disposition` - a friendly NPC travelling
+         * with the party fights alongside them and is still not somebody with a
+         * sheet to write experience onto.
+         *
+         * Deduplicated by actor: a character with two tokens in the order is
+         * one person, and counting them twice would both shrink everybody's
+         * share and pay them double.
+         */
+        const earners = [
+          ...new Set(
+            fought
+              .filter((row) => row.actorType === 'character' && row.actorId)
+              .map((row) => row.actorId as string),
+          ),
+        ];
 
         const summary = battleSummary({
           rounds: ending.round,
-          characters: party.length,
+          characters: earners.length,
           foes: fought
             .filter((row) => row.disposition === 'hostile')
             .map((row) => ({
@@ -378,23 +389,16 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
          * a confirmation on every fight is friction for a figure that changes
          * nothing, where damage and healing are offered because they do.
          *
-         * Divided across the campaign's characters rather than the combatants,
-         * the same party `battleSummary` was given. Somebody who missed the
-         * session still earned it as far as the record is concerned, which is
-         * how most tables do it and is the DM's to correct - the number is
-         * editable on the sheet.
+         * Paid to the characters who were in the fight, and to nobody else:
+         * somebody who missed the session earns nothing from it. The DM can
+         * still hand it out by typing, since the number is editable.
          */
         const each = summary.xpEach ?? 0;
         if (each > 0) {
           await db
             .update(actors)
             .set({ experience: sql`${actors.experience} + ${each}`, updatedAt: Date.now() })
-            .where(
-              inArray(
-                actors.id,
-                party.map((character) => character.id),
-              ),
-            );
+            .where(inArray(actors.id, earners));
         }
 
         await postSystemMessage(

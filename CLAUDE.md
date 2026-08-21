@@ -628,10 +628,15 @@ point of declaring them. That was the third disconnected wire found in this
 area, after `subclass` and `backstory`: each looked like a missing feature and
 was really a field nothing wrote.
 
-**The share is divided across the campaign's characters, not the combatants.**
-The same party `battleSummary` was given. Somebody who missed the session still
-earned it as far as the record is concerned, which is how most tables do it and
-is the DM's to correct on the sheet.
+**The share is divided among the characters who were in the fight, not the
+roster.** Read from the initiative order, so somebody who missed the session
+earns nothing from it. On `actors.type === 'character'` and never on
+`disposition`: a friendly NPC fights alongside the party and still has no sheet
+to earn onto, and neither the goblins nor a DM's ally may swell the divisor.
+Deduplicated by actor, because a character with two tokens in the order is one
+person — counting them twice would shrink everybody's share *and* pay them
+double. With no characters in the fight at all there is nobody to divide among,
+so the total is reported and nothing is written.
 
 **A player may damage monsters, never characters.** `damage:apply` is open to
 members, but `isFairGame` refuses any token that is owned or linked to a
