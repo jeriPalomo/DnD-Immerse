@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { levelGains } from './levelUp.js';
-import type { ClassLevelRow, FeatureRow, TraitRow } from './levelUp.js';
+import type {
+  ClassLevelRow,
+  CustomSubclassFeature,
+  FeatureRow,
+  TraitRow,
+} from './levelUp.js';
 import { ASI_LEVELS, auditAsiLevels, gainsAbilityScoreIncrease } from './rules5e.js';
 
 /** A Barbarian's published rows, trimmed to the levels these tests cross. */
@@ -235,19 +240,92 @@ describe('choices, which are features with options', () => {
 });
 
 describe('subclass features', () => {
+  /** A Battle Master, written by hand because the SRD never published one. */
+  const battleMaster: CustomSubclassFeature[] = [
+    { subclassName: 'Battle Master', level: 3, name: 'Combat Superiority', description: 'Four dice.' },
+    { subclassName: 'Battle Master', level: 7, name: 'Know Your Enemy', description: 'Study them.' },
+  ];
+
   it("keeps them apart from the class's own", () => {
-    const result = gains({ from: 2, to: 3 });
+    const result = gains({ from: 2, to: 3, subclass: 'Berserker' });
     expect(result.features.map((f) => f.name)).not.toContain('Frenzy');
     expect(result.subclassFeatures.map((f) => f.name)).toEqual(['Frenzy']);
+    expect(result.subclassSource).toBe('published');
   });
 
-  it('shows only the subclass the sheet names, when it names one', () => {
-    const withOther: FeatureRow[] = [
-      ...barbarianFeatures,
-      { className: 'Barbarian', subclassName: 'Totem Warrior', level: 3, name: 'Totem Spirit', description: '', parentName: '' },
-    ];
-    const result = gains({ from: 2, to: 3, subclass: 'Berserker', features: withOther });
+  it('shows nothing at all when the sheet names no subclass', () => {
+    // The regression this exists for. It used to fall back to "whatever the SRD
+    // publishes", and since no UI ever set the field, every Battle Master was
+    // quietly handed Champion's features.
+    const result = gains({ from: 2, to: 3, subclass: '' });
+    expect(result.subclassFeatures).toEqual([]);
+    expect(result.subclassSource).toBeNull();
+    // Still reported, so the panel can say which one the SRD does carry.
+    expect(result.publishedSubclassName).toBe('Berserker');
+  });
+
+  it('shows nothing for a subclass the SRD never published', () => {
+    const result = gains({ from: 2, to: 3, subclass: 'Totem Warrior' });
+    expect(result.subclassFeatures).toEqual([]);
+    expect(result.subclassSource).toBeNull();
+    expect(result.publishedSubclassName).toBe('Berserker');
+  });
+
+  it('uses a definition written for that subclass', () => {
+    const result = gains({
+      className: 'Fighter', subclass: 'Battle Master', from: 6, to: 7,
+      features: [], customFeatures: battleMaster,
+    });
+    expect(result.subclassFeatures.map((f) => f.name)).toEqual(['Know Your Enemy']);
+    expect(result.subclassSource).toBe('custom');
+  });
+
+  it('refuses a definition written for a different subclass', () => {
+    // Retyping the sheet's subclass must not serve the old list. The name rides
+    // on every row for exactly this.
+    const result = gains({
+      className: 'Fighter', subclass: 'Champion', from: 6, to: 7,
+      features: [], customFeatures: battleMaster,
+    });
+    expect(result.subclassFeatures).toEqual([]);
+    expect(result.subclassSource).toBeNull();
+  });
+
+  it('ignores a definition when no subclass is named', () => {
+    const result = gains({
+      className: 'Fighter', subclass: '', from: 6, to: 7,
+      features: [], customFeatures: battleMaster,
+    });
+    expect(result.subclassFeatures).toEqual([]);
+  });
+
+  it('only takes the levels crossed from a definition', () => {
+    const result = gains({
+      className: 'Fighter', subclass: 'Battle Master', from: 2, to: 3,
+      features: [], customFeatures: battleMaster,
+    });
+    expect(result.subclassFeatures.map((f) => f.name)).toEqual(['Combat Superiority']);
+  });
+
+  it('matches the subclass however it was capitalised', () => {
+    const result = gains({
+      className: 'Fighter', subclass: 'battle master', from: 6, to: 7,
+      features: [], customFeatures: battleMaster,
+    });
+    expect(result.subclassFeatures.map((f) => f.name)).toEqual(['Know Your Enemy']);
+  });
+
+  it('prefers the published subclass over a definition of the same name', () => {
+    // Somebody who writes their own Berserker gets the compendium's, which is
+    // the one the rest of the app already agrees about.
+    const result = gains({
+      from: 2, to: 3, subclass: 'Berserker',
+      customFeatures: [
+        { subclassName: 'Berserker', level: 3, name: 'Something else', description: '' },
+      ],
+    });
     expect(result.subclassFeatures.map((f) => f.name)).toEqual(['Frenzy']);
+    expect(result.subclassSource).toBe('published');
   });
 });
 

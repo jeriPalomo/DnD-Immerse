@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne } from 'drizzle-orm';
 import {
   ABILITIES,
   ABILITY_ROLL,
@@ -24,6 +24,7 @@ import {
   campaignMembers,
   campaigns,
   items,
+  actorSubclassFeatures,
   ownership,
   srdClassLevels,
   srdFeatures,
@@ -263,7 +264,51 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
       .from(ownership)
       .where(and(eq(ownership.documentType, 'actor'), eq(ownership.documentId, id)));
 
-    return { actor, items: ownedItems, campaigns: assignments, access: level, grants };
+    // What this sheet's subclass grants, if somebody wrote it down. Travels
+    // with the sheet like items do, so the editor has it without a second
+    // request - and so the panel and the editor read one answer.
+    const subclassFeatures = await db
+      .select({
+        subclassName: actorSubclassFeatures.subclassName,
+        level: actorSubclassFeatures.level,
+        name: actorSubclassFeatures.name,
+        description: actorSubclassFeatures.description,
+      })
+      .from(actorSubclassFeatures)
+      .where(eq(actorSubclassFeatures.actorId, id))
+      .orderBy(asc(actorSubclassFeatures.level), asc(actorSubclassFeatures.sortOrder));
+
+    /**
+     * The subclass the compendium publishes for this class, so the field can
+     * suggest the right spelling.
+     *
+     * Read from the data rather than a curated list because the editions
+     * disagree: 2014 says "Berserker" where 2024 says "Path of the Berserker",
+     * and a hardcoded name would be wrong for half the campaigns.
+     */
+    const published = actor.className
+      ? await db
+          .select({ name: srdFeatures.subclassName })
+          .from(srdFeatures)
+          .where(
+            and(
+              eq(srdFeatures.ruleset, assignments[0]?.ruleset ?? '2014'),
+              eq(srdFeatures.className, actor.className),
+              ne(srdFeatures.subclassName, ''),
+            ),
+          )
+          .limit(1)
+      : [];
+
+    return {
+      actor,
+      items: ownedItems,
+      campaigns: assignments,
+      access: level,
+      grants,
+      subclassFeatures,
+      publishedSubclass: published[0]?.name ?? null,
+    };
   });
 
   app.post('/api/actors', async (request) => {
@@ -699,10 +744,15 @@ const STAT_BLOCK_FIELDS = [
       .limit(1);
     const ruleset = assigned[0]?.ruleset ?? '2014';
 
-    const [classLevels, features, traits] = await Promise.all([
+    const [classLevels, features, traits, customFeatures] = await Promise.all([
       db.select().from(srdClassLevels).where(eq(srdClassLevels.ruleset, ruleset)),
       db.select().from(srdFeatures).where(eq(srdFeatures.ruleset, ruleset)),
       db.select().from(srdTraits).where(eq(srdTraits.ruleset, ruleset)),
+      db
+        .select()
+        .from(actorSubclassFeatures)
+        .where(eq(actorSubclassFeatures.actorId, id))
+        .orderBy(asc(actorSubclassFeatures.level), asc(actorSubclassFeatures.sortOrder)),
     ]);
 
     return {
@@ -715,6 +765,7 @@ const STAT_BLOCK_FIELDS = [
         classLevels,
         features,
         traits,
+        customFeatures,
       }),
       // So the panel can say "nothing is published yet" rather than "this level
       // grants nothing", which are very different messages.
@@ -785,6 +836,59 @@ const STAT_BLOCK_FIELDS = [
       .where(eq(actors.id, id));
 
     return { levelAcknowledged: actor.level };
+  });
+
+  /**
+   * The subclass this sheet wrote for itself.
+   *
+   * Replaced wholesale rather than edited row by row: the editor holds the
+   * whole list, one person edits their own sheet, and one route with one guard
+   * is less to get wrong than three with per-row id scoping.
+   *
+   * The subclass name is taken from the sheet rather than from the payload, so
+   * a definition cannot be filed under a subclass the character does not play.
+   */
+  app.put('/api/actors/:id/subclass-features', async (request) => {
+    const user = assertUser(request);
+    const { id } = request.params as { id: string };
+    const { actor } = await requireActorWrite(id, user.id);
+
+    const input = z
+      .object({
+        features: z
+          .array(
+            z.object({
+              level: z.number().int().min(1).max(20),
+              name: z.string().min(1).max(200),
+              description: z.string().max(8000).default(''),
+            }),
+          )
+          .max(40),
+      })
+      .parse(request.body);
+
+    const subclassName = actor.subclass.trim();
+    if (!subclassName && input.features.length > 0) {
+      throw new HttpError(400, 'Set the subclass on this sheet before writing what it grants.');
+    }
+
+    await db.delete(actorSubclassFeatures).where(eq(actorSubclassFeatures.actorId, id));
+
+    if (input.features.length > 0) {
+      await db.insert(actorSubclassFeatures).values(
+        input.features.map((feature, index) => ({
+          id: newId(),
+          actorId: id,
+          subclassName,
+          level: feature.level,
+          name: feature.name,
+          description: feature.description,
+          sortOrder: index,
+        })),
+      );
+    }
+
+    return { subclassName, count: input.features.length };
   });
 
   app.post('/api/actors/:id/level-hit-points', async (request) => {

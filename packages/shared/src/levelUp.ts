@@ -32,6 +32,18 @@ export interface FeatureRow {
   parentName: string;
 }
 
+/**
+ * A subclass feature the table wrote itself, as `actor_subclass_features`
+ * stores it. `subclassName` travels so a definition cannot be served to a
+ * sheet that has since changed subclass.
+ */
+export interface CustomSubclassFeature {
+  subclassName: string;
+  level: number;
+  name: string;
+  description: string;
+}
+
 /** A racial trait, as `srd_traits` stores it. */
 export interface TraitRow {
   name: string;
@@ -71,6 +83,17 @@ export interface LevelGains {
   unavailable: string | null;
   features: GainedFeature[];
   subclassFeatures: GainedFeature[];
+  /** What the sheet says this character's subclass is. Empty when unset. */
+  subclassName: string;
+  /** Where `subclassFeatures` came from, or null when there was nothing. */
+  subclassSource: 'published' | 'custom' | null;
+  /**
+   * The one subclass the compendium carries for this class, whether or not it
+   * is this character's. The panel needs it to say "the SRD only carries
+   * Champion" - which is the difference between an unexplained empty section
+   * and an honest one.
+   */
+  publishedSubclassName: string | null;
   /** How many ability score increases are owed - two, if a level was skipped. */
   abilityScoreIncreases: number;
   /** Only when it moved. */
@@ -181,6 +204,8 @@ export function levelGains(input: {
   classLevels: ClassLevelRow[];
   features: FeatureRow[];
   traits: TraitRow[];
+  /** Subclasses the table wrote itself, for the ones the SRD never published. */
+  customFeatures?: CustomSubclassFeature[];
 }): LevelGains {
   const empty: LevelGains = {
     className: input.className,
@@ -188,6 +213,9 @@ export function levelGains(input: {
     unavailable: null,
     features: [],
     subclassFeatures: [],
+    subclassName: input.subclass.trim(),
+    subclassSource: null,
+    publishedSubclassName: null,
     abilityScoreIncreases: 0,
     proficiencyBonus: null,
     spellSlots: [],
@@ -218,17 +246,58 @@ export function levelGains(input: {
   const crossed: number[] = [];
   for (let level = input.from + 1; level <= input.to; level += 1) crossed.push(level);
 
+  const customFeatures = input.customFeatures ?? [];
+
   const named = (row: { className: string }) =>
     row.className.trim().toLowerCase() === input.className.trim().toLowerCase();
 
   const gained = input.features.filter((row) => named(row) && crossed.includes(row.level));
 
-  // A subclass the sheet names wins; with none set, whatever the SRD publishes
-  // is shown under its own heading so nobody mistakes it for their own.
-  const wantedSubclass = input.subclass.trim().toLowerCase();
-  const subclassRows = gained.filter(
-    (row) => row.subclassName && (!wantedSubclass || row.subclassName.trim().toLowerCase() === wantedSubclass),
-  );
+  /**
+   * Which subclass's features to show, decided once.
+   *
+   * This used to fall back to "whatever the SRD publishes" whenever the sheet
+   * named nothing - and since no UI ever set the field, that meant every
+   * Battle Master was quietly handed Champion's features. A subclass that is
+   * not this character's is never shown now, not even labelled: an empty
+   * section the panel can explain beats a filled one that is wrong.
+   */
+  const wantedSubclass = input.subclass.trim();
+  const wanted = wantedSubclass.toLowerCase();
+
+  // Taken from the whole class rather than the levels crossed: a Fighter at 5
+  // gains nothing from Champion, but Champion is still what the SRD carries.
+  const publishedSubclassName =
+    input.features.find((row) => named(row) && row.subclassName)?.subclassName ?? null;
+
+  const publishedRows =
+    wanted && publishedSubclassName?.trim().toLowerCase() === wanted
+      ? gained.filter((row) => row.subclassName.trim().toLowerCase() === wanted)
+      : [];
+
+  // Only a definition written for the subclass the sheet names now. One written
+  // for Battle Master means nothing on a sheet that reads Champion.
+  const customRows: FeatureRow[] = wanted
+    ? customFeatures
+        .filter(
+          (row) =>
+            row.subclassName.trim().toLowerCase() === wanted && crossed.includes(row.level),
+        )
+        .map((row) => ({
+          className: input.className,
+          subclassName: wantedSubclass,
+          level: row.level,
+          name: row.name,
+          description: row.description,
+          parentName: '',
+        }))
+    : [];
+
+  // Published wins where it is genuinely this character's subclass; a
+  // definition is for the subclasses the SRD never published.
+  const subclassRows = publishedRows.length > 0 ? publishedRows : customRows;
+  const subclassSource: 'published' | 'custom' | null =
+    publishedRows.length > 0 ? 'published' : customRows.length > 0 ? 'custom' : null;
 
   const rowFor = (level: number) =>
     input.classLevels.find((row) => named(row) && row.level === level) ?? null;
@@ -289,6 +358,9 @@ export function levelGains(input: {
     unavailable: null,
     features: nest(gained.filter((row) => !row.subclassName)),
     subclassFeatures: nest(subclassRows),
+    subclassName: wantedSubclass,
+    subclassSource,
+    publishedSubclassName,
     abilityScoreIncreases: crossed.filter((level) =>
       gainsAbilityScoreIncrease(input.className, level),
     ).length,

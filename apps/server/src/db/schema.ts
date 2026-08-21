@@ -257,6 +257,39 @@ export const items = sqliteTable(
   ],
 );
 
+/**
+ * A subclass the table wrote itself, as the levels it grants things at.
+ *
+ * The SRD publishes exactly one subclass per class, so a Battle Master, a
+ * Bladesinger or a Gloom Stalker has nothing to draw on - and their text is
+ * copyright, so it can never be imported. Written once and read at every
+ * level-up afterwards.
+ *
+ * Kept apart from `items` deliberately: a `type: 'feature'` row is something
+ * the character **has**, and these are things they **will get**. Folding them
+ * together would put level-18 abilities on a level-3 sheet.
+ *
+ * `subclassName` rides on every row and is load-bearing. A definition written
+ * for Battle Master means nothing on a sheet that now reads Champion, and
+ * carrying the name lets the merge refuse it rather than serve the wrong list -
+ * the same reason `fog_exploration` stores the grid it was written for.
+ */
+export const actorSubclassFeatures = sqliteTable(
+  'actor_subclass_features',
+  {
+    id: id(),
+    actorId: text('actor_id')
+      .notNull()
+      .references(() => actors.id, { onDelete: 'cascade' }),
+    subclassName: text('subclass_name').notNull(),
+    level: integer('level').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    sortOrder: integer('sort_order').notNull().default(0),
+  },
+  (t) => [index('actor_subclass_features_idx').on(t.actorId, t.level)],
+);
+
 /* ------------------------------------------------------------- ownership */
 
 /**
