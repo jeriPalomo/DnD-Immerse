@@ -13,8 +13,9 @@ import {
   effectUpdateSchema,
   CONDITIONS,
   abilityModifier,
-  combatSeconds,
-  formatDuration,
+  battleSummary,
+  formatBattleSummary,
+  xpForMonster,
   initiativeExpression,
   initiativeAddSchema,
   initiativeRollSchema,
@@ -31,7 +32,16 @@ import type {
   WireInitiativeEntry,
 } from '@dnd/shared';
 import { db } from '../db/index.js';
-import { activeEffects, actors, encounters, initiativeEntries, scenes, tokens } from '../db/schema.js';
+import {
+  actorCampaigns,
+  activeEffects,
+  actors,
+  encounters,
+  initiativeEntries,
+  scenes,
+  srdMonsters,
+  tokens,
+} from '../db/schema.js';
 import { getMembership } from '../auth/guards.js';
 import {
   applyCondition,
@@ -297,36 +307,73 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
     const ending = await activeEncounter(ctx.campaignId);
 
     /**
-     * What the fight cost, posted where the table can read it.
+     * What the fight came to, posted where the whole table can read it.
      *
-     * The in-game duration is the headline because it is the surprising half:
-     * six seconds a round means a fight everybody felt was long is usually
-     * under half a minute, and that is worth saying out loud when it ends.
+     * Read off the board at the moment it ends rather than tallied as it runs,
+     * which is the same rule the rest of this codebase follows: a creature
+     * standing at 0 hit points was vanquished, and one healed back up was not,
+     * with no state to keep in step. The cost is that a corpse the DM deleted
+     * mid-fight takes its initiative entry with it and cannot be counted -
+     * unknowable rather than wrong, and named as such by `xpUnknown` when the
+     * creature is still there but its worth is not.
      *
-     * Real time is mentioned only once it is a minute or more, so a fight
-     * started and stopped by mistake does not announce that it lasted four
-     * seconds. Both come from `formatDuration`, the same function the running
-     * clock uses - the number a table watched all encounter is the number they
-     * are handed at the end of it.
+     * Hostiles only, on `disposition` and never on `ownerUserId`: a friendly
+     * NPC travelling with the party is not an enemy vanquished, whoever runs
+     * it, and neither is a downed player character.
      */
     if (ending) {
       const fought = await db
-        .select({ id: initiativeEntries.id })
+        .select({
+          entryName: initiativeEntries.name,
+          tokenName: tokens.name,
+          hp: tokens.hp,
+          disposition: tokens.disposition,
+          publishedXp: srdMonsters.xp,
+          publishedCr: srdMonsters.challengeRating,
+          challengeRating: actors.challengeRating,
+        })
         .from(initiativeEntries)
+        .leftJoin(tokens, eq(initiativeEntries.tokenId, tokens.id))
+        .leftJoin(actors, eq(tokens.actorId, actors.id))
+        .leftJoin(srdMonsters, eq(actors.srdMonsterId, srdMonsters.id))
         .where(eq(initiativeEntries.encounterId, ending.id));
 
       // A fight nobody was ever in is a mis-press, not an encounter.
       if (fought.length > 0) {
-        const realSeconds = Math.round((Date.now() - ending.createdAt) / 1000);
-        const atTheTable =
-          realSeconds >= 60 ? `, fought over ${formatDuration(realSeconds)} at the table` : '';
+        // The party as the campaign has it, exactly as the difficulty
+        // suggestions read it - four level 3s and a level 1 is a real party,
+        // and the share is divided across whoever is actually assigned.
+        const party = await db
+          .select({ id: actors.id })
+          .from(actorCampaigns)
+          .innerJoin(actors, eq(actorCampaigns.actorId, actors.id))
+          .where(
+            and(eq(actorCampaigns.campaignId, ctx.campaignId), eq(actors.type, 'character')),
+          );
+
+        const summary = battleSummary({
+          rounds: ending.round,
+          characters: party.length,
+          foes: fought
+            .filter((row) => row.disposition === 'hostile')
+            .map((row) => ({
+              name: row.tokenName || row.entryName,
+              defeated: row.hp !== null && row.hp <= 0,
+              // The rating decides, and the compendium's own column is only
+              // the fallback - see `xpForMonster`, which explains why this is
+              // the one place a published number does not win.
+              xp: xpForMonster({
+                challengeRating: row.challengeRating || row.publishedCr,
+                publishedXp: row.publishedXp,
+              }),
+            })),
+        });
 
         await postSystemMessage(
           io,
           ctx.campaignId,
           user.id,
-          `The fight ends after ${ending.round} round${ending.round === 1 ? '' : 's'} — ` +
-            `${formatDuration(combatSeconds(ending.round))} of game time${atTheTable}.`,
+          formatBattleSummary(summary, Math.round((Date.now() - ending.createdAt) / 1000)),
         );
       }
     }

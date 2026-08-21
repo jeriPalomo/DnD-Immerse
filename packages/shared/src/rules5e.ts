@@ -584,6 +584,165 @@ export function auditPotionHealing(
   return audit;
 }
 
+/* ------------------------------------------------------ experience points */
+
+/**
+ * What a creature of each challenge rating is worth, from the DMG.
+ *
+ * Keyed by the challenge rating exactly as the compendium writes it, fractions
+ * and all, so a lookup needs no parsing. A stamped monster does not need this -
+ * `srd_monsters` carries its own published `xp` and that always wins - but an
+ * NPC written by hand carries a CR and nothing else, and a DM who gives their
+ * boss a CR of 7 has said what it is worth.
+ *
+ * `auditXpByCr` checks every row of it against the compendium during
+ * `srd:import`, which is the one moment all 337 published CR/XP pairs are in
+ * hand. A curated table checked against itself proves nothing.
+ */
+export const XP_BY_CR: Readonly<Record<string, number>> = {
+  '0': 10,
+  '1/8': 25,
+  '1/4': 50,
+  '1/2': 100,
+  '1': 200,
+  '2': 450,
+  '3': 700,
+  '4': 1100,
+  '5': 1800,
+  '6': 2300,
+  '7': 2900,
+  '8': 3900,
+  '9': 5000,
+  '10': 5900,
+  '11': 7200,
+  '12': 8400,
+  '13': 10000,
+  '14': 11500,
+  '15': 13000,
+  '16': 15000,
+  '17': 18000,
+  '18': 20000,
+  '19': 22000,
+  '20': 25000,
+  '21': 33000,
+  '22': 41000,
+  '23': 50000,
+  '24': 62000,
+  '25': 75000,
+  '26': 90000,
+  '27': 105000,
+  '28': 120000,
+  '29': 135000,
+  '30': 155000,
+};
+
+/**
+ * A challenge rating as experience points, or null when it says nothing.
+ *
+ * Null rather than zero, and the caller has to deal with it: an NPC with no CR
+ * written on it is worth an unknown amount, which is a different fact from
+ * being worth nothing, and summing it as zero would hand a table a confidently
+ * short total.
+ */
+export function xpForChallengeRating(cr: string | null | undefined): number | null {
+  if (cr === null || cr === undefined) return null;
+  const key = cr.trim();
+  if (!key) return null;
+  return XP_BY_CR[key] ?? null;
+}
+
+/**
+ * What a creature is worth, given what is known about it.
+ *
+ * The challenge rating wins over the compendium's own `xp` column, which is a
+ * deliberate exception to the rule that a stamped monster's published numbers
+ * beat anything recomputed. That rule exists for facts a stat block states and
+ * a sheet cannot derive - a `+4 to hit` carrying proficiency the stat line
+ * never mentions. Experience is not one of those: the DMG defines it *as* a
+ * function of challenge rating, so there is no per-monster XP fact for a
+ * published figure to know better.
+ *
+ * And it is measurably the safer way round. `auditXpByCr` against the 337
+ * monsters in the compendium finds four rows carrying the XP of the rating one
+ * step below - a Brass Dragon Wyrmling at CR 1 published as 100 rather than
+ * 200 - so trusting the column outright would quietly halve the reward for
+ * killing them.
+ *
+ * The column is still the fallback, for a creature whose rating means nothing
+ * to the table.
+ */
+export function xpForMonster(source: {
+  challengeRating?: string | null;
+  publishedXp?: number | null;
+}): number | null {
+  const fromRating = xpForChallengeRating(source.challengeRating);
+  if (fromRating !== null) return fromRating;
+  return source.publishedXp && source.publishedXp > 0 ? source.publishedXp : null;
+}
+
+export interface XpAudit {
+  /** CRs where the table and every published monster agree. */
+  matched: string[];
+  /**
+   * CRs some published monster disagrees with, and how many.
+   *
+   * The count is the point. One row out of twenty-five is a typo upstream;
+   * twenty-five out of twenty-five would mean the table here is wrong, and the
+   * two want opposite responses.
+   */
+  disagreed: {
+    cr: string;
+    ours: number;
+    published: number;
+    example: string;
+    disagreeing: number;
+    total: number;
+  }[];
+  /** CRs no published monster uses, so nothing here can check them. */
+  unchecked: string[];
+}
+
+/**
+ * Checks `XP_BY_CR` against every monster the compendium publishes.
+ *
+ * The compendium carries both the challenge rating and the experience points
+ * for all of them, so this is a straight comparison rather than a smell test -
+ * the one audit in this file that can be certain. A CR nothing is published at
+ * is reported as unchecked rather than passed over: it means the number is
+ * hand-entered and unverified, which is worth knowing about even though there
+ * is nothing to do.
+ */
+export function auditXpByCr(
+  monsters: { name: string; challengeRating: string; xp: number }[],
+): XpAudit {
+  const audit: XpAudit = { matched: [], disagreed: [], unchecked: [] };
+
+  for (const [cr, ours] of Object.entries(XP_BY_CR)) {
+    // Zero-XP rows are the compendium declining to say, not a disagreement.
+    const published = monsters.filter((m) => m.challengeRating === cr && m.xp > 0);
+    if (published.length === 0) {
+      audit.unchecked.push(cr);
+      continue;
+    }
+
+    const wrong = published.filter((m) => m.xp !== ours);
+    if (wrong.length > 0) {
+      audit.disagreed.push({
+        cr,
+        ours,
+        published: wrong[0]!.xp,
+        example: wrong[0]!.name,
+        disagreeing: wrong.length,
+        total: published.length,
+      });
+    } else {
+      audit.matched.push(cr);
+    }
+  }
+
+  return audit;
+}
+
 /* ------------------------------------------------- building an encounter */
 
 /**

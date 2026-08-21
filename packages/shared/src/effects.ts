@@ -585,6 +585,129 @@ export function formatDuration(totalSeconds: number): string {
 }
 
 /** How far into a fight it is, for the tracker and the turn bar. */
+/**
+ * How long a *finished* fight lasted, in seconds.
+ *
+ * Deliberately not `combatSeconds`, and the difference is not a rounding
+ * quibble - the two answer different questions. The running clock says how long
+ * the table has been fighting, which part-way through round 3 is the two rounds
+ * already behind it: 12 seconds. A fight that ran five rounds *took* five
+ * rounds, so its duration is 30. Using the running figure in the summary would
+ * quietly dock every battle six seconds.
+ */
+export function combatDuration(rounds: number): number {
+  return Math.max(0, rounds) * SECONDS_PER_ROUND;
+}
+
 export function formatCombatTime(round: number): string {
   return `${formatDuration(combatSeconds(round))} in`;
+}
+
+/* ------------------------------------------------------ the battle summary */
+
+/** A creature that was in the fight, as the summary needs to see it. */
+export interface BattleFoe {
+  name: string;
+  /** Down, and therefore counted. */
+  defeated: boolean;
+  /** What it is worth, or null where nothing published a number. */
+  xp: number | null;
+}
+
+export interface BattleSummary {
+  rounds: number;
+  /** In-game seconds the fight took. */
+  seconds: number;
+  /** The names of what was put down, in the order they stood in the fight. */
+  vanquished: string[];
+  /** Experience from the creatures that had a number to give. */
+  xpTotal: number;
+  /** How many of the defeated had no published XP, so the total is short. */
+  xpUnknown: number;
+  /** The share each character takes, or null with nobody to divide among. */
+  xpEach: number | null;
+  characters: number;
+}
+
+/**
+ * What a finished fight came to.
+ *
+ * Kept apart from the writing of it and from the database, so the arithmetic
+ * can be tested without either. The three facts a table wants are how long it
+ * took, what they killed and what it was worth - and only the first is certain,
+ * hence `xpUnknown`, which exists so a total missing a creature can say so
+ * rather than reading as the whole answer.
+ *
+ * XP is divided, never multiplied: the handbook's share is the total split
+ * across the party, and `encounterMultiplier` deliberately has no part in it.
+ * That multiplier is for judging a fight before it happens; awarding it would
+ * hand out several times what the creatures are actually worth.
+ */
+export function battleSummary(input: {
+  rounds: number;
+  foes: BattleFoe[];
+  characters: number;
+}): BattleSummary {
+  const down = input.foes.filter((foe) => foe.defeated);
+  const xpTotal = down.reduce((sum, foe) => sum + (foe.xp ?? 0), 0);
+
+  return {
+    rounds: input.rounds,
+    seconds: combatDuration(input.rounds),
+    vanquished: down.map((foe) => foe.name),
+    xpTotal,
+    xpUnknown: down.filter((foe) => foe.xp === null).length,
+    // Rounded down, as the handbook does, and only where there is a party to
+    // divide among - a campaign with no characters assigned gets a total and
+    // no opinion about whose it is.
+    xpEach: input.characters > 0 ? Math.floor(xpTotal / input.characters) : null,
+    characters: input.characters,
+  };
+}
+
+/**
+ * The summary as the table reads it.
+ *
+ * Lines rather than a sentence, because it is four separate facts and a
+ * paragraph buries all of them - the chat already renders bodies
+ * `whitespace-pre-line` for exactly this. Plain text, no markdown: the body is
+ * drawn into a `<p>`, so asterisks would arrive as asterisks.
+ *
+ * `realSeconds` is named only from a minute up. A fight started and ended by
+ * mistake should not announce that it lasted four seconds, and the in-game
+ * duration is the interesting half anyway.
+ */
+export function formatBattleSummary(summary: BattleSummary, realSeconds?: number): string {
+  const lines = [`Battle Summary — ${summary.rounds} round${summary.rounds === 1 ? '' : 's'}`];
+
+  const atTheTable =
+    realSeconds !== undefined && realSeconds >= 60
+      ? ` (${formatDuration(realSeconds)} at the table)`
+      : '';
+  lines.push(`Time elapsed: ${formatDuration(summary.seconds)}${atTheTable}`);
+
+  // "None" rather than a missing line: a fight that was fled, talked down or
+  // called off is a real outcome, and a summary that silently drops the row
+  // reads as one that failed to count.
+  lines.push(
+    summary.vanquished.length > 0
+      ? `Enemies vanquished: ${summary.vanquished.join(', ')}`
+      : 'Enemies vanquished: none',
+  );
+
+  if (summary.vanquished.length > 0) {
+    // The gap is named rather than folded into the total. A number quietly
+    // short is worse than one that admits what it could not count.
+    const gap =
+      summary.xpUnknown > 0
+        ? ` — ${summary.xpUnknown} with no published XP`
+        : '';
+    const share =
+      summary.xpEach !== null
+        ? `, ${summary.xpEach} each across ${summary.characters} character${summary.characters === 1 ? '' : 's'}`
+        : '';
+    lines.push(`EXP gain: ${summary.xpTotal}${share}${gap}`);
+  }
+
+  return lines.join('\n');
 }

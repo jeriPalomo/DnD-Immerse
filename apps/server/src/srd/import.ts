@@ -15,6 +15,8 @@ import {
   POTION_HEALING,
   auditPotionHealing,
   auditSpellConditions,
+  auditXpByCr,
+  XP_BY_CR,
   parseRange,
   type AbilityKey,
   type ItemSystem,
@@ -518,6 +520,8 @@ export async function importSrd(): Promise<void> {
   console.log(
     `  ${monsterRows.filter((r) => r.imageUrl).length} of ${monsterRows.length} monsters have art`,
   );
+
+  reportXpByCr(monsterRows);
   console.log('  2024 spells are not published in the SRD dataset; 2024 campaigns use the 2014 list');
 
   reportSpellConditions(spellRows);
@@ -554,6 +558,36 @@ function reportPotionHealing(items: { id: string; name: string; description: str
   }
   if (audit.suspicious.length > 0) {
     console.log(`    text never mentions hit points, worth a look: ${audit.suspicious.join(', ')}`);
+  }
+}
+
+/**
+ * The curated CR-to-XP table, checked against every monster published.
+ *
+ * The one audit here that can be certain rather than a smell test: the
+ * compendium carries both numbers for all 337 of them, so this is a straight
+ * comparison. `XP_BY_CR` is only ever consulted for an NPC written by hand -
+ * a stamped monster brings its own published figure - which is exactly why it
+ * needs checking here: nothing else in the app would ever notice it was wrong.
+ */
+function reportXpByCr(monsters: { name: string; challengeRating: string; xp: number }[]): void {
+  const audit = auditXpByCr(monsters);
+
+  console.log(
+    `  XP by challenge rating: ${audit.matched.length} of ${Object.keys(XP_BY_CR).length} ratings agree with the compendium`,
+  );
+  for (const row of audit.disagreed) {
+    // Phrased as a count so the answer is obvious: a few rows out of many is a
+    // typo upstream, and all of them would mean the table here is wrong.
+    console.log(
+      `    CR ${row.cr}: the table says ${row.ours}, but ${row.disagreeing} of ${row.total} ` +
+        `published monsters say ${row.published} (e.g. ${row.example}) — upstream data, not used`,
+    );
+  }
+  if (audit.unchecked.length > 0) {
+    // Not a failure - nothing is published at CR 29 - but worth saying, since
+    // an unchecked number is a hand-entered one nothing can verify.
+    console.log(`    no published monster to check against: CR ${audit.unchecked.join(', ')}`);
   }
 }
 

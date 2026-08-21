@@ -453,14 +453,53 @@ than swallowing it, or panning would depend on finding a bare square on a board
 that is mostly creatures. The context menu is suppressed, since it would open
 the instant the drag ended.
 
-**A fight says how long it took when it ends.** Six seconds a round is the
-surprising half — a fight everybody felt was long is usually under half a
-minute — so `encounter:end` posts it to the whole table rather than leaving the
-DM to work it out. Real time is mentioned only once it reaches a minute, so a
-mis-press does not announce that the battle lasted four seconds, and a fight
-nobody was ever in posts nothing at all. `formatDuration` is shared with the
-running clock in the tracker, because two ways of writing one duration is how a
-table gets told two different numbers for the same fight.
+**A fight ends with a summary: how long, what died, what it was worth.**
+`encounter:end` posts four lines to the whole table — six seconds a round is
+the surprising half, and a fight everybody felt was long is usually under half
+a minute. Real time is named only from a minute up, so a mis-press does not
+announce a four-second battle, and a fight nobody was ever in posts nothing.
+
+**A finished fight's duration is not the running clock's number.**
+`combatSeconds(round)` answers "how long have we been fighting", which part-way
+through round 3 is the two rounds behind you: 12 seconds. `combatDuration`
+answers how long a fight that ran five rounds *took*: 30. Both are right and
+they differ by a round, so using one for the other quietly docks every battle
+six seconds. `formatDuration` is shared by both, because two ways of writing
+one duration is how a table gets told two different numbers for the same fight.
+
+**Vanquished is read off the board when the fight ends, not tallied as it
+runs.** A hostile creature standing at 0 hit points was killed and one healed
+back up was not, with no state to keep in step — the same rule as every other
+derived value here. The cost is that a corpse the DM deleted mid-fight takes
+its initiative entry with it and cannot be counted: unknowable rather than
+wrong. Hostiles only, on `disposition` and never on `ownerUserId`, so a
+friendly NPC travelling with the party is not an enemy vanquished whoever runs
+it, and neither is a downed player character.
+
+**Experience comes from the challenge rating, not from the compendium's own XP
+column** — the one place a published number does not win, and deliberately
+against the neighbouring rule about stamped monsters. That rule is for facts a
+stat block states and a sheet cannot derive, like a `+4 to hit` carrying
+proficiency the stat line never mentions. Experience is not one of those: the
+DMG defines it *as* a function of challenge rating, so there is no per-monster
+XP fact for a published figure to know better. It is also measurably safer.
+`auditXpByCr` runs inside `srd:import` and compares `XP_BY_CR` against all 337
+published monsters — a straight comparison rather than a smell test, since the
+compendium carries both numbers — and it found four rows carrying the XP of the
+rating one step below, a Brass Dragon Wyrmling at CR 1 published as 100 rather
+than 200. Trusting the column would have halved the reward for killing them.
+The audit reports *how many* rows disagree out of how many, because one in
+twenty-five is a typo upstream while twenty-five in twenty-five would mean the
+table here is wrong, and those want opposite responses.
+
+**An unknown price is not a price of zero.** A creature with no published XP
+and no challenge rating is counted among the vanquished and named in
+`xpUnknown`, so a total that is missing a creature says so rather than reading
+as the whole answer. XP is divided across the party, never multiplied by
+`encounterMultiplier` — that multiplier is for judging a fight before it
+happens, and awarding it would hand out several times what the creatures are
+worth. The summary reports; it never writes to anyone's `experience`, the same
+rule a heal follows.
 
 **A player may damage monsters, never characters.** `damage:apply` is open to
 members, but `isFairGame` refuses any token that is owned or linked to a

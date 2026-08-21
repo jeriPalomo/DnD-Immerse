@@ -449,25 +449,62 @@ console.log('\n=== 23. the fight ends with a summary ===');
  * summary is that the table is told, and a message the DM alone receives would
  * pass a check on the DM's socket while telling nobody.
  */
+// Every goblin put down first, so the count is the encounter's rather than
+// whatever happened to survive the sections above. Whichever entries are still
+// in the order, they are all now on 0 hit points.
+for (const goblin of goblins) {
+  emit(dm, 'damage:apply', {
+    tokenIds: [goblin.id], amount: 99, damageType: 'force', healing: false, halved: false,
+  });
+}
+await new Promise((r) => setTimeout(r, 900));
+
 const summarised = nextWhere(
   player,
   'chat:message',
-  (p) => /the fight ends/i.test(p?.message?.body ?? ''),
+  (p) => /battle summary/i.test(p?.message?.body ?? ''),
   3000,
 );
 emit(dm, 'encounter:end', {});
 const ended = await summarised;
 const summaryBody = ended?.message?.body ?? '';
+const lineOf = (label) =>
+  summaryBody.split('\n').find((line) => line.toLowerCase().startsWith(label)) ?? '';
 
-check('ending the fight tells the table how long it took', Boolean(ended), summaryBody || 'nothing posted');
-check('and it counts the rounds', /round/i.test(summaryBody), summaryBody);
-check('and gives the time in game', /of game time/i.test(summaryBody), summaryBody);
+check('ending the fight posts a battle summary', Boolean(ended), summaryBody || 'nothing posted');
 check('filed with the fight rather than the conversation', ended?.message?.combat === true,
   `combat: ${ended?.message?.combat}`);
 
+// Four separate facts, so four lines - a paragraph buries all of them.
+check('it is written as lines rather than a sentence', summaryBody.split('\n').length === 4,
+  JSON.stringify(summaryBody));
+
+const elapsed = lineOf('time elapsed');
+check('it gives the time elapsed in game', /second|m \d\ds/.test(elapsed), elapsed);
+
+// Six seconds a round, and the whole of the round that was running counts:
+// the fight took as many rounds as it ran.
+const rounds = Number(summaryBody.match(/(\d+) rounds?/)?.[1] ?? 0);
+const seconds = Number(elapsed.match(/(\d+) seconds?/)?.[1] ?? -1);
+check('and the duration is six seconds a round', rounds > 0 && seconds === rounds * 6,
+  `${rounds} rounds, ${seconds}s`);
+
+const kills = lineOf('enemies vanquished');
+const named = kills.replace(/^[^:]*:\s*/, '').split(', ').filter((n) => n.startsWith('Goblin'));
+check('it names the enemies vanquished', named.length > 0, kills);
+
+// A goblin is CR 1/4, which the handbook prices at 50. Checked against the
+// names on the line above rather than a fixed total, so removing a combatant
+// earlier in this part cannot make it wrong for the wrong reason.
+const gain = lineOf('exp gain');
+const total = Number(gain.match(/EXP gain: (\d+)/i)?.[1] ?? -1);
+check('and prices them from the challenge rating', total === named.length * 50,
+  `${gain} — ${named.length} goblins at 50`);
+check('and divides the take across the party', /each across \d+ character/.test(gain), gain);
+
 // Twice is a mis-press, not a second fight: there is no encounter left to
 // summarise, so nothing should be posted.
-const again = nextWhere(player, 'chat:message', (p) => /the fight ends/i.test(p?.message?.body ?? ''), 1500);
+const again = nextWhere(player, 'chat:message', (p) => /battle summary/i.test(p?.message?.body ?? ''), 1500);
 emit(dm, 'encounter:end', {});
 check('ending a fight that is already over says nothing', (await again) === null);
 
