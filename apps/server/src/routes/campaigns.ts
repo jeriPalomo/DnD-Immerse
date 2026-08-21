@@ -242,6 +242,11 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
           level: input.level,
           hitDiceTotal: hitDicePool(character.className, input.level),
           saveProficiencies: saves,
+          // The tally is what they earned *since the last level*, so reaching
+          // one starts it again. It is a record rather than a gate - this
+          // table levels by story - and a number that only ever climbed would
+          // say nothing about the level being played.
+          experience: 0,
           ...(info?.casting ? { spellcastingAbility: info.casting } : {}),
           updatedAt: Date.now(),
         })
@@ -267,7 +272,11 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       );
     }
 
-    return { level: input.level, levelled: climbing.map((c) => c.name), unchanged: party.length - climbing.length };
+    return {
+      level: input.level,
+      levelled: climbing.map((c) => c.name),
+      unchanged: party.length - climbing.length,
+    };
   });
 
   /* ------------------------------------------------------------- members */

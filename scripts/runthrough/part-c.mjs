@@ -457,6 +457,13 @@ check('the player has a sheet to level', Boolean(thorin), `${thorin?.name} level
 if (thorin) {
   const target = thorin.level + 1;
 
+  // Set by hand so there is something to reset. The awarding is checked at the
+  // end of the fight below; this is only about what levelling does to it.
+  await playerApi('PATCH', `/api/actors/${thorin.id}`, { experience: 1234 });
+  const carrying = await playerApi('GET', `/api/actors/${thorin.id}`);
+  check('experience is an ordinary editable number', carrying.body.actor.experience === 1234,
+    String(carrying.body.actor.experience));
+
   const announced = nextWhere(player, 'chat:message', (p) => p?.message?.kind === 'levelup', 4000);
   const levelled = await dmApi('POST', `/api/campaigns/${campaignId}/level-party`, { level: target });
   check('the DM levels the whole party at once', levelled.status === 200,
@@ -481,6 +488,12 @@ if (thorin) {
   const player2 = await playerApi('GET', `/api/actors/${thorin.id}`);
   check('the sheet is at the new level', player2.body.actor.level === target,
     `level ${player2.body.actor.level}`);
+  // The tally counts what was earned *since* the last level, so reaching one
+  // starts it again. Levels are declared by story here; the number gates
+  // nothing and a figure that only ever climbed would say nothing about the
+  // level being played.
+  check('and the experience tally starts again', player2.body.actor.experience === 0,
+    `${player2.body.actor.experience} left over`);
   // Left behind on purpose: this is what makes the sheet greet them with what
   // they gained rather than the level-up passing silently.
   check('and knows it has something unread', player2.body.actor.levelAcknowledged < target,
@@ -668,6 +681,23 @@ const lineOf = (label) =>
   summaryBody.split('\n').find((line) => line.toLowerCase().startsWith(label)) ?? '';
 
 check('ending the fight posts a battle summary', Boolean(ended), summaryBody || 'nothing posted');
+
+/**
+ * Experience is a record, and it is written without asking.
+ *
+ * The number gates nothing at a table that levels by story, which is exactly
+ * why it is added rather than offered - damage and healing are offered because
+ * they change what happens. Read back off the sheet rather than believed from
+ * the message that announced it.
+ */
+if (thorin) {
+  const earned = Number(summaryBody.match(/EXP gain: \d+, (\d+) each/)?.[1] ?? 0);
+  const afterFight = await playerApi('GET', `/api/actors/${thorin.id}`);
+  check('the share is added to the sheet, not merely announced',
+    earned > 0 && afterFight.body.actor.experience === earned,
+    `${afterFight.body.actor.experience} on the sheet, ${earned} from this fight`);
+  check('and the log says it landed', /added to their sheets/.test(summaryBody), summaryBody);
+}
 check('filed with the fight rather than the conversation', ended?.message?.combat === true,
   `combat: ${ended?.message?.combat}`);
 

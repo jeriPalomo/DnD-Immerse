@@ -608,6 +608,31 @@ leak underneath. They now clear the subclass, and rename to a subclass that is
 also unpublished. Reverted again, they fail naming `Improved Critical` and
 `Combat Superiority` respectively.
 
+**Experience is a record, never a gate.** Levels are declared by story at this
+table, so no amount of XP causes one: `actors.experience` is what a character
+earned *since* their last level, and reaching one starts it at zero again. That
+is why it is added when a fight ends rather than offered — damage and healing
+are offered because they change what happens, and this changes nothing. It is an
+ordinary editable field, so a session well played can be rewarded by hand.
+
+**No bar is drawn, because there is nothing to fill.** A tally that resets and
+gates nothing has no target, and drawing the handbook's threshold beside it
+would promise a rule this table does not play by. The sheet shows the number.
+
+**The DMG advancement table was deleted, not left lying about.**
+`XP_THRESHOLDS` and `levelFromXP` were read by exactly one thing — a "Level up
+to N" button whose own condition could never be true, because nothing had ever
+written `experience`. Left in place they would have come alive the moment fights
+started paying out and begun offering XP-driven level-ups against the whole
+point of declaring them. That was the third disconnected wire found in this
+area, after `subclass` and `backstory`: each looked like a missing feature and
+was really a field nothing wrote.
+
+**The share is divided across the campaign's characters, not the combatants.**
+The same party `battleSummary` was given. Somebody who missed the session still
+earned it as far as the record is concerned, which is how most tables do it and
+is the DM's to correct on the sheet.
+
 **A player may damage monsters, never characters.** `damage:apply` is open to
 members, but `isFairGame` refuses any token that is owned or linked to a
 `character` actor, and healing stays the DM's. Rolling damage and then asking

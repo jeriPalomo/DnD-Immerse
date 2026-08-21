@@ -106,19 +106,19 @@ export function carryingCapacity(scores: AbilityScores): number {
   return scores.str * 15;
 }
 
-/** XP thresholds for levels 1-20, index 0 = level 1. */
-export const XP_THRESHOLDS = [
-  0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000,
-  85000, 100000, 120000, 140000, 165000, 195000, 225000, 265000, 305000, 355000,
-] as const;
-
-export function levelFromXP(xp: number): number {
-  let level = 1;
-  for (let i = 0; i < XP_THRESHOLDS.length; i++) {
-    if (xp >= XP_THRESHOLDS[i]) level = i + 1;
-  }
-  return level;
-}
+/*
+ * The DMG advancement table is deliberately absent.
+ *
+ * `XP_THRESHOLDS` and `levelFromXP` lived here for the life of the project and
+ * were read by exactly one thing: a "Level up to N" button whose own condition
+ * was never true, because nothing had ever written `actors.experience`. Levels
+ * are declared by story at this table, so experience is a record of what was
+ * earned since the last one and crosses no threshold at all.
+ *
+ * Left in place they would have come alive the moment fights started paying
+ * out, and begun offering XP-driven level-ups against the whole point. In git
+ * history if the table ever changes its mind.
+ */
 
 /* ------------------------------------------------------ character classes */
 

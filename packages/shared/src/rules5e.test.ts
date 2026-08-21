@@ -8,7 +8,6 @@ import {
   hitDicePool,
   hitPointsForLevel,
   hitPointsGained,
-  levelFromXP,
   maxSpellLevel,
   passiveSkill,
   proficiencyBonus,
@@ -110,17 +109,6 @@ describe('formatModifier', () => {
     expect(formatModifier(3)).toBe('+3');
     expect(formatModifier(0)).toBe('+0');
     expect(formatModifier(-2)).toBe('-2');
-  });
-});
-
-describe('levelFromXP', () => {
-  it('maps XP onto the PHB advancement table', () => {
-    expect(levelFromXP(0)).toBe(1);
-    expect(levelFromXP(299)).toBe(1);
-    expect(levelFromXP(300)).toBe(2);
-    expect(levelFromXP(48000)).toBe(9);
-    expect(levelFromXP(355000)).toBe(20);
-    expect(levelFromXP(999999)).toBe(20);
   });
 });
 

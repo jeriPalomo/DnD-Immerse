@@ -10,7 +10,6 @@ import {
   classInfo,
   classSaves,
   hitDicePool,
-  levelFromXP,
   type AbilityKey,
   type ItemCategory,
   type ProficiencyLevel,
@@ -758,21 +757,33 @@ function Identity({
               className={`w-12 ${field}`}
             />
           </span>
-          {/* Experience is already tracked, so say when it has earned a level
-              rather than leaving the player to check the table. */}
-          {actor.experience > 0 && levelFromXP(actor.experience) > actor.level && (
-            <button
-              type="button"
+          {/*
+            * A tally, not a gauge.
+            *
+            * What this character has earned *since the last level*, reset when
+            * the DM levels the party. There is no bar because there is nothing
+            * to fill: levels are declared by story here, so no amount of this
+            * causes one, and drawing a threshold would promise a rule the
+            * table does not play by.
+            *
+            * This replaces a "Level up to N" button that read the DMG
+            * thresholds and could never appear - nothing had ever written
+            * `experience`, so its own condition was never true. Left in place
+            * it would have come alive the moment fights started paying out,
+            * and begun offering XP-driven level-ups against the whole point.
+            */}
+          <span className="flex items-center gap-1 text-ink-500" title="Earned since the last level. Reset when the party levels. Levels are declared, never earned.">
+            EXP
+            <input
+              type="number"
+              min={0}
+              aria-label="Experience this level"
               disabled={!editable}
-              onClick={() => {
-                const level = levelFromXP(actor.experience);
-                onChange({ level, ...withClassDefaults(actor.className, level) });
-              }}
-              className="rounded border border-ember-500/50 bg-ember-500/10 px-1.5 py-0.5 text-[10px] text-ember-300"
-            >
-              Level up to {levelFromXP(actor.experience)}
-            </button>
-          )}
+              value={actor.experience}
+              onChange={(e) => onChange({ experience: Math.max(0, Number(e.target.value) || 0) })}
+              className={`w-20 ${field}`}
+            />
+          </span>
           <Suggest
             disabled={!editable}
             options={BACKGROUNDS}

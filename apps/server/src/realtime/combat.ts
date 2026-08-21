@@ -369,11 +369,39 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
             })),
         });
 
+        /**
+         * The share, written to the sheets.
+         *
+         * Experience is a record here rather than a gate: this table levels by
+         * story, so nothing is decided by the number and there is no threshold
+         * for it to cross. That is exactly why it is added without asking -
+         * a confirmation on every fight is friction for a figure that changes
+         * nothing, where damage and healing are offered because they do.
+         *
+         * Divided across the campaign's characters rather than the combatants,
+         * the same party `battleSummary` was given. Somebody who missed the
+         * session still earned it as far as the record is concerned, which is
+         * how most tables do it and is the DM's to correct - the number is
+         * editable on the sheet.
+         */
+        const each = summary.xpEach ?? 0;
+        if (each > 0) {
+          await db
+            .update(actors)
+            .set({ experience: sql`${actors.experience} + ${each}`, updatedAt: Date.now() })
+            .where(
+              inArray(
+                actors.id,
+                party.map((character) => character.id),
+              ),
+            );
+        }
+
         await postSystemMessage(
           io,
           ctx.campaignId,
           user.id,
-          formatBattleSummary(summary, Math.round((Date.now() - ending.createdAt) / 1000)),
+          formatBattleSummary(summary, Math.round((Date.now() - ending.createdAt) / 1000), each > 0),
         );
       }
     }

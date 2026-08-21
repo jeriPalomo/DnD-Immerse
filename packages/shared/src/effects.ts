@@ -677,7 +677,12 @@ export function battleSummary(input: {
  * mistake should not announce that it lasted four seconds, and the in-game
  * duration is the interesting half anyway.
  */
-export function formatBattleSummary(summary: BattleSummary, realSeconds?: number): string {
+export function formatBattleSummary(
+  summary: BattleSummary,
+  realSeconds?: number,
+  /** Set when the share was written to the sheets, so the line can say so. */
+  awarded = false,
+): string {
   const lines = [`Battle Summary — ${summary.rounds} round${summary.rounds === 1 ? '' : 's'}`];
 
   const atTheTable =
@@ -706,7 +711,11 @@ export function formatBattleSummary(summary: BattleSummary, realSeconds?: number
       summary.xpEach !== null
         ? `, ${summary.xpEach} each across ${summary.characters} character${summary.characters === 1 ? '' : 's'}`
         : '';
-    lines.push(`EXP gain: ${summary.xpTotal}${share}${gap}`);
+    // Said only when it actually happened. A line claiming the sheets were
+    // written when nothing was is worse than no line at all - and a share of
+    // zero, from a fight worth less than the party is large, writes nothing.
+    const landed = awarded && summary.xpEach !== null && summary.xpEach > 0 ? ' — added to their sheets' : '';
+    lines.push(`EXP gain: ${summary.xpTotal}${share}${gap}${landed}`);
   }
 
   return lines.join('\n');
