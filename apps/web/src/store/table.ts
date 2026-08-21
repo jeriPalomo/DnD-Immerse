@@ -77,6 +77,13 @@ interface TableState {
    * What landed. `before`/`after` arrive on a DM socket only - a player is told
    * the amount, never the creature's pool.
    */
+  /**
+   * Numbers rising off a creature: what it took, or that the swing missed.
+   *
+   * Short-lived and purely visual, so they live beside `pings` rather than in
+   * anything persisted - a floater nobody saw is not worth reloading.
+   */
+  floaters: { id: number; tokenId: string; text: string; kind: 'damage' | 'heal' | 'miss' }[];
   lastDamage:
     | {
         tokenId: string;
@@ -245,6 +252,9 @@ type SetState = (partial: Partial<TableState>) => void;
 type GetState = () => TableState;
 
 /** Records a reversible action and, unless told otherwise, offers an undo. */
+/** How long a floating number lives, matched by the board's fade. */
+export const FLOATER_LIFE_MS = 1800;
+
 function pushUndo(set: SetState, get: GetState, entry: UndoEntry): void {
   const stack = [...get().undoStack, entry];
   set({ undoStack: stack.length > MAX_UNDO ? stack.slice(-MAX_UNDO) : stack });
@@ -256,6 +266,25 @@ function pushUndo(set: SetState, get: GetState, entry: UndoEntry): void {
     // Only clear it if nothing newer replaced it in the meantime.
     if (get().toast?.message === entry.label) set({ toast: null });
   }, 6000);
+}
+
+/**
+ * Puts a number over a creature for a moment.
+ *
+ * Cleared on a timer rather than by the board, so an unmounted board cannot
+ * leave one stuck - the same shape the ping cleanup already uses. The id is
+ * unique per floater so two hits on one creature stack rather than replace.
+ */
+function pushFloater(
+  set: SetState,
+  get: GetState,
+  floater: { tokenId: string; text: string; kind: 'damage' | 'heal' | 'miss' },
+): void {
+  const entry = { ...floater, id: Date.now() + Math.random() };
+  set({ floaters: [...get().floaters, entry] });
+  setTimeout(() => {
+    set({ floaters: get().floaters.filter((f) => f.id !== entry.id) });
+  }, FLOATER_LIFE_MS);
 }
 
 export const useTable = create<TableState>((set, get) => ({
@@ -279,6 +308,7 @@ export const useTable = create<TableState>((set, get) => ({
   wallTool: 'off',
   terrain: { blocked: [], mud: [], water: [], matchesGrid: true },
   encounter: null,
+  floaters: [],
   lastDamage: null,
   journalVersion: 0,
   moveRange: { tokenId: null, squares: [], leftFeet: null, maxFeet: null, dashed: false },
@@ -395,10 +425,28 @@ export const useTable = create<TableState>((set, get) => ({
     // Surfaced as a short-lived banner so the DM sees resistances being applied
     // without having to read the chat log mid-combat.
     socket.on('damage:applied', ({ results }) => {
+      // What actually landed, floated over the creature it landed on. `amount`
+      // rather than the roll: resistance means the two differ, and the board
+      // should show what was taken.
+      for (const result of results) {
+        if (result.amount > 0) {
+          pushFloater(set, get, {
+            tokenId: result.tokenId,
+            text: `${result.healing ? '+' : ''}${result.amount}`,
+            kind: result.healing ? 'heal' : 'damage',
+          });
+        }
+      }
       set({ lastDamage: results });
       setTimeout(() => {
         if (get().lastDamage === results) set({ lastDamage: null });
       }, 6000);
+    });
+    // A miss has nothing to apply, so it says so at once; a hit is announced by
+    // the damage that follows it, and floating both would stack two numbers
+    // over one token.
+    socket.on('attack:missed', ({ tokenId }) => {
+      pushFloater(set, get, { tokenId, text: 'Miss', kind: 'miss' });
     });
     socket.on('wall:created', ({ wall }) => set({ walls: [...get().walls, wall] }));
     // Only ever arrives on a DM socket; the server sends it to the DM room.

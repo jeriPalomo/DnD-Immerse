@@ -20,14 +20,14 @@ import KonvaGlobal from 'konva';
 import type Konva from 'konva';
 import type { TerrainBrush, WireScene, WireToken } from '@dnd/shared';
 import type { Actor, Item } from '../../store/sheet.js';
-import { evaluateOptions } from './TargetPanel.js';
+import { evaluateOptions, groupOptions } from './TargetPanel.js';
 import { DoorLayer, FogLayer, NoteLayer, WallLayer } from './FogLayer.js';
 import { DrawingLayer } from './DrawingLayer.js';
 import { TerrainLayer } from './TerrainLayer.js';
 import { MovementLayer } from './MovementLayer.js';
 import { TemplateLayer } from './TemplateLayer.js';
 import { LightLayer, WeatherLayer } from './AtmosphereLayer.js';
-import { useTable } from '../../store/table.js';
+import { FLOATER_LIFE_MS, useTable } from '../../store/table.js';
 import { useAuth } from '../../store/auth.js';
 import { getPref, setPref } from '../../lib/prefs.js';
 
@@ -202,7 +202,7 @@ export function BattleMap({
   onUseItem?: (item: Item, victim: WireToken) => void;
 }) {
   const {
-    scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool, templates, notes,
+    scene, tokens, selectedTokenId, targetTokenId, pings, floaters, vision, doors, walls, wallTool, templates, notes,
     drawings, encounter, activeActorId, moveRange, threatRange, showThreat, queryMovement, toggleThreat,
     select, target, moveToken, commitToken, pingMap, createWall, deleteWall, updateWall, toggleDoor, clearTemplate,
     placeNote, toggleNote, removeNote, addDrawing, eraseDrawing, terrain, paintTerrain,
@@ -963,7 +963,17 @@ export function BattleMap({
             <p className="text-[11px] text-ink-500">Nothing on this sheet to use.</p>
           ) : (
             <ul className="max-h-56 space-y-0.5 overflow-y-auto">
-              {targetPopup.options.map((option) => (
+              {/* Three headed lists rather than one run of buttons, so a
+                  misclick cannot heal an enemy or swing at an ally. Grouping
+                  only - nothing here is hidden or refused for being pointed at
+                  the wrong sort of creature. */}
+              {groupOptions(targetPopup.options).map((group) => (
+                <li key={group.category}>
+                  <div className="mt-1 mb-0.5 px-1.5 text-[9px] tracking-wider text-ink-600 uppercase first:mt-0">
+                    {group.label}
+                  </div>
+                  <ul className="space-y-0.5">
+              {group.options.map((option) => (
                 <li key={option.item.id}>
                   {/* Illegal options are greyed and labelled rather than hidden:
                       hiding them makes the app feel arbitrary, while naming the
@@ -996,6 +1006,9 @@ export function BattleMap({
                       </span>
                     )}
                   </button>
+                </li>
+              ))}
+                  </ul>
                 </li>
               ))}
             </ul>
@@ -1093,11 +1106,93 @@ export function BattleMap({
         )}
       </div>
 
+      {/* What a blow came to, over the creature it came to. HTML rather than
+          Konva, like the tooltip and the target menu, so it stays sharp however
+          far the board is zoomed out. */}
+      {floaters.map((floater) => {
+        const token = tokens.find((t) => t.id === floater.tokenId);
+        if (!token) return null;
+        const at = gridToPixel({ x: token.x + token.w / 2, y: token.y }, grid);
+        return (
+          <Floater
+            key={floater.id}
+            floater={floater}
+            x={at.x * view.scale + view.x}
+            y={at.y * view.scale + view.y}
+          />
+        );
+      })}
+
       {wallStart && (
         <div className="pointer-events-none absolute top-2 left-2 rounded bg-arcane-500/20 px-2 py-1 text-[10px] text-arcane-400">
           from ({wallStart.x}, {wallStart.y})
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * A number rising off a creature, then gone.
+ *
+ * Damage floats when it is *applied* rather than when it is rolled, so what
+ * appears over the token is what the creature actually took - resistance means
+ * the roll and the result differ, and the roll is the wrong one to show. A miss
+ * floats at once, having nothing to apply.
+ *
+ * `prefers-reduced-motion` keeps the number and drops the drift: the point is
+ * the figure, and the movement is only there to pull the eye to it.
+ */
+function Floater({
+  floater,
+  x,
+  y,
+}: {
+  floater: { text: string; kind: 'damage' | 'heal' | 'miss' };
+  x: number;
+  y: number;
+}) {
+  const start = useRef(Date.now());
+  const [, setTick] = useState(0);
+  const still = useRef(
+    typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+  );
+
+  useEffect(() => {
+    if (still.current) return;
+    let frame = 0;
+    const step = () => {
+      setTick((t) => (t + 1) % 1000);
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const phase = Math.min(1, (Date.now() - start.current) / FLOATER_LIFE_MS);
+  const rise = still.current ? 0 : phase * 34;
+  // Held at full strength for the first third, so it is readable before it goes.
+  const opacity = still.current ? 1 : phase < 0.35 ? 1 : 1 - (phase - 0.35) / 0.65;
+
+  const tone =
+    floater.kind === 'heal'
+      ? 'text-emerald-300'
+      : floater.kind === 'miss'
+        ? 'text-ink-300'
+        : 'text-red-400';
+
+  return (
+    <div
+      className={`pointer-events-none absolute z-20 font-display text-lg font-bold drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] ${tone}`}
+      style={{
+        left: x,
+        top: y - rise,
+        transform: 'translate(-50%, -100%)',
+        opacity,
+      }}
+    >
+      {floater.text}
     </div>
   );
 }

@@ -10,10 +10,67 @@ import type { Actor, Item } from '../../store/sheet.js';
  * and lets a player argue the ruling with the DM.
  */
 
+/** Where an option is filed in the list you pick from. */
+export type OptionCategory = 'attack' | 'support' | 'item';
+
+export const CATEGORY_LABELS: Record<OptionCategory, string> = {
+  attack: 'Attacks',
+  support: 'Support',
+  item: 'Items',
+};
+
+export const CATEGORY_ORDER: OptionCategory[] = ['attack', 'support', 'item'];
+
+/**
+ * What an item is *for*, decided from what it carries.
+ *
+ * Damage dice, an attack roll or a save it forces make it an attack; healing
+ * dice, or a spell or feature carrying none of those, make it support. Never
+ * from the description: reading intent out of prose is wrong in both
+ * directions, which is the line this codebase draws everywhere else.
+ *
+ * Consumables are filed as items whatever they do, because "what have I got"
+ * is how anybody looks for a potion - and it keeps the two things you spend
+ * from being scattered through the other two lists.
+ *
+ * Grouping only. Nothing is hidden or refused for being aimed at the wrong
+ * sort of creature: a DM does sometimes need to strike their own NPC or heal a
+ * hostile, and the same reasoning that keeps Mage Armor in the list rather than
+ * out of it applies to the whole category.
+ */
+export function categoryOf(item: Item): OptionCategory {
+  if (item.type === 'consumable') return 'item';
+
+  const s = item.system as Record<string, unknown>;
+  if (s.damageDice || s.attackRoll || s.save || item.type === 'weapon') return 'attack';
+  if (s.healingDice) return 'support';
+
+  return item.type === 'spell' || item.type === 'feature' ? 'support' : 'item';
+}
+
+/**
+ * The options split into the three lists you pick from, empty ones dropped.
+ *
+ * One helper rather than three copies of the same grouping, so the token
+ * popup, the target panel and the reach list cannot disagree about where a
+ * potion belongs.
+ */
+export function groupOptions(
+  options: Option[],
+): { category: OptionCategory; label: string; options: Option[] }[] {
+  return CATEGORY_ORDER.map((category) => ({
+    category,
+    label: CATEGORY_LABELS[category],
+    options: options.filter((option) => option.category === category),
+  })).filter((group) => group.options.length > 0);
+}
+
 export interface Option {
   item: Item;
   legal: boolean;
   reason: string;
+  /** Attacks, Support or Items - so a misclick cannot heal an enemy. */
+  category: OptionCategory;
   /** Range in feet this option reaches, for the tooltip. */
   reach: number | null;
   longRange: boolean;
@@ -122,7 +179,15 @@ export function evaluateOptions({
 
       return { item, legal: true, reason: detail, reach, longRange: false };
     })
-    .sort((a, b) => Number(b.legal) - Number(a.legal) || a.item.name.localeCompare(b.item.name));
+    // Filed once, at the end, rather than at each of the branches above - six
+    // places to remember is five chances to forget.
+    .map((option) => ({ ...option, category: categoryOf(option.item) }))
+    .sort(
+      (a, b) =>
+        CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category) ||
+        Number(b.legal) - Number(a.legal) ||
+        a.item.name.localeCompare(b.item.name),
+    );
 }
 
 export function TargetPanel({
@@ -194,7 +259,16 @@ export function TargetPanel({
         <p className="text-sm text-ink-500">No weapons or spells on this sheet.</p>
       ) : (
         <ul className="max-h-64 space-y-1 overflow-y-auto">
-          {options.map(({ item, legal, reason, longRange }) => (
+          {/* Attacks, Support and Items kept apart, so a misclick cannot heal
+              an enemy or swing at an ally. Grouping only: nothing is hidden for
+              being aimed at the wrong sort of creature. */}
+          {groupOptions(options).map((group) => (
+            <li key={group.category}>
+              <div className="mt-2 mb-1 text-[10px] tracking-wider text-ink-600 uppercase first:mt-0">
+                {group.label}
+              </div>
+              <ul className="space-y-1">
+          {group.options.map(({ item, legal, reason, longRange }) => (
             <li key={item.id}>
               <button
                 disabled={!legal}
@@ -223,6 +297,9 @@ export function TargetPanel({
                   {reason}
                 </div>
               </button>
+            </li>
+          ))}
+              </ul>
             </li>
           ))}
         </ul>

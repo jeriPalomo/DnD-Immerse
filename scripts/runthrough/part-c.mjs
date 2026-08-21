@@ -140,18 +140,72 @@ if (weapon) {
   emit(player, 'chat:card', { itemId: weapon.id, actorId: thorinActorId, targetTokenId: goblins[0].id });
   const card = await carded;
   check('posting an item makes a card', Boolean(card?.message?.cardData), card?.message?.cardData?.name);
-  check('the card offers attack and damage',
-    (card?.message?.cardData?.actions ?? []).includes('attack'), JSON.stringify(card?.message?.cardData?.actions));
+  const offered = card?.message?.cardData?.actions ?? [];
+  check('the card offers one attack button', offered.includes('attack'), JSON.stringify(offered));
+  // One button, not two. Nobody could tell what the difference between Attack
+  // and Damage was, and the answer was "press both, in order".
+  check('and no separate damage button beside it', !offered.includes('damage'), JSON.stringify(offered));
 
-  for (const action of ['attack', 'damage', 'critical']) {
-    const acted = nextWhere(dm, 'chat:message', (p) => Boolean(p?.message?.rollData), 3000);
+  /**
+   * One press, the whole swing.
+   *
+   * Attack rolls to hit and then rolls the damage itself when it lands, so a
+   * hit produces two messages and a miss exactly one. Repeated until both
+   * outcomes have been seen rather than trusting a single roll of a d20 -
+   * asserting "two messages" off one attack is a coin flip dressed as a check.
+   */
+  let sawHit = false;
+  let sawMiss = false;
+
+  for (let attempt = 0; attempt < 20 && !(sawHit && sawMiss); attempt += 1) {
+    const posted = [];
+    const collect = (p) => {
+      if (p?.message?.rollData) posted.push(p.message);
+    };
+    dm.on('chat:message', collect);
+
     emit(player, 'chat:cardAction', {
-      itemId: weapon.id, actorId: thorinActorId, action, targetTokenId: goblins[0].id,
+      itemId: weapon.id, actorId: thorinActorId, action: 'attack', targetTokenId: goblins[0].id,
     });
-    const result = await acted;
-    check(`the ${action} button rolls`, Boolean(result?.message?.rollData),
-      `${result?.message?.rollData?.expression} = ${result?.message?.rollData?.total}`);
+    await new Promise((r) => setTimeout(r, 700));
+    dm.off('chat:message', collect);
+
+    const toHit = posted.find((m) => /attacks/.test(m.body));
+    if (!toHit) continue;
+
+    const hit = /HIT/.test(toHit.body);
+    const damage = posted.find((m) => /damage/i.test(m.body));
+
+    if (hit && !sawHit) {
+      sawHit = true;
+      check('a hit rolls its damage in the same press', Boolean(damage),
+        `${toHit.body} | ${damage?.body ?? 'no damage rolled'}`);
+      check('and the damage is aimed at the creature that was struck',
+        /to Goblin/.test(damage?.body ?? ''), damage?.body);
+    }
+    if (!hit && !sawMiss) {
+      sawMiss = true;
+      check('a miss rolls no damage at all', !damage,
+        `${toHit.body} | ${damage?.body ?? 'nothing, as it should be'}`);
+    }
   }
+
+  check('both a hit and a miss were seen', sawHit && sawMiss,
+    `hit: ${sawHit}, miss: ${sawMiss}`);
+
+  // The log used to read "Mace — attack", which says nothing about who threw it
+  // or at what.
+  const named = nextWhere(dm, 'chat:message', (p) => /attacks/.test(p?.message?.body ?? ''), 3000);
+  emit(player, 'chat:cardAction', {
+    itemId: weapon.id, actorId: thorinActorId, action: 'attack', targetTokenId: goblins[0].id,
+  });
+  const label = (await named)?.message?.body ?? '';
+  check('the roll says who is attacking whom', /Thorin.* attacks Goblin.* with /.test(label), label);
+
+  // A card and the roll it produces have to live in the same view, or pressing
+  // the button looks like it did nothing. This is the bug that was reported.
+  check('the card and its roll are both in the conversation, or both in the fight',
+    card?.message?.combat === false, `card combat: ${card?.message?.combat}`);
 }
 
 console.log('\n=== 16. damage, healing and death saves ===');

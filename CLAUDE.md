@@ -655,6 +655,49 @@ initiative order, so a creature in the fight earns whether or not its sheet was
 ever assigned. Rehearsing against a copy of the real campaign is what found this
 — the seed always assigns its characters, so no test could have.
 
+**The result of an action appears where the action was taken.** Chat is the
+whole log and Battle filters it to combat - Chat used to *exclude* combat, which
+put an item card and the roll it produces in different tabs. The card posts
+uncombatted and lands in Chat; the attack posts `combat: true` and lands in
+Battle. Press Attack while looking at Chat and the answer arrives in a tab you
+are not on, so the button looks broken while working perfectly every time. That
+was reported as a dead button and cost an evening to find; nothing may reintroduce
+a view that hides its own results.
+
+**Attack is one button, and rolls the damage itself when it lands.** Two buttons
+meant nobody could tell what the difference was, and the answer was "press both,
+in order". A hit rolls damage in the same action, a critical doubling the dice -
+the one case where the attack roll changes what the damage roll is - and a miss
+rolls nothing, so there is no number lying around to apply for a swing that
+never connected. A spell that rolls to hit chains the same way; one that does
+not, like a fireball, keeps its own damage button because there is no attack
+roll to hang it off. The label names both creatures.
+
+**Options are filed as Attacks, Support or Items, from what an item carries.**
+`categoryOf` in `TargetPanel.tsx` reads damage dice, an attack roll or a forced
+save for an attack, healing dice or a bare spell for support, and files every
+consumable as an item. Never from the description - reading intent out of prose
+is the line this codebase draws everywhere. Grouping only: nothing is hidden or
+refused for being aimed at the wrong sort of creature, because a DM does
+sometimes strike their own NPC or heal a hostile, and the same reasoning that
+keeps Mage Armor in the list applies to the whole category. One classifier
+shared by the token popup, the target panel and the reach list, so they cannot
+disagree about where a potion belongs.
+
+**Damage tells the table what landed, never what is left.** `damage:applied`
+carried `before` and `after` to the whole campaign room and the initiative
+tracker rendered them, so a player watching a fight read an enemy's exact hit
+points off their own screen - the one number every other payload here redacts.
+Players get `amount`; the DM gets the pool, on the DM room, with `.except` so
+they are not handed both. Two tests asserted the leak rather than the rule
+(`after < before` on a *player's* payload) and now assert the redaction.
+
+**A number floats when it is true, not when it is rolled.** Damage rises off a
+creature at the moment it is *applied*, because resistance means the roll and
+the result differ and the roll is the wrong one to show. A miss floats at once,
+having nothing to apply - and only the miss, since a hit is announced by the
+damage that follows it and two numbers over one token is noise.
+
 **A player may damage monsters, never characters.** `damage:apply` is open to
 members, but `isFairGame` refuses any token that is owned or linked to a
 `character` actor, and healing stays the DM's. Rolling damage and then asking
