@@ -33,7 +33,8 @@ npm run serve        # Play: backs up, builds, starts, restarts on crash
 npm run stop         # Stop it when Ctrl-C is not an option
 npm start            # One process, everything on :3001, no supervision
 npm run dev          # Development: API :3001 + client :5173, hot reload
-npm test             # Vitest: rules5e + grid math
+npm test             # Vitest: rules, geometry, vision, sockets
+npm run runthrough   # Every route and socket event, end to end on a real server
 npm run db:generate  # New migration after editing schema.ts
 npm run srd:import   # Seed the compendium (downloads once, then cached)
 npm run seed         # Example campaign: DM + 3 players, gear, NPCs
@@ -72,6 +73,33 @@ the browser then refuses to send the cookie over plain HTTP, so setting it while
 the table is reached at `http://100.x.y.z:3001` breaks every login. Which is
 right depends on how it is served and only the person serving it knows, so the
 server says so at boot and changes nothing.
+
+## Testing
+
+Two halves, and they answer different questions.
+
+**`npm test`** is the unit and socket suite: the rules, the grid maths, the
+vision sweep, and the invariants that are wrong in ways nobody can see - a leak,
+a redaction, a modifier that is plausible and false.
+
+**`npm run runthrough`** drives every route and every socket event against a
+real server on a throwaway database, in four parts: accounts and sheets, the
+board, play, and uploads. It exists because the client has three test files for
+the whole of it, and because a route can be individually correct and still not
+work with the others.
+
+**It builds its own world and never opens `data/`**, exactly as `playtest` does.
+That is not caution for its own sake: part D uploads a one-pixel map to check
+the route, and it does so to a scene of its own precisely because doing it to
+the seeded one collapses the grid to 1x1 and breaks part C. A check that damages
+what the next check measures is worse than no check.
+
+**A failing check is a question, not a verdict.** Of the two dozen that failed
+the first time this was written, all but two were the test being wrong - the
+wrong event name, a payload shaped from memory, an assumption about whose turn
+it was. `terrain:paint` answers on `terrain:state` and only to the DM;
+`token:move` reaches a player only if they can see the creature; a handout must
+be an image. Read the handler before believing the test.
 
 ## Invariants
 

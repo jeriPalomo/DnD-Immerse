@@ -124,6 +124,17 @@ thing worth showing.
 
 **It never touches `data/`.** Your real campaign cannot be harmed by a demo.
 
+## Checking it still works
+
+```bash
+npm test             # rules, geometry, vision, socket invariants
+npm run runthrough   # every route and socket event, end to end
+```
+
+The runthrough builds, seeds a throwaway campaign under the system temp folder,
+starts a server, drives 188 checks across four parts, and stops. It never opens
+`data/`. Worth running after a pull, and before a session you care about.
+
 ## When something is wrong
 
 Read `data/logs/server-<date>.log` first — the supervisor's own lines are

@@ -25,6 +25,40 @@ audio system rather than extending it.
 
 ---
 
+## Every feature, driven end to end — 2026-08-20
+
+`npm run runthrough` is new: 188 checks over every one of the ~42 routes and ~42
+socket events, in four parts, against a real server on a throwaway database. It
+exists because the client has three test files for the whole React app, and
+because a route can be individually correct and still not work alongside the
+others.
+
+Two real bugs came out of it.
+
+**Any upload of the wrong file answered 500.** `storeImage` had a guard for an
+unreadable image that could not be reached: sharp throws rather than returning
+metadata with no dimensions, and from two different places - `metadata()` for a
+text file, the constructor for an empty one. So "Something went wrong" instead
+of "that is not an image". Both wrapped, four tests, and the empty case is the
+one that caught the second throw site after the first fix only handled the
+first.
+
+**The seeded NPCs were not stamped** - covered in the review above, found by the
+same pass.
+
+Everything else that failed was the test, not the app, and that is worth writing
+down because the ratio was about twelve to one. The recurring shapes: an event
+name assumed rather than read (`terrain:paint` answers on `terrain:state`, and
+only to the DM), a payload shaped from memory (`effect:apply` takes `tokenIds`
+and a `condition`; `effect:remove` takes an `effectId`), and an assumption about
+state (whose turn it was, whether the fog had been reset, whether a goblin was
+still on full health). Read the handler before believing the test.
+
+One of those was self-inflicted and instructive: part D uploaded a one-pixel map
+to the seeded crypt, collapsing its grid to 1x1, and part C then reported a
+player with 25 feet of movement and nowhere to go. It uploads to a scene of its
+own now.
+
 ## Walking through a shut door — 2026-08-20
 
 Reported from a real session. The straight-line check was refusing it correctly;

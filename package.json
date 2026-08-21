@@ -22,7 +22,8 @@
     "pretest": "npm run build --workspace=@dnd/shared",
     "playtest": "node scripts/playtest.mjs",
     "serve": "node scripts/serve.mjs",
-    "stop": "node scripts/stop.mjs"
+    "stop": "node scripts/stop.mjs",
+    "runthrough": "node scripts/runthrough.mjs"
   },
   "engines": {
     "node": ">=20"
