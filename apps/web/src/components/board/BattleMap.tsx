@@ -16,6 +16,7 @@ import {
   tokenBadges,
   tokenDistanceInFeet,
 } from '@dnd/shared';
+import KonvaGlobal from 'konva';
 import type Konva from 'konva';
 import type { TerrainBrush, WireScene, WireToken } from '@dnd/shared';
 import type { Actor, Item } from '../../store/sheet.js';
@@ -29,6 +30,16 @@ import { LightLayer, WeatherLayer } from './AtmosphereLayer.js';
 import { useTable } from '../../store/table.js';
 import { useAuth } from '../../store/auth.js';
 import { getPref, setPref } from '../../lib/prefs.js';
+
+/**
+ * Only the left button drags a node.
+ *
+ * Konva's default is `[0, 1]` - left *and middle* - so a middle-drag intended
+ * to pan the board picked up whatever token it started over and moved it, which
+ * on a live scene is a creature walking somewhere nobody asked. Panning is
+ * handled by hand on the Stage; dragging is left-button only.
+ */
+KonvaGlobal.dragButtons = [0];
 
 /**
  * A dragged ping is sampled every mousemove, so a slow hand over a big map can
@@ -211,6 +222,15 @@ export function BattleMap({
    * it acts. Null when no tool is out, so an ordinary game never pays for it.
    */
   const [snapAt, setSnapAt] = useState<{ x: number; y: number } | null>(null);
+  /**
+   * A right-drag pan in progress: where it began, and where the view was.
+   *
+   * A ref rather than state because mouse moves outrun React - the same reason
+   * the paint buffer and the drawing stroke are refs. Holding the *starting*
+   * view rather than accumulating deltas means a dropped frame cannot make the
+   * map drift away from the cursor.
+   */
+  const panFrom = useRef<{ x: number; y: number; viewX: number; viewY: number } | null>(null);
   const { user } = useAuth();
 
   // The stroke in progress, kept local so it tracks the cursor with no round
@@ -515,6 +535,25 @@ export function BattleMap({
         }}
         onWheel={onWheel}
         onMouseDown={(e) => {
+          /**
+           * Right-drag pans, whatever tool is out.
+           *
+           * The stage's own dragging is off while a pen or a ground brush is
+           * selected, because those need the same left-drag - so the only way
+           * to reach another part of a big map was to zoom out, zoom in, and
+           * hope. Right-drag is nobody else's gesture here, and middle-drag
+           * comes along because it is the other thing people try.
+           */
+          if (e.evt.button === 2 || e.evt.button === 1) {
+            e.evt.preventDefault();
+            const stage = e.target.getStage();
+            const pointer = stage?.getPointerPosition();
+            if (pointer) {
+              panFrom.current = { x: pointer.x, y: pointer.y, viewX: view.x, viewY: view.y };
+            }
+            return;
+          }
+
           // Alt-drag points at something without leaving anything behind.
           if (e.evt.altKey && !drawingMode && canPoint) {
             const point = pointerGrid(e);
@@ -537,6 +576,20 @@ export function BattleMap({
           if (point) setStroke([point.x, point.y]);
         }}
         onMouseMove={(e) => {
+          if (panFrom.current) {
+            const stage = e.target.getStage();
+            const pointer = stage?.getPointerPosition();
+            if (pointer) {
+              const from = panFrom.current;
+              setView((current) => ({
+                ...current,
+                x: from.viewX + (pointer.x - from.x),
+                y: from.viewY + (pointer.y - from.y),
+              }));
+            }
+            return;
+          }
+
           // Appended through the updater, never from the rendered value: mouse
           // moves arrive faster than React re-renders, and reading the closed
           // -over array meant each batch of moves overwrote the last, leaving a
@@ -565,8 +618,22 @@ export function BattleMap({
           if (wallTool === 'arrow') setStroke((current) => (current ? [current[0], current[1], point.x, point.y] : current));
           else setStroke((current) => (current ? [...current, point.x, point.y] : current));
         }}
-        onMouseLeave={() => setSnapAt(null)}
+        onMouseLeave={() => {
+          setSnapAt(null);
+          // Released off the board: a pan left running would resume the moment
+          // the pointer came back, with the map jumping to meet it.
+          panFrom.current = null;
+        }}
+        onContextMenu={(e) => {
+          // Right-drag is a pan here, so the browser menu is only ever in the
+          // way - and it would appear the instant the drag ended.
+          e.evt.preventDefault();
+        }}
         onMouseUp={() => {
+          if (panFrom.current) {
+            panFrom.current = null;
+            return;
+          }
           if (pingStroke) {
             // A drag draws; a click without one falls through to the plain dot
             // the click handler already sends.
@@ -1002,7 +1069,10 @@ export function BattleMap({
         {(hints || wallTool !== 'off') && (
           <div className="pointer-events-none rounded bg-ink-950/80 px-2 py-1 text-[10px] text-ink-500">
             {wallTool !== 'off'
-              ? wallTool === 'note'
+              ? // Every tool line carries the pan, because a tool is exactly
+                // when the left button is spoken for and dragging the map stops
+                // working - which read as a board that had seized up.
+                (wallTool === 'note'
                 ? 'click to drop a pin — click a pin to reveal it, alt-click to delete'
                 : wallTool === 'secret'
                   ? 'drawing a secret passage — players are never sent it; alt-click a dotted seam to reveal it'
@@ -1014,7 +1084,8 @@ export function BattleMap({
                     ? 'click a wall or a pin to delete it'
                     : groundBrush
                     ? groundHint(groundBrush)
-                    : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`
+                    : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`) +
+                ' · right-drag to pan'
               : isDM
                 ? 'scroll to zoom · drag to pan · alt-click a door to lock it · shift-click a token to target · ? for keys'
                 : 'scroll to zoom · drag to pan · alt-click to ping, alt-drag to draw one · shift-click a token to target · ? for keys'}
@@ -1193,6 +1264,10 @@ function TokenShape({
         // mousedown reached the Stage and started a pan - the map slid away
         // under a player trying to move someone else's token. Alt still passes
         // through, because pinging over a token is fair.
+        // A right or middle press is a pan wherever it lands - a crowded board
+        // is mostly tokens, so swallowing it here would make panning depend on
+        // finding a bare square.
+        if (e.evt.button === 2 || e.evt.button === 1) return;
         if (!draggable && !e.evt.altKey) e.cancelBubble = true;
       }}
       onDragMove={(e) => {

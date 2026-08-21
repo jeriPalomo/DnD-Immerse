@@ -222,7 +222,81 @@ check('and the squares dragged over are the blocked ones',
   blocked.some(([x, y]) => y === 12 && x >= 15 && x <= 17),
   JSON.stringify(blocked.filter(([, y]) => y === 12)));
 
-console.log('\n=== 31. selecting and dragging a token ===');
+console.log('\n=== 31. panning while a tool is selected ===');
+
+/**
+ * The gesture that exists because the tools took the other one.
+ *
+ * With a ground brush out, the Stage's own dragging is off - left-drag paints -
+ * so before right-drag there was no way to reach another part of a big map
+ * except zooming out and back in. Measured rather than probed: pan right by a
+ * known two squares, then paint at the screen point that *was* square (15, 13),
+ * and the server should store (13, 13). The board having moved by exactly the
+ * distance dragged is the claim, and a stored square is the only place it can
+ * be read from outside the browser.
+ */
+const panBy = 2 * scene.gridSize * scale;
+const panStart = middleOf(10, 8);
+
+await page.mouse.move(panStart.x, panStart.y);
+await page.mouse.down({ button: 'right' });
+await page.mouse.move(panStart.x + panBy / 2, panStart.y, { steps: 6 });
+await page.mouse.move(panStart.x + panBy, panStart.y, { steps: 6 });
+await page.mouse.up({ button: 'right' });
+await page.waitForTimeout(400);
+
+const afterPan = next(watcher, 'terrain:state', 4000);
+const wasAt = middleOf(15, 13);
+await page.mouse.move(wasAt.x, wasAt.y);
+await page.mouse.down();
+await page.mouse.move(wasAt.x + 2, wasAt.y, { steps: 2 });
+await page.mouse.up();
+const panned = await afterPan;
+const paintedRow = (panned?.terrain?.blocked ?? []).filter(([, y]) => y === 13);
+
+check('the brush still paints after a right-drag', Boolean(panned),
+  panned ? 'terrain pushed after the pan' : 'nothing painted');
+check('and right-drag panned the board by exactly the distance dragged',
+  paintedRow.some(([x]) => x === 13),
+  paintedRow.length ? `row 13 holds ${JSON.stringify(paintedRow)}, wanted x=13` : 'nothing on row 13');
+
+// Undo the paint, or every run leaves another square of rubble behind.
+for (const [x, y] of paintedRow) {
+  watcher.emit('terrain:paint', { sceneId: scene.id, kind: 'clear', squares: [[x, y]] });
+}
+await new Promise((r) => setTimeout(r, 400));
+
+// Back to the fitted view, which is the transform every later section computes
+// its clicks from.
+await page.locator('button', { hasText: /^Fit$/ }).first().click();
+await page.waitForTimeout(900);
+
+/**
+ * A pan may start over a creature, and must not pick it up.
+ *
+ * Middle-drag rather than right, because middle is the button that could
+ * actually have gone wrong: Konva's `dragButtons` defaults to left *and*
+ * middle, so before that was narrowed a middle-drag meant to shift the map
+ * walked whatever creature it started over across the board. A right-drag was
+ * never in that list, so pressing it here would prove nothing.
+ */
+const panTokens = (await boardNow()).tokens;
+const bystander = panTokens.find((t) => t.name === 'Goblin');
+if (bystander) {
+  const onCreature = middleOf(bystander.x, bystander.y);
+  const moved = next(watcher, 'token:updated', 2000);
+  await page.mouse.move(onCreature.x, onCreature.y);
+  await page.mouse.down({ button: 'middle' });
+  await page.mouse.move(onCreature.x + panBy, onCreature.y, { steps: 8 });
+  await page.mouse.up({ button: 'middle' });
+  const stirred = await moved;
+  check('middle-dragging from a creature never walks it', stirred === null,
+    stirred ? `the token moved to ${stirred.token?.x},${stirred.token?.y}` : 'the creature stayed put');
+  await page.locator('button', { hasText: /^Fit$/ }).first().click();
+  await page.waitForTimeout(900);
+}
+
+console.log('\n=== 32. selecting and dragging a token ===');
 
 await page.getByRole('button', { name: 'Off', exact: true }).click();
 await page.waitForTimeout(300);
@@ -264,7 +338,7 @@ if (goblin) {
   await new Promise((r) => setTimeout(r, 600));
 }
 
-console.log('\n=== 32. opening a door by clicking it ===');
+console.log('\n=== 33. opening a door by clicking it ===');
 
 const doorBefore = (await wallsNow()).find((w) => w.door === 1);
 check('the crypt has a door to click', Boolean(doorBefore),
@@ -283,7 +357,7 @@ if (doorBefore) {
   check('and clicking it again shuts it', (await shut)?.door?.doorState === 0);
 }
 
-console.log('\n=== 33. a scene with no map, which is the first one anybody makes ===');
+console.log('\n=== 34. a scene with no map, which is the first one anybody makes ===');
 
 /**
  * The bug this whole file exists for.

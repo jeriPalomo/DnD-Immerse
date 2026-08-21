@@ -438,6 +438,30 @@ position into the map's pan origin and the scene jumped. A token that is not
 draggable also has to stop its mousedown, or the Stage starts panning under a
 player trying to move someone else's token.
 
+**Right-drag pans the board, and only the left button drags a node.** A tool
+takes the left button - a pen draws with it, a ground brush paints with it - so
+`draggable={!drawingMode && !groundBrush}` left no way at all to reach another
+part of a big map except zooming out and back in, which read as a board that had
+seized up. The pan is done by hand on the Stage rather than by toggling Konva's
+own dragging, so it works whatever tool is out: the *starting* view is held in a
+ref and the delta applied to it, because accumulating deltas across dropped
+frames lets the map drift away from the cursor. `Konva.dragButtons` is narrowed
+to `[0]` — it defaults to left **and middle**, so a middle-drag meant to shift
+the map picked up whatever creature it started over and walked it somewhere
+nobody asked. A token's mousedown lets a right or middle press through rather
+than swallowing it, or panning would depend on finding a bare square on a board
+that is mostly creatures. The context menu is suppressed, since it would open
+the instant the drag ended.
+
+**A fight says how long it took when it ends.** Six seconds a round is the
+surprising half — a fight everybody felt was long is usually under half a
+minute — so `encounter:end` posts it to the whole table rather than leaving the
+DM to work it out. Real time is mentioned only once it reaches a minute, so a
+mis-press does not announce that the battle lasted four seconds, and a fight
+nobody was ever in posts nothing at all. `formatDuration` is shared with the
+running clock in the tracker, because two ways of writing one duration is how a
+table gets told two different numbers for the same fight.
+
 **A player may damage monsters, never characters.** `damage:apply` is open to
 members, but `isFairGame` refuses any token that is owned or linked to a
 `character` actor, and healing stays the DM's. Rolling damage and then asking
