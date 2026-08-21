@@ -203,10 +203,29 @@ export function BattleMap({
     });
   }, [scene?.mapWidth, scene?.mapHeight, size.width, size.height]);
 
-  // Fit when the map first loads or the scene changes.
+  /**
+   * Fit once per scene, and never again on its own.
+   *
+   * This used to list `fitToMap` as a dependency, and `fitToMap` is rebuilt
+   * whenever `size` changes - so *every* container resize threw the view away
+   * and refitted. Resizing the window, toggling focus mode, opening a panel:
+   * a DM who had zoomed into one corner lost it, which is precisely what the
+   * comment on the focus-mode refit below says must not happen.
+   *
+   * It could not simply leave the array either. `size` starts at zero and the
+   * ResizeObserver fills it a frame later, so `fitToMap` returns early on the
+   * first run and the initial fit only ever happened *because* the effect
+   * re-ran. Hence the ref: fit when the scene id changes, and once more when a
+   * real size arrives for that scene. Every later resize is somebody's window,
+   * not a new map, and leaves the view alone.
+   */
+  const fittedScene = useRef<string | null>(null);
   useEffect(() => {
+    if (!scene?.id || !size.width || !size.height) return;
+    if (fittedScene.current === scene.id) return;
+    fittedScene.current = scene.id;
     fitToMap();
-  }, [scene?.id, fitToMap]);
+  }, [scene?.id, size.width, size.height, fitToMap]);
 
   /*
    * Refit when focus mode toggles, since the board has just changed width by a
