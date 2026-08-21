@@ -252,6 +252,27 @@ function toClassLevelRow(row: Json, ruleset: Ruleset): ClassLevelRow | null {
 }
 
 /**
+ * The level a feature is gained at.
+ *
+ * 2014 publishes a plain number and 2024 publishes a *reference to the level
+ * entry* - `{ index: 'barbarian-1', url: '.../levels/1' }` - so reading it as a
+ * number silently dropped every 2024 feature and left a 2024 campaign with no
+ * class features at all. The import reported success either way, which is why
+ * the row counts get looked at rather than the exit code.
+ */
+function levelNumber(value: unknown): number | null {
+  if (typeof value === 'number') return value;
+
+  if (value && typeof value === 'object') {
+    const ref = value as { index?: string; url?: string };
+    const found = /(\d+)$/.exec(ref.url ?? ref.index ?? '');
+    if (found) return Number(found[1]);
+  }
+
+  return null;
+}
+
+/**
  * A class or subclass feature.
  *
  * 2014 publishes `desc` as an array and 2024 publishes `description` as a
@@ -260,14 +281,15 @@ function toClassLevelRow(row: Json, ruleset: Ruleset): ClassLevelRow | null {
  */
 function toFeatureRow(row: Json, ruleset: Ruleset): FeatureRow | null {
   const className = row.class?.name ?? '';
-  if (!className || typeof row.level !== 'number') return null;
+  const level = levelNumber(row.level);
+  if (!className || level === null) return null;
 
   return {
     id: `${ruleset}-${row.index}`,
     ruleset,
     className,
     subclassName: row.subclass?.name ?? '',
-    level: row.level,
+    level,
     name: row.name ?? '',
     description: joinDesc(row.description ?? row.desc),
     parentName: row.parent?.name ?? '',

@@ -10,6 +10,7 @@ import {
   emptyActor,
   hitPointsForLevel,
   hitPointsGained,
+  levelGains,
   ownershipLevelSchema,
   parseHitDicePool,
   parseItemSystem,
@@ -24,7 +25,10 @@ import {
   campaigns,
   items,
   ownership,
+  srdClassLevels,
+  srdFeatures,
   srdMonsters,
+  srdTraits,
 } from '../db/schema.js';
 import { campaignAllowsStats, mayReadStats, tokenIn } from '../realtime/scene.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
@@ -659,6 +663,130 @@ const STAT_BLOCK_FIELDS = [
    * `hpMax` was previously only ever typed in by hand, so levelling up healed
    * nobody and the sheet quietly disagreed with the hit dice pool beside it.
    */
+  /**
+   * What this character gained by reaching their level.
+   *
+   * Read-only, and read through `requireActorRead` like every other sheet
+   * question - a briefing about somebody's character is their sheet's business,
+   * not a public compendium lookup.
+   *
+   * The ruleset comes from the campaign the sheet is assigned to, the same
+   * resolution the compendium picker already uses. A sheet assigned nowhere
+   * falls back to 2014, which is also the only edition with a full spell list.
+   */
+  app.get('/api/actors/:id/level-gains', async (request) => {
+    const user = assertUser(request);
+    const { id } = request.params as { id: string };
+    const { actor } = await requireActorRead(id, user.id);
+
+    const query = z
+      .object({
+        from: z.coerce.number().int().min(0).max(20).optional(),
+        to: z.coerce.number().int().min(1).max(20).optional(),
+      })
+      .parse(request.query);
+
+    const to = query.to ?? actor.level;
+    // Defaults to the levels not yet read, which is what the panel wants and
+    // handles a DM moving somebody two levels at once.
+    const from = query.from ?? Math.min(actor.levelAcknowledged, to - 1);
+
+    const assigned = await db
+      .select({ ruleset: campaigns.ruleset })
+      .from(actorCampaigns)
+      .innerJoin(campaigns, eq(actorCampaigns.campaignId, campaigns.id))
+      .where(eq(actorCampaigns.actorId, id))
+      .limit(1);
+    const ruleset = assigned[0]?.ruleset ?? '2014';
+
+    const [classLevels, features, traits] = await Promise.all([
+      db.select().from(srdClassLevels).where(eq(srdClassLevels.ruleset, ruleset)),
+      db.select().from(srdFeatures).where(eq(srdFeatures.ruleset, ruleset)),
+      db.select().from(srdTraits).where(eq(srdTraits.ruleset, ruleset)),
+    ]);
+
+    return {
+      gains: levelGains({
+        className: actor.className,
+        subclass: actor.subclass,
+        race: actor.race,
+        from,
+        to,
+        classLevels,
+        features,
+        traits,
+      }),
+      // So the panel can say "nothing is published yet" rather than "this level
+      // grants nothing", which are very different messages.
+      compendiumEmpty: classLevels.length === 0 && features.length === 0,
+    };
+  });
+
+  /**
+   * Writes chosen features onto the sheet.
+   *
+   * Idempotent on name, which is the whole point: pressing Add twice, or the DM
+   * levelling the party a second time, must not leave two Extra Attacks on a
+   * sheet nobody will think to tidy. Offered rather than applied automatically,
+   * the rule a stamped monster and a rolled heal both already follow.
+   */
+  app.post('/api/actors/:id/level-features', async (request) => {
+    const user = assertUser(request);
+    const { id } = request.params as { id: string };
+    const { actor } = await requireActorWrite(id, user.id);
+
+    const input = z
+      .object({
+        features: z
+          .array(z.object({ name: z.string().min(1).max(200), description: z.string().max(8000) }))
+          .max(20),
+      })
+      .parse(request.body);
+
+    const existing = await db
+      .select({ name: items.name })
+      .from(items)
+      .where(and(eq(items.ownerActorId, id), eq(items.type, 'feature')));
+    const already = new Set(existing.map((row) => row.name.trim().toLowerCase()));
+
+    const fresh = input.features.filter((feature) => !already.has(feature.name.trim().toLowerCase()));
+    if (fresh.length > 0) {
+      await db.insert(items).values(
+        fresh.map((feature, index) => ({
+          id: newId(),
+          ownerActorId: id,
+          type: 'feature' as const,
+          name: feature.name,
+          description: feature.description,
+          sortOrder: existing.length + index,
+          system: {} as never,
+        })),
+      );
+    }
+
+    return { added: fresh.length, skipped: input.features.length - fresh.length, actorId: actor.id };
+  });
+
+  /**
+   * Marks the gains as read.
+   *
+   * A column rather than React state, because the DM sets the level from their
+   * own screen: transient state is gone before the player ever opens the sheet,
+   * which is exactly the case this exists for.
+   */
+  app.post('/api/actors/:id/acknowledge-level', async (request) => {
+    const user = assertUser(request);
+    const { id } = request.params as { id: string };
+    const { actor } = await requireActorWrite(id, user.id);
+
+    await db
+      .update(actors)
+      .set({ levelAcknowledged: actor.level, updatedAt: Date.now() })
+      .where(eq(actors.id, id));
+
+    return { levelAcknowledged: actor.level };
+  });
+
   app.post('/api/actors/:id/level-hit-points', async (request) => {
     const user = assertUser(request);
     const { id } = request.params as { id: string };
