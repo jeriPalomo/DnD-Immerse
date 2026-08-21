@@ -47,6 +47,92 @@ function toPixelPath(
   return out;
 }
 
+/**
+ * A ghost of the next click.
+ *
+ * Drawn from the same snapping the click handler applies, not an approximation
+ * of it - a preview that rounded differently from the thing it previews would
+ * be worse than none. Wall corners round to whole squares, pins to halves, and
+ * a brush fills the square the pointer is inside.
+ */
+function SnapPreview({
+  point,
+  tool,
+  grid,
+  from,
+}: {
+  point: { x: number; y: number };
+  tool: string;
+  grid: { gridSize: number; offsetX: number; offsetY: number };
+  from: { x: number; y: number } | null;
+}) {
+  const isWall = tool === 'wall' || tool === 'door' || tool === 'secret';
+  const isBrush = TERRAIN_BRUSHES.includes(tool as TerrainBrush);
+
+  if (isWall) {
+    const corner = gridToPixel({ x: Math.round(point.x), y: Math.round(point.y) }, grid);
+    const start = from ? gridToPixel(from, grid) : null;
+    const colour = tool === 'secret' ? '#a78bfa' : tool === 'door' ? '#e8853f' : '#7dd3fc';
+
+    return (
+      <Group>
+        {/* The run so far, so a corner is aimed rather than clicked and checked. */}
+        {start && (
+          <Line
+            points={[start.x, start.y, corner.x, corner.y]}
+            stroke={colour}
+            strokeWidth={3}
+            dash={[8, 6]}
+            opacity={0.8}
+          />
+        )}
+        <Circle x={corner.x} y={corner.y} radius={6} fill={colour} opacity={0.9} />
+        <Circle x={corner.x} y={corner.y} radius={11} stroke={colour} strokeWidth={1.5} opacity={0.5} />
+      </Group>
+    );
+  }
+
+  if (tool === 'note') {
+    // Halves, matching `Math.round(p * 2) / 2` in the click handler.
+    const spot = gridToPixel(
+      { x: Math.round(point.x * 2) / 2, y: Math.round(point.y * 2) / 2 },
+      grid,
+    );
+    return <Circle x={spot.x} y={spot.y} radius={9} stroke="#fbbf24" strokeWidth={2} opacity={0.85} />;
+  }
+
+  if (isBrush) {
+    const cell = gridToPixel({ x: Math.floor(point.x), y: Math.floor(point.y) }, grid);
+    const colour =
+      tool === 'clear' ? '#94a3b8' : tool === 'water' ? '#38bdf8' : tool === 'mud' ? '#a16207' : '#ef4444';
+
+    return (
+      <Rect
+        x={cell.x}
+        y={cell.y}
+        width={grid.gridSize}
+        height={grid.gridSize}
+        fill={colour}
+        opacity={0.28}
+        stroke={colour}
+        strokeWidth={2}
+      />
+    );
+  }
+
+  // Erase, pen and arrow all act where the pointer is rather than on a snap, so
+  // a crosshair is the honest preview: it promises no rounding that is not
+  // happening.
+  const here = gridToPixel(point, grid);
+  const arm = grid.gridSize * 0.22;
+  return (
+    <Group opacity={0.7}>
+      <Line points={[here.x - arm, here.y, here.x + arm, here.y]} stroke="#e2e8f0" strokeWidth={1.5} />
+      <Line points={[here.x, here.y - arm, here.x, here.y + arm]} stroke="#e2e8f0" strokeWidth={1.5} />
+    </Group>
+  );
+}
+
 /** Loads an image for Konva, re-resolving when the URL changes. */
 function useImage(url: string | null): HTMLImageElement | null {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
@@ -107,6 +193,13 @@ export function BattleMap({
 
   // Where the DM clicked first while drawing a wall segment.
   const [wallStart, setWallStart] = useState<{ x: number; y: number } | null>(null);
+  /**
+   * Where the cursor is, in grid units, while a tool is out.
+   *
+   * Only for the snap preview: everything else reads the pointer at the moment
+   * it acts. Null when no tool is out, so an ordinary game never pays for it.
+   */
+  const [snapAt, setSnapAt] = useState<{ x: number; y: number } | null>(null);
   const { user } = useAuth();
 
   // The stroke in progress, kept local so it tracks the cursor with no round
@@ -408,6 +501,12 @@ export function BattleMap({
             if (point) paintSquare(point);
             return;
           }
+
+          // Track the cursor for the preview whenever a tool is out. Before the
+          // drawing branch below, which returns early on every move that is not
+          // extending a stroke - and a wall run is exactly that.
+          if (wallTool !== 'off') setSnapAt(pointerGrid(e));
+
           if (!drawingMode || !stroke) return;
           const point = pointerGrid(e);
           if (!point) return;
@@ -416,6 +515,7 @@ export function BattleMap({
           if (wallTool === 'arrow') setStroke((current) => (current ? [current[0], current[1], point.x, point.y] : current));
           else setStroke((current) => (current ? [...current, point.x, point.y] : current));
         }}
+        onMouseLeave={() => setSnapAt(null)}
         onMouseUp={() => {
           if (pingStroke) {
             // A drag draws; a click without one falls through to the plain dot
@@ -519,6 +619,19 @@ export function BattleMap({
         {scene.gridVisible && (
           <Layer listening={false}>
             <GridLines scene={scene} />
+          </Layer>
+        )}
+
+        {/*
+          Where the next click will actually land.
+          Each tool snaps to a different increment - a wall to the grid corner, a
+          pin to the half square, a brush to the whole square - and until now the
+          only clue was the text under the board naming the tool. Aiming a run of
+          walls meant clicking and looking.
+        */}
+        {snapAt && wallTool !== 'off' && (
+          <Layer listening={false}>
+            <SnapPreview point={snapAt} tool={wallTool} grid={grid} from={wallStart} />
           </Layer>
         )}
 
