@@ -83,10 +83,20 @@ vision sweep, and the invariants that are wrong in ways nobody can see - a leak,
 a redaction, a modifier that is plausible and false.
 
 **`npm run runthrough`** drives every route and every socket event against a
-real server on a throwaway database, in four parts: accounts and sheets, the
-board, play, and uploads. It exists because the client has three test files for
-the whole of it, and because a route can be individually correct and still not
-work with the others.
+real server on a throwaway database, in five parts: accounts and sheets, the
+board, play, uploads, and the canvas. It exists because the client has three
+test files for the whole of it, and because a route can be individually correct
+and still not work with the others.
+
+**Part E is the one that clicks.** The board is a single `<canvas>`, so no
+selector reaches it and nothing else can ask whether a gesture arrives at all -
+which is precisely how a missing `name="map"` swallowed every click on a
+grid-only scene unnoticed. It computes the stage transform rather than probing
+for it (`fitToMap` centres at `min(containerW/mapW, containerH/mapH, 1)`, so
+pressing Fit makes a square convert to a pixel exactly) and reads back what the
+*server stored*, because "the canvas looks right" is not the claim. It is the
+only part that opens a browser, and reports itself skipped rather than failing
+if one will not start.
 
 **It builds its own world and never opens `data/`**, exactly as `playtest` does.
 That is not caution for its own sake: part D uploads a one-pixel map to check

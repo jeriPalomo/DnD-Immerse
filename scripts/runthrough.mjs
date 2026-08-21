@@ -5,12 +5,18 @@
  * invariants - the things that are wrong in ways you cannot see. This covers
  * the other question: does each of the forty-odd routes and forty-odd socket
  * events actually do what it says, together, on a database with a campaign in
- * it. Four parts:
+ * it. Five parts:
  *
  *   A  accounts, campaigns, sheets, items, rests, the compendium
  *   B  scenes, walls, doors, terrain, tokens, pins, drawings, templates, fog
  *   C  chat, dice, item cards, damage, conditions, combat, movement, journal
  *   D  uploads, stat blocks, effect durations, membership
+ *   E  the canvas, clicked with a real mouse
+ *
+ * E is the odd one and the reason the rest are not enough: the board is a
+ * single <canvas>, so no selector can reach it and nothing else here can ask
+ * whether a click arrives at all. It is the only part that opens a browser, and
+ * it reports itself skipped rather than failing if one will not start.
  *
  * Like `playtest`, it never touches `data/`: the database lives in a throwaway
  * directory under the system temp folder and is rebuilt every run, so a check
@@ -117,6 +123,9 @@ try {
     ['B  scenes, walls, terrain, tokens, fog', './runthrough/part-b.mjs'],
     ['C  chat, cards, combat, movement, journal', './runthrough/part-c.mjs'],
     ['D  uploads, stat blocks, effects, members', './runthrough/part-d.mjs'],
+    // The only part that opens a browser: the board is one <canvas>, so a
+    // click is the sole way to ask whether the mouse reaches the handlers.
+    ['E  the canvas, with a real mouse', './runthrough/part-e.mjs'],
   ];
 
   let passed = 0;

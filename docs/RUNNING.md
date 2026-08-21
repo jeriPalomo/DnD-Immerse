@@ -132,8 +132,11 @@ npm run runthrough   # every route and socket event, end to end
 ```
 
 The runthrough builds, seeds a throwaway campaign under the system temp folder,
-starts a server, drives 188 checks across four parts, and stops. It never opens
+starts a server, drives 206 checks across five parts, and stops. It never opens
 `data/`. Worth running after a pull, and before a session you care about.
+
+The last part opens a browser and clicks the board itself, since the map is a
+canvas and nothing else can tell you a click still lands where you aimed it.
 
 ## When something is wrong
 
