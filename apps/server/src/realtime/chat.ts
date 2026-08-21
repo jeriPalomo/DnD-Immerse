@@ -30,6 +30,7 @@ import type {
 } from '@dnd/shared';
 import {
   abilityModifier,
+  attackVerdict,
   groupAnswerSchema,
   groupRollSchema,
   publishedMonsterBonus,
@@ -740,6 +741,23 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
       return;
     }
 
+    /**
+     * Hit or miss, said out loud.
+     *
+     * The roll was posted as a bare number and the player did the arithmetic -
+     * even though this handler is holding both the total and the creature it
+     * was aimed at. Comparing them here reveals nothing new: `ac` is on
+     * `WireToken` for everyone who can see the token at all, unlike hit points,
+     * and the board's hover tooltip has always printed it.
+     *
+     * A natural 20 hits and a natural 1 misses whatever the numbers say, which
+     * is the one place the total is not the answer.
+     */
+    const verdict =
+      input.action === 'attack' && target?.ac !== null && target?.ac !== undefined
+        ? attackVerdict(result.total, result.rolls[0], target.ac, target.name).text
+        : '';
+
     await persistAndDeliver(
       io,
       campaignId,
@@ -747,8 +765,8 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         userId: user.id,
         actorId: actor.id,
         kind: 'roll',
-        body: label,
-        rollData: result,
+        body: label + verdict,
+        rollData: { ...result, label: result.label + verdict },
         // Swinging something is combat; rolling a save off a card is not
         // necessarily, so it stays in the conversation.
         combat: input.action !== 'save',

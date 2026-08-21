@@ -766,3 +766,34 @@ export function publishedMonsterBonus(
   }
   return null;
 }
+
+/**
+ * Whether an attack roll landed, and how to say so.
+ *
+ * Separated from the handler that rolls it so the two cases dice will not
+ * reliably produce - a natural 1 and an ordinary miss - can be tested at all.
+ *
+ * A natural 20 always hits and a natural 1 always misses, whatever the totals
+ * say: the one place in 5e where the number on the die beats the arithmetic.
+ * Meeting the AC exactly is a hit, which is the off-by-one worth pinning down.
+ */
+export function attackVerdict(
+  total: number,
+  natural: number | undefined,
+  armorClass: number,
+  targetName: string,
+): { hit: boolean; critical: boolean; text: string } {
+  if (natural === 20) {
+    return { hit: true, critical: true, text: ` — CRITICAL HIT on ${targetName}` };
+  }
+  if (natural === 1) {
+    return { hit: false, critical: false, text: ` — MISS (natural 1) against ${targetName}` };
+  }
+
+  const hit = total >= armorClass;
+  return {
+    hit,
+    critical: false,
+    text: ` — ${hit ? 'HIT' : 'MISS'} against ${targetName} (AC ${armorClass})`,
+  };
+}

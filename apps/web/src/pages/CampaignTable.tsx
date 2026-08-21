@@ -353,6 +353,14 @@ export default function CampaignTable() {
               isDM={Boolean(isDM)}
               focused={focusBoard}
               onToggleFocus={() => setFocusBoard((on) => !on)}
+              // So clicking a creature can offer what you could do to it, at
+              // the creature. The same `useItemOn` the side panel and the reach
+              // list already call - three ways to swing a sword must not be
+              // three implementations of swinging it.
+              actingActor={actingActor}
+              actingItems={actingItems}
+              actingToken={actingToken}
+              onUseItem={useItemOn}
             />
           </ErrorBoundary>
         </div>

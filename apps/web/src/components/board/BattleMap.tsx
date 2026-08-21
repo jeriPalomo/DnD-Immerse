@@ -18,6 +18,8 @@ import {
 } from '@dnd/shared';
 import type Konva from 'konva';
 import type { TerrainBrush, WireScene, WireToken } from '@dnd/shared';
+import type { Actor, Item } from '../../store/sheet.js';
+import { evaluateOptions } from './TargetPanel.js';
 import { DoorLayer, FogLayer, NoteLayer, WallLayer } from './FogLayer.js';
 import { DrawingLayer } from './DrawingLayer.js';
 import { TerrainLayer } from './TerrainLayer.js';
@@ -174,10 +176,19 @@ export function BattleMap({
   isDM,
   focused = false,
   onToggleFocus,
+  actingActor = null,
+  actingItems = [],
+  actingToken = null,
+  onUseItem,
 }: {
   isDM: boolean;
   focused?: boolean;
   onToggleFocus?: () => void;
+  /** The creature doing the acting, for the options offered on a target. */
+  actingActor?: Actor | null;
+  actingItems?: Item[];
+  actingToken?: WireToken | null;
+  onUseItem?: (item: Item, victim: WireToken) => void;
 }) {
   const {
     scene, tokens, selectedTokenId, targetTokenId, pings, vision, doors, walls, wallTool, templates, notes,
@@ -431,6 +442,45 @@ export function BattleMap({
   // Mirrors the server's rule, so a player is not offered a gesture that will
   // be silently dropped. The server decides; this only avoids the dead click.
   const canPoint = isDM || scene.playerDrawing;
+
+  /**
+   * The menu that hangs off the creature you aimed at.
+   *
+   * Positioned from the same maths that brings the active combatant into view -
+   * grid to map pixels, then the stage's own scale and offset. HTML rather than
+   * a Konva group, like the hover tooltip, so it stays sharp however far the
+   * board is zoomed out and its buttons are real buttons.
+   *
+   * Null unless there is somebody to act, something to act with, and a creature
+   * that is not the actor: an empty menu pinned to a goblin is worse than none.
+   */
+  const targetPopup = (() => {
+    if (!targeted || !actingToken || !actingActor || actingItems.length === 0) return null;
+    if (targeted.id === actingToken.id) return null;
+
+    const options = evaluateOptions({
+      items: actingItems,
+      actor: actingActor,
+      self: actingToken,
+      target: targeted,
+      scene,
+    });
+    if (options.length === 0) return null;
+
+    const anchor = gridToPixel({ x: targeted.x + targeted.w, y: targeted.y }, grid);
+    const left = anchor.x * view.scale + view.x + 12;
+    const top = anchor.y * view.scale + view.y;
+
+    return {
+      token: targeted,
+      options,
+      feet: tokenDistanceInFeet(actingToken, targeted, 'standard', scene.feetPerSquare),
+      // Kept on screen: a creature at the right edge would otherwise hang its
+      // menu off the board where nobody can press it.
+      x: Math.max(8, Math.min(left, size.width - 232)),
+      y: Math.max(8, Math.min(top, size.height - 220)),
+    };
+  })();
 
   return (
     <div
@@ -725,8 +775,20 @@ export function BattleMap({
                 // A player may drag only their own tokens; the DM drags anything.
                 draggable={isDM || (token.ownerUserId === user?.id && !token.locked)}
                 onSelect={(withShift) => {
-                  if (withShift) target(token.id === targetTokenId ? null : token.id);
-                  else select(token.id);
+                  if (withShift) {
+                    target(token.id === targetTokenId ? null : token.id);
+                    return;
+                  }
+
+                  select(token.id);
+
+                  // Clicking a creature you do not run also aims at it, which is
+                  // what opens the menu below. Shift-to-target still works and
+                  // is still the only way to aim at your own party; clicking
+                  // your own token selects it and nothing more, since you are
+                  // far more often moving it than attacking it.
+                  const mine = token.ownerUserId === user?.id;
+                  if (!mine && token.id !== actingToken?.id) target(token.id);
                 }}
                 onMove={moveToken}
                 onCommit={commitToken}
@@ -802,6 +864,76 @@ export function BattleMap({
           />
         </Layer>
       </Stage>
+      )}
+
+      {/*
+        What you could do to the creature you just clicked, at the creature.
+        The options are `evaluateOptions`, the same function the side panel
+        uses - two answers to "can I reach it with this" would eventually
+        disagree, and the one on the board would be the one somebody trusted.
+      */}
+      {targetPopup && (
+        <div
+          className="absolute z-20 w-56 rounded-lg border border-ink-600 bg-ink-950/95 p-2 shadow-xl shadow-black/50 backdrop-blur"
+          style={{ left: targetPopup.x, top: targetPopup.y }}
+        >
+          <div className="mb-1.5 flex items-baseline justify-between gap-2">
+            <span className="truncate text-xs text-ink-100">{targetPopup.token.name || 'Creature'}</span>
+            <button
+              onClick={() => target(null)}
+              aria-label="Close"
+              className="shrink-0 text-[11px] text-ink-500 hover:text-ink-200"
+            >
+              ×
+            </button>
+          </div>
+          <div className="mb-1.5 text-[10px] text-ink-500">
+            {targetPopup.feet} ft away
+            {targetPopup.token.ac !== null ? ` · AC ${targetPopup.token.ac}` : ''}
+          </div>
+
+          {targetPopup.options.length === 0 ? (
+            <p className="text-[11px] text-ink-500">Nothing on this sheet to use.</p>
+          ) : (
+            <ul className="max-h-56 space-y-0.5 overflow-y-auto">
+              {targetPopup.options.map((option) => (
+                <li key={option.item.id}>
+                  {/* Illegal options are greyed and labelled rather than hidden:
+                      hiding them makes the app feel arbitrary, while naming the
+                      reason teaches the rule mid-turn. */}
+                  {/* Two lines, not one row. Squeezed side by side, "Out of
+                      range — 60 ft away, reach 5 ft" took the width and left
+                      the weapon reading "Ha…", which is the one thing on this
+                      menu that has to be legible. */}
+                  <button
+                    disabled={!option.legal}
+                    onClick={() => {
+                      onUseItem?.(option.item, targetPopup.token);
+                      target(null);
+                    }}
+                    className={`w-full rounded px-1.5 py-1 text-left transition-colors ${
+                      option.legal
+                        ? 'text-ink-200 hover:bg-ink-800'
+                        : 'cursor-not-allowed text-ink-600'
+                    }`}
+                  >
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-[11px]">{option.item.name}</span>
+                      {option.legal && option.reach !== null && (
+                        <span className="shrink-0 text-[10px] text-ink-500">{option.reach} ft</span>
+                      )}
+                    </span>
+                    {option.reason && (
+                      <span className="block text-[10px] leading-tight text-ink-600">
+                        {option.reason}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {hovered && (
