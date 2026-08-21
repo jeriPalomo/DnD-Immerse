@@ -13,6 +13,8 @@ import {
   effectUpdateSchema,
   CONDITIONS,
   abilityModifier,
+  combatSeconds,
+  formatDuration,
   initiativeExpression,
   initiativeAddSchema,
   initiativeRollSchema,
@@ -293,6 +295,41 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
 
     // Read before it is closed, so the scene it was fought on is still known.
     const ending = await activeEncounter(ctx.campaignId);
+
+    /**
+     * What the fight cost, posted where the table can read it.
+     *
+     * The in-game duration is the headline because it is the surprising half:
+     * six seconds a round means a fight everybody felt was long is usually
+     * under half a minute, and that is worth saying out loud when it ends.
+     *
+     * Real time is mentioned only once it is a minute or more, so a fight
+     * started and stopped by mistake does not announce that it lasted four
+     * seconds. Both come from `formatDuration`, the same function the running
+     * clock uses - the number a table watched all encounter is the number they
+     * are handed at the end of it.
+     */
+    if (ending) {
+      const fought = await db
+        .select({ id: initiativeEntries.id })
+        .from(initiativeEntries)
+        .where(eq(initiativeEntries.encounterId, ending.id));
+
+      // A fight nobody was ever in is a mis-press, not an encounter.
+      if (fought.length > 0) {
+        const realSeconds = Math.round((Date.now() - ending.createdAt) / 1000);
+        const atTheTable =
+          realSeconds >= 60 ? `, fought over ${formatDuration(realSeconds)} at the table` : '';
+
+        await postSystemMessage(
+          io,
+          ctx.campaignId,
+          user.id,
+          `The fight ends after ${ending.round} round${ending.round === 1 ? '' : 's'} — ` +
+            `${formatDuration(combatSeconds(ending.round))} of game time${atTheTable}.`,
+        );
+      }
+    }
 
     await db
       .update(encounters)

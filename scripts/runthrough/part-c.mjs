@@ -439,7 +439,38 @@ const playerClear = next(player, 'error', 2500);
 emit(player, 'chat:clear', {});
 check('a player cannot', Boolean(await playerClear));
 
+console.log('\n=== 23. the fight ends with a summary ===');
+
+/**
+ * Six seconds a round, said out loud when it is over.
+ *
+ * The log was cleared two checks ago, so anything arriving now is this and
+ * nothing else. Read from the *player's* socket deliberately: the point of the
+ * summary is that the table is told, and a message the DM alone receives would
+ * pass a check on the DM's socket while telling nobody.
+ */
+const summarised = nextWhere(
+  player,
+  'chat:message',
+  (p) => /the fight ends/i.test(p?.message?.body ?? ''),
+  3000,
+);
 emit(dm, 'encounter:end', {});
+const ended = await summarised;
+const summaryBody = ended?.message?.body ?? '';
+
+check('ending the fight tells the table how long it took', Boolean(ended), summaryBody || 'nothing posted');
+check('and it counts the rounds', /round/i.test(summaryBody), summaryBody);
+check('and gives the time in game', /of game time/i.test(summaryBody), summaryBody);
+check('filed with the fight rather than the conversation', ended?.message?.combat === true,
+  `combat: ${ended?.message?.combat}`);
+
+// Twice is a mis-press, not a second fight: there is no encounter left to
+// summarise, so nothing should be posted.
+const again = nextWhere(player, 'chat:message', (p) => /the fight ends/i.test(p?.message?.body ?? ''), 1500);
+emit(dm, 'encounter:end', {});
+check('ending a fight that is already over says nothing', (await again) === null);
+
 await new Promise((r) => setTimeout(r, 500));
 emit(dm, 'campaign:leave', { campaignId });
 

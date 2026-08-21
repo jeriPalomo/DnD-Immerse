@@ -565,17 +565,26 @@ export function combatSeconds(round: number): number {
 }
 
 /**
- * That number as somebody would say it out loud.
+ * A span of seconds as somebody would say it out loud.
  *
- * Seconds while a fight is short, because "18 seconds" is the answer a player
- * wants when they ask whether the door held. Minutes once it is long enough
- * that counting seconds stops meaning anything.
+ * Seconds while it is short, because "18 seconds" is the answer a player wants
+ * when they ask whether the door held. Minutes once it is long enough that
+ * counting seconds stops meaning anything.
+ *
+ * Shared by the running clock and the summary posted when a fight ends, so the
+ * number a table watched all encounter is the number they are handed at the end
+ * of it - two formatters would eventually disagree about the same duration.
  */
-export function formatCombatTime(round: number): string {
-  const total = combatSeconds(round);
-  if (total < 60) return `${total} seconds in`;
+export function formatDuration(totalSeconds: number): string {
+  const whole = Math.max(0, Math.round(totalSeconds));
+  if (whole < 60) return `${whole} second${whole === 1 ? '' : 's'}`;
 
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return `${minutes}m ${String(seconds).padStart(2, '0')}s in`;
+  const minutes = Math.floor(whole / 60);
+  const seconds = whole % 60;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+/** How far into a fight it is, for the tracker and the turn bar. */
+export function formatCombatTime(round: number): string {
+  return `${formatDuration(combatSeconds(round))} in`;
 }
