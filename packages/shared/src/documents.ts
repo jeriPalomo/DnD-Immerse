@@ -463,6 +463,16 @@ export const actorInputSchema = z.object({
   notes: z.string().max(20000).default(''),
   appearance: z.string().max(4000).default(''),
   backstory: z.string().max(20000).default(''),
+
+  /**
+   * The handbook's four personal characteristics, kept as separate fields
+   * rather than one blob because that is how they are rolled, referred to and
+   * inspired by - "what is your bond" is a question with its own answer.
+   */
+  personalityTraits: z.string().max(2000).default(''),
+  ideals: z.string().max(2000).default(''),
+  bonds: z.string().max(2000).default(''),
+  flaws: z.string().max(2000).default(''),
 });
 
 export type ActorInput = z.infer<typeof actorInputSchema>;

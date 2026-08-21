@@ -39,7 +39,7 @@ function sectionId(title: string): string {
 
 // Rest is not here: it moved into the hit point card, which is where you look
 // when you want it.
-const NAV = ['Attacks', 'Spells', 'Inventory', 'Features & Traits', 'Notes'];
+const NAV = ['Attacks', 'Spells', 'Inventory', 'Features & Traits', 'Characteristics', 'Backstory'];
 
 export default function CharacterSheet() {
   const { id } = useParams<{ id: string }>();
@@ -309,15 +309,84 @@ export default function CharacterSheet() {
             </Section>
           )}
 
-          <Section title="Notes">
-            <textarea
-              disabled={!editable}
-              value={actor.notes}
-              onChange={(e) => sheet.patch({ notes: e.target.value })}
-              rows={6}
-              placeholder="Backstory, session notes, anything you want to remember…"
-              className="w-full resize-y rounded-lg border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-ink-200 placeholder:text-ink-500 focus:border-arcane-400 focus:outline-none disabled:opacity-70"
+          {/*
+            The handbook's four, each its own box.
+            "What is your bond" is a question with its own answer, and a single
+            blob makes the DM read four paragraphs to find the one they wanted
+            to lean on this scene.
+          */}
+          <Section title="Characteristics">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Prose
+                label="Personality traits"
+                hint="How you carry yourself; what somebody notices first."
+                value={actor.personalityTraits}
+                editable={editable}
+                onChange={(personalityTraits) => sheet.patch({ personalityTraits })}
+              />
+              <Prose
+                label="Ideals"
+                hint="What you believe in, and would argue for."
+                value={actor.ideals}
+                editable={editable}
+                onChange={(ideals) => sheet.patch({ ideals })}
+              />
+              <Prose
+                label="Bonds"
+                hint="Who or what you would cross the map for."
+                value={actor.bonds}
+                editable={editable}
+                onChange={(bonds) => sheet.patch({ bonds })}
+              />
+              <Prose
+                label="Flaws"
+                hint="What a clever enemy would use against you."
+                value={actor.flaws}
+                editable={editable}
+                onChange={(flaws) => sheet.patch({ flaws })}
+              />
+            </div>
+
+            <div className="mt-3">
+              <Prose
+                label="Appearance"
+                hint="What the table sees. Was in the schema and had nowhere to be typed."
+                value={actor.appearance}
+                editable={editable}
+                rows={3}
+                onChange={(appearance) => sheet.patch({ appearance })}
+              />
+            </div>
+          </Section>
+
+          {/*
+            Bound to `backstory`, not `notes`.
+            `backstory` has been in the schema all along with no way to fill it
+            in, while the Notes box - whose placeholder read "Backstory, session
+            notes, anything" - was where everybody actually wrote one. Migration
+            0020 moves that text across, so renaming the section does not hide
+            what somebody already wrote.
+          */}
+          <Section title="Backstory">
+            <Prose
+              label=""
+              value={actor.backstory}
+              editable={editable}
+              rows={8}
+              placeholder="Where they came from, and why they are here…"
+              onChange={(backstory) => sheet.patch({ backstory })}
             />
+
+            <div className="mt-4">
+              <Prose
+                label="Session notes"
+                hint="Anything you want to remember between games."
+                value={actor.notes}
+                editable={editable}
+                rows={4}
+                onChange={(notes) => sheet.patch({ notes })}
+              />
+            </div>
           </Section>
         </div>
       </div>
@@ -496,6 +565,59 @@ function LevelHitPoints({
       )}
       {error && <p className="mt-1.5 text-xs text-red-400">{error}</p>}
     </div>
+  );
+}
+
+/**
+ * A labelled block of writing.
+ *
+ * Read-only draws the words rather than a `disabled` textarea, the rule the
+ * inventory toggles already follow: a column of dead boxes is what a player
+ * meets when they open somebody else's sheet, and "nothing written yet" says
+ * more than an empty grey rectangle.
+ */
+function Prose({
+  label,
+  hint,
+  value,
+  editable,
+  rows = 3,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  editable: boolean;
+  rows?: number;
+  placeholder?: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <label className="block">
+      {label && (
+        <span className="mb-1 block text-[11px] tracking-wide text-ink-400 uppercase">{label}</span>
+      )}
+
+      {/* The hint is the placeholder and the tooltip, never a standing line
+          above the box. Printed both ways it read as the same sentence twice,
+          and a line of grey under every label is the wall of prose the map
+          panel was stripped of for the same reason. */}
+      {editable ? (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          rows={rows}
+          title={hint}
+          placeholder={placeholder ?? hint}
+          className="w-full resize-y rounded-lg border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-ink-200 placeholder:text-ink-500 focus:border-arcane-400 focus:outline-none"
+        />
+      ) : (
+        <p className="rounded-lg border border-ink-800 bg-ink-900/60 px-3 py-2 text-sm whitespace-pre-line text-ink-300">
+          {value || <span className="text-ink-600">Nothing written yet.</span>}
+        </p>
+      )}
+    </label>
   );
 }
 

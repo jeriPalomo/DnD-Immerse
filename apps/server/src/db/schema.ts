@@ -190,6 +190,11 @@ export const actors = sqliteTable(
     notes: text('notes').notNull().default(''),
     appearance: text('appearance').notNull().default(''),
     backstory: text('backstory').notNull().default(''),
+    /** The handbook's four: what you are like, what drives you, who you owe, what undoes you. */
+    personalityTraits: text('personality_traits').notNull().default(''),
+    ideals: text('ideals').notNull().default(''),
+    bonds: text('bonds').notNull().default(''),
+    flaws: text('flaws').notNull().default(''),
 
     createdAt: epoch('created_at'),
     updatedAt: epoch('updated_at'),
