@@ -15,14 +15,23 @@ import {
   POTION_HEALING,
   auditPotionHealing,
   auditSpellConditions,
+  auditAsiLevels,
   auditXpByCr,
+  ASI_LEVELS,
   XP_BY_CR,
   parseRange,
   type AbilityKey,
   type ItemSystem,
 } from '@dnd/shared';
 import { db } from '../db/index.js';
-import { srdItems, srdMonsters, srdSpells } from '../db/schema.js';
+import {
+  srdClassLevels,
+  srdFeatures,
+  srdItems,
+  srdMonsters,
+  srdSpells,
+  srdTraits,
+} from '../db/schema.js';
 import { paths } from '../env.js';
 
 const BASE_2014 = 'https://raw.githubusercontent.com/5e-bits/5e-database/main/src/2014/en';
@@ -42,6 +51,14 @@ const SOURCES = {
   monsters: '5e-SRD-Monsters.json',
   equipment: '5e-SRD-Equipment.json',
   magicItems: '5e-SRD-Magic-Items.json',
+  levels: '5e-SRD-Levels.json',
+  features: '5e-SRD-Features.json',
+  traits: '5e-SRD-Traits.json',
+  // The one file whose *name* changes between editions - 2024 renamed races to
+  // species. Both are loaded optional, so the edition that does not have one
+  // is an empty list rather than an import that dies holding no compendium.
+  races: '5e-SRD-Races.json',
+  species: '5e-SRD-Species.json',
 } as const;
 
 /**
@@ -179,6 +196,108 @@ type Json = Record<string, any>;
 function joinDesc(value: unknown): string {
   if (Array.isArray(value)) return value.join('\n\n');
   return typeof value === 'string' ? value : '';
+}
+
+type Ruleset = '2014' | '2024';
+
+interface ClassLevelRow {
+  id: string;
+  ruleset: Ruleset;
+  className: string;
+  level: number;
+  spellcasting: Record<string, number> | null;
+  classSpecific: Record<string, unknown>;
+}
+
+interface FeatureRow {
+  id: string;
+  ruleset: Ruleset;
+  className: string;
+  subclassName: string;
+  level: number;
+  name: string;
+  description: string;
+  parentName: string;
+}
+
+interface TraitRow {
+  id: string;
+  ruleset: Ruleset;
+  name: string;
+  description: string;
+  races: string[];
+}
+
+/**
+ * A class's row for one level.
+ *
+ * Subclass rows are skipped: they carry only features, which come from the
+ * features file with their own class and level on them. Two copies of that
+ * relationship would be two chances to disagree.
+ */
+function toClassLevelRow(row: Json, ruleset: Ruleset): ClassLevelRow | null {
+  if (row.subclass) return null;
+
+  const className = row.class?.name ?? '';
+  if (!className || typeof row.level !== 'number') return null;
+
+  return {
+    id: `${ruleset}-${row.index}`,
+    ruleset,
+    className,
+    level: row.level,
+    spellcasting: row.spellcasting ?? null,
+    classSpecific: row.class_specific ?? {},
+  };
+}
+
+/**
+ * A class or subclass feature.
+ *
+ * 2014 publishes `desc` as an array and 2024 publishes `description` as a
+ * string; `joinDesc` takes either. `parent` is what turns seven sibling rows
+ * into "Fighting Style" and six options.
+ */
+function toFeatureRow(row: Json, ruleset: Ruleset): FeatureRow | null {
+  const className = row.class?.name ?? '';
+  if (!className || typeof row.level !== 'number') return null;
+
+  return {
+    id: `${ruleset}-${row.index}`,
+    ruleset,
+    className,
+    subclassName: row.subclass?.name ?? '',
+    level: row.level,
+    name: row.name ?? '',
+    description: joinDesc(row.description ?? row.desc),
+    parentName: row.parent?.name ?? '',
+  };
+}
+
+/**
+ * A racial trait, with every race and subrace that has it.
+ *
+ * 2014 says `races`/`subraces` and 2024 says `species`/`subspecies`; both are
+ * read, because `actors.race` is free text and has to match either.
+ */
+function toTraitRow(row: Json, ruleset: Ruleset): TraitRow | null {
+  if (!row.name) return null;
+
+  const named = (list: unknown): string[] =>
+    Array.isArray(list) ? list.map((entry: Json) => entry?.name).filter(Boolean) : [];
+
+  return {
+    id: `${ruleset}-${row.index}`,
+    ruleset,
+    name: row.name,
+    description: joinDesc(row.description ?? row.desc),
+    races: [
+      ...named(row.races),
+      ...named(row.subraces),
+      ...named(row.species),
+      ...named(row.subspecies),
+    ],
+  };
 }
 
 /** 5e sizes as token footprints in grid units. */
@@ -397,6 +516,33 @@ export async function importSrd(): Promise<void> {
     load(SOURCES.monsters, '2024', true),
   ]);
 
+  /**
+   * Class progression, which nothing here has ever fetched.
+   *
+   * All of it is optional. A level-up briefing is a nicety, and an import that
+   * dies halfway because one file moved leaves the table with no compendium at
+   * all - the same reasoning that makes a failed art download non-fatal.
+   */
+  const [
+    levels,
+    levels2024,
+    features,
+    features2024,
+    traits,
+    traits2024,
+    races,
+    species,
+  ] = await Promise.all([
+    load(SOURCES.levels, '2014', true),
+    load(SOURCES.levels, '2024', true),
+    load(SOURCES.features, '2014', true),
+    load(SOURCES.features, '2024', true),
+    load(SOURCES.traits, '2014', true),
+    load(SOURCES.traits, '2024', true),
+    load(SOURCES.races, '2014', true),
+    load(SOURCES.species, '2024', true),
+  ]);
+
   // Art is fetched before the tables are rebuilt so a row is only ever written
   // with a URL whose file is already on disk.
   const monsterImages = await cacheMonsterImages([
@@ -408,6 +554,9 @@ export async function importSrd(): Promise<void> {
   await db.delete(srdSpells);
   await db.delete(srdMonsters);
   await db.delete(srdItems);
+  await db.delete(srdClassLevels);
+  await db.delete(srdFeatures);
+  await db.delete(srdTraits);
 
   const spellRows = dedupe((spells as Json[]).map((s) => ({
     id: s.index,
@@ -495,11 +644,43 @@ export async function importSrd(): Promise<void> {
     ...[...(equipment2024 as Json[]), ...(magicItems2024 as Json[])].map((e) => toItemRow(e, '2024')),
   ]);
 
+  const kept = <T,>(rows: (T | null)[]): T[] => rows.filter((row): row is T => row !== null);
+
+  const classLevelRows = dedupe(
+    kept([
+      ...(levels as Json[]).map((row) => toClassLevelRow(row, '2014')),
+      ...(levels2024 as Json[]).map((row) => toClassLevelRow(row, '2024')),
+    ]),
+  );
+
+  const featureRows = dedupe(
+    kept([
+      ...(features as Json[]).map((row) => toFeatureRow(row, '2014')),
+      ...(features2024 as Json[]).map((row) => toFeatureRow(row, '2024')),
+    ]),
+  );
+
+  // Only the traits belonging to a race the SRD actually publishes: the trait
+  // files carry entries for races that are not in the set, and a hint pointing
+  // at a race nobody can pick is noise.
+  const publishedRaces = new Set(
+    [...(races as Json[]), ...(species as Json[])].map((row) => row.name).filter(Boolean),
+  );
+  const traitRows = dedupe(
+    kept([
+      ...(traits as Json[]).map((row) => toTraitRow(row, '2014')),
+      ...(traits2024 as Json[]).map((row) => toTraitRow(row, '2024')),
+    ]),
+  ).filter((row) => row.races.length > 0);
+
   // Chunked: SQLite has a hard limit on variables per statement.
   for (const [table, rows] of [
     [srdSpells, spellRows],
     [srdMonsters, monsterRows],
     [srdItems, itemRows],
+    [srdClassLevels, classLevelRows],
+    [srdFeatures, featureRows],
+    [srdTraits, traitRows],
   ] as const) {
     for (let i = 0; i < rows.length; i += 100) {
       await db.insert(table as never).values(rows.slice(i, i + 100) as never);
@@ -524,6 +705,11 @@ export async function importSrd(): Promise<void> {
   reportXpByCr(monsterRows);
   console.log('  2024 spells are not published in the SRD dataset; 2024 campaigns use the 2014 list');
 
+  console.log(
+    `  ${classLevelRows.length} class levels, ${featureRows.length} features, ${traitRows.length} racial traits`,
+  );
+  reportAsiLevels(levels as Json[]);
+
   reportSpellConditions(spellRows);
   reportPotionHealing(itemRows);
 }
@@ -547,6 +733,42 @@ export async function importSrd(): Promise<void> {
  * can never fire and cannot be verified by anything this project has, so it is
  * a bug in the table rather than a gap to live with.
  */
+/**
+ * The curated ability-score-increase levels, against the published counts.
+ *
+ * Only 2014 can check this - 2024 publishes no such field at all, which is why
+ * the table is curated in the first place. The counts are cumulative, so this
+ * turns them back into the levels where the count went up: the same arithmetic
+ * that reading them naively gets wrong, done once here against real data.
+ */
+function reportAsiLevels(levels: Json[]): void {
+  const rows = levels
+    .filter((row) => !row.subclass && typeof row.ability_score_bonuses === 'number')
+    .map((row) => ({
+      className: row.class?.name ?? '',
+      level: row.level as number,
+      cumulative: row.ability_score_bonuses as number,
+    }));
+
+  if (rows.length === 0) {
+    console.log('  ability score increases: nothing published to check the table against');
+    return;
+  }
+
+  const audit = auditAsiLevels(rows);
+  console.log(
+    `  ability score increases: ${audit.matched.length} of ${Object.keys(ASI_LEVELS).length} classes agree with the compendium`,
+  );
+  for (const row of audit.disagreed) {
+    console.log(
+      `    ${row.className}: the table says ${row.ours.join('/')}, the compendium says ${row.published.join('/')}`,
+    );
+  }
+  if (audit.unchecked.length > 0) {
+    console.log(`    nothing published to check: ${audit.unchecked.join(', ')}`);
+  }
+}
+
 function reportPotionHealing(items: { id: string; name: string; description: string }[]): void {
   const audit = auditPotionHealing(items);
 

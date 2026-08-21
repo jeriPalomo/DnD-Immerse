@@ -10,6 +10,7 @@ export * from './terrain.js';
 export * from './effects.js';
 export * from './aoe.js';
 export * from './rest.js';
+export * from './levelUp.js';
 export * from './gridDetect.js';
 export * from './colors.js';
 export * from './movement.js';

@@ -152,6 +152,15 @@ export const actors = sqliteTable(
     background: text('background').notNull().default(''),
     alignment: text('alignment').notNull().default(''),
     experience: integer('experience').notNull().default(0),
+    /**
+     * The highest level whose gains this character has been shown.
+     *
+     * Behind `level` means there is something new to read. A column rather than
+     * React state because the DM sets the level from their own screen: transient
+     * state is gone before the player ever opens the sheet, which is precisely
+     * the case this exists for.
+     */
+    levelAcknowledged: integer('level_acknowledged').notNull().default(0),
     challengeRating: text('challenge_rating').notNull().default(''),
 
     str: integer('str').notNull().default(10),
@@ -793,6 +802,93 @@ export const srdMonsters = sqliteTable(
     data: text('data', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
   },
   (t) => [index('srd_monsters_name_idx').on(t.name), index('srd_monsters_cr_idx').on(t.challengeRating)],
+);
+
+/**
+ * What a class has at each level: slots, and whatever it counts.
+ *
+ * Deliberately thin. The proficiency bonus is not stored, because
+ * `proficiencyBonus()` computes it and storing a derived number guarantees
+ * drift; the ability score increases are not stored either, because the 2024
+ * dataset does not publish them at all and `ASI_LEVELS` covers both editions
+ * from one curated, audited table. What is left is the two things nothing here
+ * can derive: the published slot progression, and the counters a class keeps
+ * (rages per rest, sneak attack dice, ki points).
+ *
+ * Features live in `srd_features` rather than here. They carry their own class
+ * and level, so a second copy of that relationship would be a second chance to
+ * disagree with the first.
+ */
+export const srdClassLevels = sqliteTable(
+  'srd_class_levels',
+  {
+    id: id(),
+    ruleset: text('ruleset', { enum: ['2014', '2024'] })
+      .notNull()
+      .default('2014'),
+    className: text('class_name').notNull(),
+    level: integer('level').notNull(),
+    /** Cantrips and slots as published. Null for a class that does not cast. */
+    spellcasting: text('spellcasting', { mode: 'json' }).$type<Record<string, number> | null>(),
+    /** Rage count, sneak attack dice, ki points - whatever this class counts. */
+    classSpecific: text('class_specific', { mode: 'json' })
+      .$type<Record<string, unknown>>()
+      .notNull(),
+  },
+  (t) => [index('srd_class_levels_idx').on(t.ruleset, t.className, t.level)],
+);
+
+/**
+ * A class or subclass feature, at the level it is gained.
+ *
+ * `parentName` is what makes a choice readable. The SRD publishes "Fighting
+ * Style" and its six options as seven sibling rows, so a Fighter reaching
+ * level 1 flat would be handed eight things rather than two and a choice.
+ */
+export const srdFeatures = sqliteTable(
+  'srd_features',
+  {
+    id: id(),
+    ruleset: text('ruleset', { enum: ['2014', '2024'] })
+      .notNull()
+      .default('2014'),
+    className: text('class_name').notNull(),
+    /** Empty for a feature every member of the class gets. */
+    subclassName: text('subclass_name').notNull().default(''),
+    level: integer('level').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    /** The feature this is an option of, if it is one. */
+    parentName: text('parent_name').notNull().default(''),
+  },
+  (t) => [index('srd_features_idx').on(t.ruleset, t.className, t.level)],
+);
+
+/**
+ * A racial trait, kept for one narrow purpose.
+ *
+ * 5e grants almost nothing racially on level-up, and the little it does grant -
+ * a Dragonborn's breath weapon growing, a Tiefling's Infernal Legacy - is
+ * written in prose rather than published as a level entry. These rows exist so
+ * the level-up panel can say "your race mentions this level, worth re-reading",
+ * which is a pointer and never a claim.
+ *
+ * `races` holds every race and subrace the trait belongs to, because
+ * `actors.race` is free text and "High Elf" has to match a subrace while
+ * "Tiefling" matches a race.
+ */
+export const srdTraits = sqliteTable(
+  'srd_traits',
+  {
+    id: id(),
+    ruleset: text('ruleset', { enum: ['2014', '2024'] })
+      .notNull()
+      .default('2014'),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    races: text('races', { mode: 'json' }).$type<string[]>().notNull(),
+  },
+  (t) => [index('srd_traits_idx').on(t.ruleset)],
 );
 
 export const srdItems = sqliteTable(

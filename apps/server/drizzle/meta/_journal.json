@@ -148,6 +148,13 @@
       "when": 1787276689932,
       "tag": "0020_characteristics",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1787317296076,
+      "tag": "0021_class_progression",
+      "breakpoints": true
     }
   ]
 }

@@ -584,6 +584,90 @@ export function auditPotionHealing(
   return audit;
 }
 
+/* ------------------------------------------------------ levelling up */
+
+/**
+ * The levels at which a class gains an ability score increase.
+ *
+ * Curated rather than imported, because the two editions disagree about
+ * publishing it at all: 2014 ships a cumulative `ability_score_bonuses` count
+ * per level, and 2024 ships no such field anywhere. One table serves both, and
+ * `auditAsiLevels` checks it against the 2014 data during `srd:import` - which
+ * is the only way a hand-written table earns any trust.
+ *
+ * Everyone gets 4, 8, 12, 16 and 19. Fighters get two more and Rogues one, and
+ * those three exceptions are the whole reason this cannot be a formula.
+ */
+export const ASI_LEVELS: Readonly<Record<string, readonly number[]>> = {
+  Barbarian: [4, 8, 12, 16, 19],
+  Bard: [4, 8, 12, 16, 19],
+  Cleric: [4, 8, 12, 16, 19],
+  Druid: [4, 8, 12, 16, 19],
+  Fighter: [4, 6, 8, 12, 14, 16, 19],
+  Monk: [4, 8, 12, 16, 19],
+  Paladin: [4, 8, 12, 16, 19],
+  Ranger: [4, 8, 12, 16, 19],
+  Rogue: [4, 8, 10, 12, 16, 19],
+  Sorcerer: [4, 8, 12, 16, 19],
+  Warlock: [4, 8, 12, 16, 19],
+  Wizard: [4, 8, 12, 16, 19],
+};
+
+/**
+ * Whether reaching this level owes an ability score increase.
+ *
+ * Answered from the level alone, never from a running total. The 2014 dataset
+ * publishes the count *cumulatively* - a Barbarian reads 1 at level 5 because
+ * of the increase at 4 - so reading that number as "you get one here" hands out
+ * an increase at every level from 4 upwards.
+ */
+export function gainsAbilityScoreIncrease(className: string, level: number): boolean {
+  const found = CLASS_NAMES.find((name) => name.toLowerCase() === (className ?? '').trim().toLowerCase());
+  return found ? (ASI_LEVELS[found] ?? []).includes(level) : false;
+}
+
+export interface AsiAudit {
+  /** Classes where the table and the published counts agree at every level. */
+  matched: string[];
+  /** Classes they disagree about, and where. */
+  disagreed: { className: string; ours: number[]; published: number[] }[];
+  /** Classes the data says nothing about, so nothing here can check them. */
+  unchecked: string[];
+}
+
+/**
+ * Checks `ASI_LEVELS` against the levels the 2014 compendium publishes.
+ *
+ * Takes the cumulative counts and turns them back into the levels where the
+ * count *went up*, which is the same arithmetic `gainsAbilityScoreIncrease`
+ * refuses to get wrong - so this is a real comparison against the data rather
+ * than the table agreeing with itself.
+ */
+export function auditAsiLevels(
+  rows: { className: string; level: number; cumulative: number }[],
+): AsiAudit {
+  const audit: AsiAudit = { matched: [], disagreed: [], unchecked: [] };
+
+  for (const className of CLASS_NAMES) {
+    const mine = rows.filter((row) => row.className === className);
+    if (mine.length === 0) {
+      audit.unchecked.push(className);
+      continue;
+    }
+
+    const counts = new Map(mine.map((row) => [row.level, row.cumulative]));
+    const published = [...counts.keys()]
+      .sort((a, b) => a - b)
+      .filter((level) => (counts.get(level) ?? 0) > (counts.get(level - 1) ?? 0));
+
+    const ours = [...(ASI_LEVELS[className] ?? [])];
+    if (ours.join(',') === published.join(',')) audit.matched.push(className);
+    else audit.disagreed.push({ className, ours, published });
+  }
+
+  return audit;
+}
+
 /* ------------------------------------------------------ experience points */
 
 /**
