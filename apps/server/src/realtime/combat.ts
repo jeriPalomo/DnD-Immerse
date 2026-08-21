@@ -3,6 +3,7 @@ import {
   advanceTurn,
   applyDamage,
   applyHealing,
+  campaignDmRoom,
   campaignRoom,
   concentrationDC,
   concentrationSave,
@@ -746,7 +747,15 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       }
     }
 
-    const results: { tokenId: string; name: string; before: number; after: number; reason: string }[] = [];
+    const results: {
+      tokenId: string;
+      name: string;
+      amount: number;
+      healing: boolean;
+      before: number;
+      after: number;
+      reason: string;
+    }[] = [];
     const lines: string[] = [];
 
     for (const token of targets) {
@@ -774,7 +783,17 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
         await db.update(actors).set({ hpCurrent: after, updatedAt: Date.now() }).where(eq(actors.id, token.actorId));
       }
 
-      results.push({ tokenId: token.id, name: token.name, before: token.hp, after, reason });
+      results.push({
+        tokenId: token.id,
+        name: token.name,
+        // What the creature actually took, after resistances - the number the
+        // board floats, and the only part a player may be told.
+        amount: Math.abs(token.hp - after),
+        healing: Boolean(input.healing),
+        before: token.hp,
+        after,
+        reason,
+      });
 
       const verb = input.healing ? 'heals' : 'takes';
       const suffix = reason === 'normal' || reason === 'healing' ? '' : ` (${reason})`;
@@ -812,9 +831,25 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       invalidateDragCache(sceneId);
     }
 
-    // To the room, not the caller: emitted back to the sender alone, nobody
-    // else at the table ever saw the damage banner.
-    io.to(campaignRoom(ctx.campaignId)).emit('damage:applied', { results });
+    /**
+     * The amount to the table, the pool to the DM.
+     *
+     * This used to send `before` and `after` to the whole room, and the
+     * initiative tracker rendered them - so a player watching a fight read
+     * "Goblin 2 12 to 5" off their own screen, which is the exact number every
+     * other payload in this app redacts. Watching a blow land tells you what it
+     * took; it does not tell you how much the creature had left.
+     */
+    // `.except` matters: the DM is in both rooms, so emitting to each in turn
+    // would hand them the redacted copy as well and leave which one arrived
+    // last to chance.
+    io
+      .to(campaignRoom(ctx.campaignId))
+      .except(campaignDmRoom(ctx.campaignId))
+      .emit('damage:applied', {
+        results: results.map(({ before: _before, after: _after, ...rest }) => rest),
+      });
+    io.to(campaignDmRoom(ctx.campaignId)).emit('damage:applied', { results });
     await postSystemMessage(io, ctx.campaignId, user.id, lines.join('\n'));
 
     const { broadcastSceneState } = await import('./scene.js');

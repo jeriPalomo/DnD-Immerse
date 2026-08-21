@@ -229,7 +229,11 @@ function buildCard(item: Item, actor: Actor, targetTokenId: string | null = null
   let saveDC: number | null = null;
 
   if (item.type === 'weapon') {
-    actions.push('attack', 'damage');
+    // One button. Attack rolls to hit and then rolls the damage itself when it
+    // lands, so there is nothing to press twice and no damage rolled for a
+    // swing that missed - which is also the difference nobody could see
+    // between the two buttons that used to be here.
+    actions.push('attack');
     if (s.versatileDice) actions.push('versatile');
     subtitle = [s.damageDice, s.damageType].filter(Boolean).join(' ');
   } else if (item.type === 'spell') {
@@ -241,8 +245,11 @@ function buildCard(item: Item, actor: Actor, targetTokenId: string | null = null
       .filter(Boolean)
       .join(' · ');
 
+    // A spell that rolls to hit chains into its damage exactly as a weapon
+    // does. One that does not - a fireball - keeps its own damage button,
+    // because there is no attack roll for the damage to hang off.
     if (s.attackRoll) actions.push('attack');
-    if (s.damageDice) actions.push('damage');
+    if (s.damageDice && !s.attackRoll) actions.push('damage');
   } else if (item.type === 'consumable') {
     // A potion used to post a card with a name and nothing to press. It gets
     // buttons only where a DM has filled in the dice: the SRD keeps a potion's
@@ -657,10 +664,12 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
             : attackExpression(s, scores, actor.level, mode);
         // Named, so the table can see which condition earned it rather than
         // wondering why two dice appeared.
-        label =
-          reasons.length > 0
-            ? `${item.name} — attack at ${mode} (${reasons.join('; ')})`
-            : `${item.name} — attack`;
+        // Who is swinging at whom, rather than a bare item name: a log full of
+        // "Mace — attack" says nothing about who threw it or at what.
+        label = target
+          ? `${actor.name} attacks ${target.name} with ${item.name}`
+          : `${actor.name} attacks with ${item.name}`;
+        if (reasons.length > 0) label += ` (at ${mode}: ${reasons.join('; ')})`;
         break;
 
       case 'damage':
@@ -753,10 +762,11 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
      * A natural 20 hits and a natural 1 misses whatever the numbers say, which
      * is the one place the total is not the answer.
      */
-    const verdict =
-      input.action === 'attack' && target?.ac !== null && target?.ac !== undefined
-        ? attackVerdict(result.total, result.rolls[0], target.ac, target.name).text
-        : '';
+    const struck =
+      input.action === 'attack' && target && target.ac !== null && target.ac !== undefined
+        ? attackVerdict(result.total, result.rolls[0], target.ac, target.name)
+        : null;
+    const verdict = struck?.text ?? '';
 
     await persistAndDeliver(
       io,
@@ -774,8 +784,47 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
       { authorName: user.displayName, actorName: actor.name },
     );
 
+    /**
+     * The damage, rolled by the same press that landed the blow.
+     *
+     * Only on a hit: a swing that missed has no damage, and rolling it anyway
+     * invites somebody to apply a number that never happened. A critical
+     * doubles the dice here rather than needing its own button - the one case
+     * where the attack roll changes what the damage roll is.
+     *
+     * A second message rather than a longer first one, so the damage keeps its
+     * own Apply button: `RollCard` offers that on a label containing "damage",
+     * and whose hit points move stays the separate decision it already was.
+     */
+    if (struck?.hit && target && s.damageDice) {
+      const damage = rollExpression(
+        damageExpression(s, scores, { critical: struck.critical }),
+        `${item.name} damage${struck.critical ? ' (critical)' : ''} to ${target.name}`,
+      );
+
+      await persistAndDeliver(
+        io,
+        campaignId,
+        {
+          userId: user.id,
+          actorId: actor.id,
+          kind: 'roll',
+          body: damage.label,
+          rollData: damage,
+          combat: true,
+        },
+        { authorName: user.displayName, actorName: actor.name },
+      );
+    }
+
     if (saveAgainst) {
       await resolveSave(io, campaignId, user.id, item, actor, saveAgainst, result.total);
+    }
+
+    // Nothing landed, so nothing will be applied - the board says so above the
+    // creature rather than leaving it to be read out of the log.
+    if (struck && !struck.hit && target) {
+      io.to(campaignRoom(campaignId)).emit('attack:missed', { tokenId: target.id });
     }
   });
 

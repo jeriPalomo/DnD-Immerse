@@ -619,9 +619,35 @@ export interface ServerToClientEvents {
 
   'initiative:state': (payload: { encounter: WireEncounter | null }) => void;
   /** Result of applying damage, so chat can explain resistances. */
+  /**
+   * Damage or healing that actually landed.
+   *
+   * `amount` is what the creature took after resistances, which is both what
+   * the board floats above it and the only part a player may know. `before` and
+   * `after` are the creature's hit point pool and are sent to the DM room
+   * alone - they used to go to everyone, and the tracker rendered them, so a
+   * player watching a fight read "Goblin 2 12 to 5" while every other payload
+   * in the app carefully redacted exactly that.
+   */
   'damage:applied': (payload: {
-    results: { tokenId: string; name: string; before: number; after: number; reason: string }[];
+    results: {
+      tokenId: string;
+      name: string;
+      amount: number;
+      healing: boolean;
+      before?: number;
+      after?: number;
+      reason: string;
+    }[];
   }) => void;
+
+  /**
+   * An attack that missed, so the board can say so above the creature.
+   *
+   * Only the miss: a hit is announced by the damage that follows it, and
+   * floating both would put two numbers over one token.
+   */
+  'attack:missed': (payload: { tokenId: string }) => void;
 
   'template:state': (payload: { templates: WireTemplate[] }) => void;
   /** Shown large on every screen for a moment, then it settles into the journal. */

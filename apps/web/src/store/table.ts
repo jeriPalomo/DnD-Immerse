@@ -73,7 +73,21 @@ interface TableState {
   toast: { message: string; undo: boolean } | null;
 
   /** Most recent damage results, shown briefly then cleared. */
-  lastDamage: { tokenId: string; name: string; before: number; after: number; reason: string }[] | null;
+  /**
+   * What landed. `before`/`after` arrive on a DM socket only - a player is told
+   * the amount, never the creature's pool.
+   */
+  lastDamage:
+    | {
+        tokenId: string;
+        name: string;
+        amount: number;
+        healing: boolean;
+        before?: number;
+        after?: number;
+        reason: string;
+      }[]
+    | null;
 
   /**
    * Bumped when the journal changes. The panel refetches on it rather than
@@ -423,7 +437,24 @@ export const useTable = create<TableState>((set, get) => ({
       const life = ping.points.length > 0 ? 5000 : 2500;
       setTimeout(() => set({ pings: get().pings.filter((p) => p.id !== ping.id) }), life);
     });
-    socket.on('error', ({ message }) => set({ error: message }));
+    /**
+     * A refusal the table can actually see.
+     *
+     * The server says no in fifty-one places, and every one of them landed in
+     * an `error` field that no component has ever rendered - so "you do not
+     * control that character" and "that item is not on this sheet" both looked
+     * exactly like a dead button. That is precisely how the attack card was
+     * reported as doing nothing.
+     *
+     * Sent to the toast that is already mounted on the table. No undo: a
+     * refusal is not an action to take back.
+     */
+    socket.on('error', ({ message }) => {
+      set({ error: message, toast: { message, undo: false } });
+      setTimeout(() => {
+        if (get().toast?.message === message) set({ toast: null });
+      }, 5000);
+    });
 
     set({ socket, campaignId, messages: [], members: [], tokens: [], scene: null, encounter: null, templates: [], notes: [], drawings: [], undoStack: [], toast: null });
   },

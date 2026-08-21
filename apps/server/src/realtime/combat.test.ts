@@ -407,6 +407,63 @@ describe('who may apply a condition', () => {
   });
 });
 
+/** Every number anywhere in a payload, keys and strings ignored. */
+function numbersInPayload(value: unknown, found: number[] = []): number[] {
+  if (typeof value === 'number') found.push(value);
+  else if (Array.isArray(value)) for (const item of value) numbersInPayload(item, found);
+  else if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) numbersInPayload(item, found);
+  }
+  return found;
+}
+
+/**
+ * Damage tells the table what landed, never what is left.
+ *
+ * `damage:applied` used to carry `before` and `after` to the whole campaign
+ * room, and the initiative tracker rendered them - so a player watching a fight
+ * read an enemy's exact hit points off their own screen, which is the one thing
+ * every other payload in this app is careful to redact. Watching a blow land
+ * tells you what it took; it does not tell you how much the creature had left.
+ */
+describe('applied damage does not leak the pool', () => {
+  let ogreId: string;
+
+  beforeAll(async () => {
+    const created = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, name: 'Leak Ogre', x: 9, y: 9, hp: 59, maxHp: 59,
+    } as never);
+    ogreId = (await created)!.token.id;
+  });
+
+  it('tells a player how much was dealt, and not the hit points', async () => {
+    const toPlayer = next<{ results: Record<string, unknown>[] }>(aliceSocket, 'damage:applied');
+    const toDm = next<{ results: Record<string, unknown>[] }>(dmSocket, 'damage:applied');
+
+    dmSocket.emit('damage:apply', {
+      tokenIds: [ogreId], amount: 7, damageType: 'slashing', healing: false, halved: false,
+    } as never);
+
+    const seen = (await toPlayer)?.results?.find((r) => r.tokenId === ogreId);
+    expect(seen, 'the player is told something landed').toBeTruthy();
+    expect(seen!.amount).toBe(7);
+    expect(seen!.before).toBeUndefined();
+    expect(seen!.after).toBeUndefined();
+
+    // Walked as values rather than searched as text: a JSON search for "59"
+    // matches the digits of an id about as often as it matches hit points,
+    // which is the flake `visionleak.test.ts` was written to avoid.
+    expect(numbersInPayload(seen)).not.toContain(59);
+    expect(numbersInPayload(seen)).not.toContain(52);
+
+    // The DM still gets the pool - it is theirs to see.
+    const dmSaw = (await toDm)?.results?.find((r) => r.tokenId === ogreId);
+    expect(dmSaw!.before).toBe(59);
+    expect(dmSaw!.after).toBe(52);
+  });
+});
+
 describe('a spell that inflicts a condition applies it', () => {
   let ogreId: string;
   let holdPersonId: string;
@@ -774,7 +831,10 @@ describe('range is measured when the button is pressed', () => {
 
   it('takes disadvantage on a shot beyond normal range', async () => {
     // Alice is at (2,2), the target at (20,2): 90 ft, past a longbow's 30.
-    expect(await attackLabel(farId)).toMatch(/attack at disadvantage.*beyond normal range/);
+    const label = await attackLabel(farId);
+    expect(label).toMatch(/at disadvantage.*beyond normal range/);
+    // And it says who is shooting at whom, which a bare item name never did.
+    expect(label).toMatch(/Alice PC attacks .* with Longbow/);
   });
 
   it('drops it once the target closes, without reposting the card', async () => {

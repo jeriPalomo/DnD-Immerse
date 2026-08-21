@@ -153,7 +153,12 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
             <div key={result.tokenId} className="text-[10px] text-ink-300">
               {result.name}{' '}
               <span className="font-mono text-ink-500">
-                {result.before} → {result.after}
+                {/* The pool only where it is known: a player is sent the amount
+                    and nothing else, so this used to print an enemy's hit points
+                    to the whole table. */}
+                {result.before !== undefined && result.after !== undefined
+                  ? `${result.before} → ${result.after}`
+                  : `${result.healing ? '+' : '−'}${result.amount}`}
               </span>
               {result.reason !== 'normal' && result.reason !== 'healing' && (
                 // Naming the reason is the point: silent halving looks like a bug.

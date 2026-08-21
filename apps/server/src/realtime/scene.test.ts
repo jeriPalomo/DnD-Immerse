@@ -444,17 +444,26 @@ describe('initiative and damage', () => {
     expect(sheet.actor.hpCurrent).toBeLessThan(30);
   });
 
-  it('lets a player damage a monster', async () => {
+  it('lets a player damage a monster, and tells them only what it took', async () => {
     // Rolling damage and then asking the DM to retype it is a step nobody
     // enjoys, so a player may subtract from what they are fighting.
-    const applied = next<{ results: { after: number; before: number }[] }>(aliceSocket, 'damage:applied');
+    //
+    // This used to read `after < before` off a player's own payload, which is
+    // the leak rather than the feature: how much a creature has left is the
+    // DM's, and watching a blow land only tells you what it dealt.
+    const applied = next<{ results: { amount: number; before?: number; after?: number }[] }>(
+      aliceSocket,
+      'damage:applied',
+    );
     aliceSocket.emit('damage:apply', {
       tokenIds: [orcTokenId], amount: 4, damageType: 'slashing', healing: false, halved: false,
     });
 
     const result = (await applied)?.results[0];
     expect(result).toBeTruthy();
-    expect(result!.after).toBeLessThan(result!.before);
+    expect(result!.amount).toBe(4);
+    expect(result!.before).toBeUndefined();
+    expect(result!.after).toBeUndefined();
   });
 
   it('refuses to let a player damage a character', async () => {

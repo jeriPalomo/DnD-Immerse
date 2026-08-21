@@ -58,9 +58,21 @@ export function ChatPanel({
   const [tab, setTab] = useState<'chat' | 'battle'>('chat');
   const bottom = useRef<HTMLDivElement>(null);
 
-  // One stored log, two views over it: a fight used to bury the conversation
-  // and the conversation used to bury the fight.
-  const shown = messages.filter((message) => (tab === 'battle' ? message.combat : !message.combat));
+  /**
+   * One stored log; Battle is a filter over it, not the other half of a split.
+   *
+   * Chat used to *exclude* combat, which put an item card and the roll it
+   * produces in different tabs: the card posts uncombatted and lands here, the
+   * attack posts `combat: true` and lands in Battle. Press Attack while looking
+   * at Chat and the answer arrives somewhere you are not - so the button looked
+   * broken, and was reported as doing nothing, while working perfectly every
+   * time.
+   *
+   * The rule this restores is that the result of an action appears where the
+   * action was taken. Battle is still the fight on its own, for a DM who wants
+   * the conversation out of the way.
+   */
+  const shown = tab === 'battle' ? messages.filter((message) => message.combat) : messages;
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: 'smooth' });
