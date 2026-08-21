@@ -638,6 +638,23 @@ person — counting them twice would shrink everybody's share *and* pay them
 double. With no characters in the fight at all there is nobody to divide among,
 so the total is reported and nothing is written.
 
+**A control that writes to somebody else's sheet asks first.** "Level the
+party" is the only one that writes to every character at once *and* throws
+something away — the experience tallies — and it is one-way, because the route
+raises levels and never lowers them. It was the single unconfirmed destructive
+control in a panel that already asks before deleting a campaign or removing a
+member. The dialog names the consequence rather than asking whether you are
+sure, and the result line says where the undo is not: lowering a level is done
+on each sheet.
+
+**A character must be assigned to the campaign for the party to level.**
+`level-party` reads `actorCampaigns`, so an unassigned character is not in the
+party and the route refuses with a message rather than silently moving nobody.
+Experience is different and deliberately so: the share is read from the
+initiative order, so a creature in the fight earns whether or not its sheet was
+ever assigned. Rehearsing against a copy of the real campaign is what found this
+— the seed always assigns its characters, so no test could have.
+
 **A player may damage monsters, never characters.** `damage:apply` is open to
 members, but `isFairGame` refuses any token that is owned or linked to a
 `character` actor, and healing stays the DM's. Rolling damage and then asking

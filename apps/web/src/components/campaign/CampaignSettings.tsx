@@ -107,6 +107,25 @@ export function CampaignSettings({
    * that explains itself.
    */
   async function levelParty() {
+    /**
+     * Asked before, because this is the one control that writes to everybody's
+     * sheet at once - and the only one that throws something away.
+     *
+     * It is also one-way: the route raises levels and never lowers them, so a
+     * mis-typed 20 cannot be taken back from here. The dialog names the
+     * consequence rather than asking whether you are sure, and says where the
+     * undo is not.
+     */
+    const ok = await ask({
+      title: `Level the party to ${partyLevel}?`,
+      body:
+        `Every character in this campaign reaches level ${partyLevel}, and the table is told. ` +
+        'Anyone already there keeps their level. Their experience tallies reset to zero, and ' +
+        'this cannot be undone here — lowering a level afterwards is done on each sheet.',
+      confirmLabel: `Level to ${partyLevel}`,
+    });
+    if (!ok) return;
+
     setLevelling(true);
     setLevelResult(null);
     try {
@@ -116,7 +135,8 @@ export function CampaignSettings({
       );
       setLevelResult(
         res.levelled.length === 0
-          ? `Nobody moved — all ${res.unchanged} are already level ${partyLevel} or higher.`
+          ? `Nobody moved — all ${res.unchanged} are already level ${partyLevel} or higher. ` +
+            "This only ever raises a level; to lower one, edit that character's sheet."
           : `${res.levelled.join(', ')} reached level ${partyLevel}` +
             (res.unchanged > 0 ? `; ${res.unchanged} were already there.` : '.'),
       );
@@ -298,6 +318,7 @@ export function CampaignSettings({
                 type="number"
                 min={1}
                 max={20}
+                aria-label="Party level"
                 value={partyLevel}
                 onChange={(e) => setPartyLevel(Number(e.target.value))}
                 className="w-16 rounded border border-ink-700 bg-ink-900 px-2 py-1 text-sm text-ink-100"
