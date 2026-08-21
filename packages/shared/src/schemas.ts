@@ -206,7 +206,12 @@ export type Condition = (typeof CONDITIONS)[number];
 
 /* ------------------------------------------------------------------ chat */
 
-export const chatKindSchema = z.enum(['text', 'roll', 'card', 'system']);
+/**
+ * `levelup` is drawn as a banner rather than a line of chat, so it is its own
+ * kind rather than a system message with a flag - the renderer has to know
+ * before it draws the speaker header, which a banner has no use for.
+ */
+export const chatKindSchema = z.enum(['text', 'roll', 'card', 'system', 'levelup']);
 export type ChatKind = z.infer<typeof chatKindSchema>;
 
 export const sendMessageSchema = z.object({

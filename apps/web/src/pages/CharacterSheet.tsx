@@ -31,6 +31,7 @@ import { ImportPdf } from '../components/sheet/ImportPdf.js';
 import { RestControl } from '../components/sheet/RestControl.js';
 import { ShareSheet } from '../components/sheet/ShareSheet.js';
 import { useSheet } from '../store/sheet.js';
+import { LevelUpPanel } from '../components/sheet/LevelUpPanel.js';
 import { api } from '../lib/api.js';
 
 /** Stable anchor from a section title, so the nav and the sections agree. */
@@ -54,8 +55,14 @@ export default function CharacterSheet() {
   const [picker, setPicker] = useState<{ kind: 'spell' | 'item'; category: ItemCategory | null } | null>(
     null,
   );
-  /** Shown after a level is gained, until the hit points are taken. */
-  const [levellingUp, setLevellingUp] = useState(false);
+  /**
+   * Shown after a level is gained, until the player says they have read it.
+   *
+   * Seeded from the sheet rather than from a click: the DM sets the level from
+   * their own screen, so by the time this page opens the level-up has already
+   * happened somewhere else. `levelAcknowledged` is what survives that.
+   */
+  const [dismissed, setDismissed] = useState(false);
 
   /**
    * Where "back" goes.
@@ -130,15 +137,22 @@ export default function CharacterSheet() {
         actor={actor}
         editable={editable}
         onChange={sheet.patch}
-        onLevelUp={() => setLevellingUp(true)}
       />
 
-      {levellingUp && editable && (
-        <LevelHitPoints
+      {/* Characters only. An NPC has a level for its stat block rather than for
+          a story, and a stamped goblin sitting at level 1 with nothing
+          acknowledged would otherwise be greeted by a level-up panel. */}
+      {!dismissed && actor.type === 'character' && actor.level > (actor.levelAcknowledged ?? 0) && (
+        <LevelUpPanel
           actorId={actor.id}
           className={actor.className}
+          level={actor.level}
+          editable={editable}
           onDone={() => void sheet.load(actor.id)}
-          onClose={() => setLevellingUp(false)}
+          onDismiss={() => {
+            setDismissed(true);
+            void sheet.load(actor.id);
+          }}
         />
       )}
 
@@ -504,86 +518,6 @@ function AbilityRoller({
 }
 
 /**
- * Hit points for a new level.
- *
- * The handbook lets you roll the class die or take the fixed average, so both
- * are offered rather than one being chosen for the table. The roll goes to the
- * server like every other roll - a hit point total nobody watched being rolled
- * is just a number somebody typed.
- */
-function LevelHitPoints({
-  actorId,
-  className,
-  onDone,
-  onClose,
-}: {
-  actorId: string;
-  className: string;
-  onDone: () => void;
-  onClose: () => void;
-}) {
-  const [busy, setBusy] = useState<'roll' | 'average' | null>(null);
-  const [result, setResult] = useState<{ gained: number; hpMax: number } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const info = classInfo(className);
-
-  async function take(method: 'roll' | 'average') {
-    setBusy(method);
-    setError(null);
-    try {
-      const res = await api.post<{ gained: number; hpMax: number }>(
-        `/api/actors/${actorId}/level-hit-points`,
-        { method },
-      );
-      setResult(res);
-      onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not add hit points');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  return (
-    <div className="mt-2 rounded-lg border border-ember-500/40 bg-ember-500/5 p-3">
-      {!info ? (
-        <p className="text-xs text-ink-400">
-          No hit die is known for &ldquo;{className}&rdquo;, so hit points stay yours to set.
-        </p>
-      ) : result ? (
-        <p className="text-xs text-emerald-300">
-          +{result.gained} hit points. Maximum is now {result.hpMax}.
-        </p>
-      ) : (
-        <>
-          <p className="mb-2 text-xs text-ink-300">
-            Hit points for the new level — roll your d{info.hitDie}, or take the average.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" loading={busy === 'roll'} onClick={() => void take('roll')}>
-              Roll 1d{info.hitDie}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              loading={busy === 'average'}
-              onClick={() => void take('average')}
-            >
-              Take {Math.floor(info.hitDie / 2) + 1}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={onClose}>
-              Later
-            </Button>
-          </div>
-        </>
-      )}
-      {error && <p className="mt-1.5 text-xs text-red-400">{error}</p>}
-    </div>
-  );
-}
-
-/**
  * A labelled block of writing.
  *
  * Read-only draws the words rather than a `disabled` textarea, the rule the
@@ -660,13 +594,10 @@ function Identity({
   actor,
   editable,
   onChange,
-  onLevelUp,
 }: {
   actor: ReturnType<typeof useSheet.getState>['actor'] & object;
   editable: boolean;
   onChange: (fields: Record<string, unknown>) => void;
-  /** Opens the hit-point prompt; a level is worth hit points. */
-  onLevelUp: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
 
@@ -802,7 +733,6 @@ function Identity({
               onClick={() => {
                 const level = levelFromXP(actor.experience);
                 onChange({ level, ...withClassDefaults(actor.className, level) });
-                onLevelUp();
               }}
               className="rounded border border-ember-500/50 bg-ember-500/10 px-1.5 py-0.5 text-[10px] text-ember-300"
             >

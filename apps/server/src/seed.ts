@@ -371,6 +371,11 @@ export async function seed(): Promise<{ inviteCode: string; campaignId: string }
       createdAt: Date.now(),
       updatedAt: Date.now(),
       ...rest,
+      // Caught up to where they start, for the same reason the migration
+      // catches everybody else up: these four have notionally been level 5 for
+      // a while, and greeting the demo with five levels of features to read is
+      // not what the panel is for.
+      levelAcknowledged: rest.level,
       skillProficiencies, saveProficiencies, spellSlots, currency, damageModifiers, prototypeToken,
     });
     await db.insert(actorCampaigns).values({

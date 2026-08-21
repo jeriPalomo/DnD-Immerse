@@ -439,7 +439,100 @@ const playerClear = next(player, 'error', 2500);
 emit(player, 'chat:clear', {});
 check('a player cannot', Boolean(await playerClear));
 
-console.log('\n=== 23. the fight ends with a summary ===');
+console.log('\n=== 23. levelling the party ===');
+
+/**
+ * The DM declares a level and the table hears about it once.
+ *
+ * Read from the *player's* socket: the banner exists so the party knows, and a
+ * message only the DM receives would pass on the DM's socket while telling
+ * nobody. The detail of what anybody gained is a sheet question, checked
+ * against the compendium below rather than against the announcement.
+ */
+const playerApi = api(playerCookie);
+const sheets = await playerApi('GET', '/api/actors');
+const thorin = (sheets.body.actors ?? []).find((a) => a.name.startsWith('Thorin'));
+check('the player has a sheet to level', Boolean(thorin), `${thorin?.name} level ${thorin?.level} ${thorin?.className}`);
+
+if (thorin) {
+  const target = thorin.level + 1;
+
+  const announced = nextWhere(player, 'chat:message', (p) => p?.message?.kind === 'levelup', 4000);
+  const levelled = await dmApi('POST', `/api/campaigns/${campaignId}/level-party`, { level: target });
+  check('the DM levels the whole party at once', levelled.status === 200,
+    `${levelled.body.levelled?.length} levelled, ${levelled.body.unchanged} already there`);
+
+  const banner = await announced;
+  check('and the table is told, once', Boolean(banner), banner?.message?.body ?? 'nothing posted');
+  check('as a banner rather than a line of chat', banner?.message?.kind === 'levelup',
+    `kind: ${banner?.message?.kind}`);
+  check('reading "Level N Reached"', banner?.message?.body === `Level ${target} Reached`,
+    banner?.message?.body);
+  check('and filed in the conversation, not the battle log', banner?.message?.combat === false,
+    `combat: ${banner?.message?.combat}`);
+
+  // Levelling to the same place again must not re-announce it: the DM pressing
+  // twice is a mis-click, not a second level.
+  const again = nextWhere(player, 'chat:message', (p) => p?.message?.kind === 'levelup', 1500);
+  const repeat = await dmApi('POST', `/api/campaigns/${campaignId}/level-party`, { level: target });
+  check('levelling to a level already reached announces nothing', (await again) === null,
+    `${repeat.body.levelled?.length} moved`);
+
+  const player2 = await playerApi('GET', `/api/actors/${thorin.id}`);
+  check('the sheet is at the new level', player2.body.actor.level === target,
+    `level ${player2.body.actor.level}`);
+  // Left behind on purpose: this is what makes the sheet greet them with what
+  // they gained rather than the level-up passing silently.
+  check('and knows it has something unread', player2.body.actor.levelAcknowledged < target,
+    `acknowledged ${player2.body.actor.levelAcknowledged} of ${target}`);
+
+  const gains = await playerApi('GET', `/api/actors/${thorin.id}/level-gains`);
+  check('the sheet can say what the level granted', gains.status === 200,
+    gains.body.gains?.unavailable ?? `${gains.body.gains?.features?.length} features`);
+  check('read from a compendium that has the progression in it', gains.body.compendiumEmpty === false);
+
+  const named = (gains.body.gains?.features ?? []).map((f) => f.name);
+  const somethingToShow =
+    named.length > 0 ||
+    (gains.body.gains?.spellSlots ?? []).length > 0 ||
+    (gains.body.gains?.counters ?? []).length > 0 ||
+    gains.body.gains?.abilityScoreIncreases > 0 ||
+    Boolean(gains.body.gains?.proficiencyBonus);
+  check('and it has something to say about it', somethingToShow,
+    `${named.join(', ') || 'no features'} | ASI ${gains.body.gains?.abilityScoreIncreases}`);
+
+  // The failure mode most likely to reach a table: a feature added twice.
+  if (named.length > 0) {
+    const first = await playerApi('POST', `/api/actors/${thorin.id}/level-features`, {
+      features: [{ name: named[0], description: 'from the runthrough' }],
+    });
+    const second = await playerApi('POST', `/api/actors/${thorin.id}/level-features`, {
+      features: [{ name: named[0], description: 'from the runthrough' }],
+    });
+    check('a gained feature can be taken onto the sheet', first.body.added === 1, named[0]);
+    check('and taking it twice adds nothing', second.body.added === 0 && second.body.skipped === 1,
+      `added ${second.body.added}, skipped ${second.body.skipped}`);
+
+    const sheet = await playerApi('GET', `/api/actors/${thorin.id}`);
+    const copies = (sheet.body.items ?? []).filter((i) => i.type === 'feature' && i.name === named[0]);
+    check('leaving exactly one on the sheet', copies.length === 1, `${copies.length} copies`);
+  }
+
+  const ack = await playerApi('POST', `/api/actors/${thorin.id}/acknowledge-level`, {});
+  check('the player can mark it read', ack.body.levelAcknowledged === target,
+    `acknowledged ${ack.body.levelAcknowledged}`);
+
+  const other = await dmApi('GET', `/api/actors/${thorin.id}/level-gains?from=1&to=5`);
+  check('and the gains can be asked for any two levels', other.status === 200,
+    `${other.body.gains?.features?.length} features from 1 to 5`);
+
+  // A player levelling the whole party would be levelling other people's
+  // characters, which is the DM's call by definition.
+  const refused = await playerApi('POST', `/api/campaigns/${campaignId}/level-party`, { level: 20 });
+  check('a player cannot level the party', refused.status === 403, String(refused.status));
+}
+
+console.log('\n=== 24. the fight ends with a summary ===');
 
 /**
  * Six seconds a round, said out loud when it is over.

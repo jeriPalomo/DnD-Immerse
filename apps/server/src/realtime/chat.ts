@@ -165,7 +165,7 @@ export async function persistAndDeliver(
   row: {
     userId: string;
     actorId: string | null;
-    kind: 'text' | 'roll' | 'card' | 'system';
+    kind: 'text' | 'roll' | 'card' | 'system' | 'levelup';
     body: string;
     rollData?: RollResult | null;
     cardData?: WireCard | null;

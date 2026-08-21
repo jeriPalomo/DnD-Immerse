@@ -29,6 +29,9 @@ export function CampaignSettings({
   const navigate = useNavigate();
   const ask = useConfirm();
   const [code, setCode] = useState(campaign.inviteCode ?? '');
+  const [partyLevel, setPartyLevel] = useState(2);
+  const [levelling, setLevelling] = useState(false);
+  const [levelResult, setLevelResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -94,6 +97,34 @@ export function CampaignSettings({
 
     if (immediate) void send();
     else timer.current = setTimeout(() => void send(), 600);
+  }
+
+  /**
+   * Reports who moved rather than saying "done".
+   *
+   * Somebody already at that level or above is left alone, and naming them as
+   * unchanged is the difference between a control that looks broken and one
+   * that explains itself.
+   */
+  async function levelParty() {
+    setLevelling(true);
+    setLevelResult(null);
+    try {
+      const res = await api.post<{ levelled: string[]; unchanged: number }>(
+        `/api/campaigns/${campaign.id}/level-party`,
+        { level: partyLevel },
+      );
+      setLevelResult(
+        res.levelled.length === 0
+          ? `Nobody moved — all ${res.unchanged} are already level ${partyLevel} or higher.`
+          : `${res.levelled.join(', ')} reached level ${partyLevel}` +
+            (res.unchanged > 0 ? `; ${res.unchanged} were already there.` : '.'),
+      );
+    } catch (err) {
+      setLevelResult(err instanceof Error ? err.message : 'Could not level the party');
+    } finally {
+      setLevelling(false);
+    }
   }
 
   async function rotate() {
@@ -256,6 +287,35 @@ export function CampaignSettings({
                 ))}
               </ul>
             )}
+          </div>
+
+          {/* The party moves together, so this is one control and one
+              announcement rather than a level typed onto four sheets. */}
+          <div className="border-t border-ink-800 pt-4">
+            <span className="mb-1.5 block text-sm font-medium text-ink-200">Party level</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={partyLevel}
+                onChange={(e) => setPartyLevel(Number(e.target.value))}
+                className="w-16 rounded border border-ink-700 bg-ink-900 px-2 py-1 text-sm text-ink-100"
+              />
+              <Button
+                size="sm"
+                loading={levelling}
+                onClick={() => void levelParty()}
+                title="Sets every character in this campaign to that level and announces it. Each player takes their own hit points and features on their sheet."
+              >
+                Level the party
+              </Button>
+            </div>
+            {levelResult && <p className="mt-1.5 text-[11px] text-emerald-300">{levelResult}</p>}
+            <p className="mt-1 text-[11px] text-ink-500">
+              Announces it to the table. Hit points and new features stay each player&rsquo;s to
+              take, on their own sheet.
+            </p>
           </div>
 
           <div className="border-t border-ink-800 pt-4">

@@ -501,6 +501,66 @@ happens, and awarding it would hand out several times what the creatures are
 worth. The summary reports; it never writes to anyone's `experience`, the same
 rule a heal follows.
 
+**A level-up is announced once and read on each sheet.** The DM declares
+levels as the story reaches them and the whole party moves together, so
+`POST /api/campaigns/:id/level-party` is one action and one banner rather than a
+level typed onto four sheets. The banner is its own chat `kind` rather than a
+system message with a flag, because the renderer has to know *before* it draws
+the speaker header — a centred banner with "Dungeon Master said:" above it is a
+line of chat wearing a hat. It is not flagged `combat`: reaching a level belongs
+in the conversation.
+
+**`levelAcknowledged` is a column, not React state.** The level-up panel shows
+whenever `level` is ahead of it. That has to survive a reload, because the DM
+sets the level from *their* screen — transient state is gone before the player
+ever opens their sheet, which is the whole case it exists for. Dismissing sets
+it to the current level; the seed and migration 0021 both start everyone caught
+up, so nobody is greeted with a level they took three sessions ago. Gated to
+`type === 'character'`: an NPC has a level for its stat block rather than for a
+story, and a stamped goblin sitting at level 1 would otherwise be offered a
+level-up.
+
+**Everything a level grants is a difference between two levels, never a
+value.** The published data is cumulative in places — a Barbarian's
+`ability_score_bonuses` reads 1 at level 5 because of the increase at 4 — so
+reading it as "gained here" hands out an increase at every level from four
+upwards. `levelGains` computes each level crossed, so a DM moving the party from
+3 to 5 owes them both levels rather than only the fifth.
+
+**`ASI_LEVELS` is curated because the two editions disagree about publishing
+it.** 2014 ships a cumulative count and 2024 ships no such field anywhere, so
+one hand-written table serves both and `auditAsiLevels` checks it against the
+2014 counts inside `srd:import`. All twelve classes agree, including the three
+that break the pattern — Fighter at 6 and 14, Rogue at 10 — which is exactly why
+it cannot be a formula.
+
+**A feature is offered, and taking it is idempotent on name.** `POST
+/api/actors/:id/level-features` skips a feature already on the sheet, so
+pressing Add twice or levelling the party again cannot leave two Extra Attacks
+on a sheet nobody will think to tidy. Ability score increases are announced and
+never written — which two points move is the one part of levelling up that is
+actually a choice, and the ability block is already on the page.
+
+**Features nest under the choice they belong to.** The SRD publishes "Fighting
+Style" and its six options as seven sibling rows, so a Fighter reaching level 1
+flat is handed eight things instead of two and a decision. An option whose
+parent is missing from the batch is kept ungrouped: a lost feature is worse than
+an untidy one.
+
+**A racial level-up is a pointer, never a claim.** 5e writes the little it has —
+a Dragonborn's breath weapon, a Tiefling's Infernal Legacy — into prose rather
+than as level entries, and deciding what those do by reading them is wrong in
+both directions. A trait whose text names the level reached is surfaced to
+re-read, and nothing is applied. This is the line `auditSpellConditions` already
+draws.
+
+**The two editions disagree about shapes, not just contents.** 2024 renames
+races to species, publishes a feature's `desc` array as a `description` string,
+and gives a feature's `level` as a *reference to the level entry* rather than a
+number — which silently dropped all 232 of its features while the import
+reported success. That is why the import prints row counts: 407 where 639 was
+expected is the only thing that catches it.
+
 **A player may damage monsters, never characters.** `damage:apply` is open to
 members, but `isFairGame` refuses any token that is owned or linked to a
 `character` actor, and healing stays the DM's. Rolling damage and then asking

@@ -369,6 +369,28 @@ function Message({
   const isWhisper = Boolean(message.whisperToUserId);
   const speaker = message.actorName ?? message.authorName;
 
+  /**
+   * Reaching a level is announced, not said.
+   *
+   * Returned before the speaker header on purpose: a banner with "Dungeon
+   * Master said:" above it is a line of chat wearing a hat. The whole party
+   * levels at once, so this is one announcement for the table rather than a
+   * line each - the detail of what anybody gained is on their own sheet, where
+   * it can be acted on.
+   */
+  if (message.kind === 'levelup') {
+    return (
+      <div className="my-3 text-center">
+        <div className="text-xl font-bold tracking-wide text-amber-300 uppercase drop-shadow-[0_0_12px_rgba(252,211,77,0.35)]">
+          {message.body}
+        </div>
+        <div className="mt-1 text-[10px] tracking-wide text-amber-200/60 uppercase">
+          open your sheet to see what you gained
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`rounded-lg px-2 py-1.5 text-sm ${

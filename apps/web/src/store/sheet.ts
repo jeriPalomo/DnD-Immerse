@@ -15,6 +15,12 @@ export type Actor = ActorInput & {
   srdMonsterId: string | null;
   /** Set once a rolled set of scores has been applied; the roller then closes. */
   abilitiesRolled: boolean;
+  /**
+   * The highest level whose gains have been read. Behind `level` means there is
+   * something new on this sheet - and it is a column rather than local state
+   * because the DM sets the level from their own screen.
+   */
+  levelAcknowledged: number;
   createdAt: number;
   updatedAt: number;
 };

@@ -1,5 +1,6 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
-import { campaignInputSchema } from '@dnd/shared';
+import { campaignInputSchema, classInfo, classSaves, hitDicePool } from '@dnd/shared';
+import type { SaveProficiencies } from '@dnd/shared';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/index.js';
@@ -183,6 +184,90 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     const inviteCode = newInviteCode();
     await db.update(campaigns).set({ inviteCode }).where(eq(campaigns.id, id));
     return { inviteCode };
+  });
+
+  /**
+   * Levels the whole party at once.
+   *
+   * The DM declares level-ups as the story reaches them, and everybody moves
+   * together - so this is one action and one announcement rather than a level
+   * typed onto four sheets and four lines in the log.
+   *
+   * It sets the level and the things that follow from it - the hit dice pool,
+   * the class's saving throws, the casting ability - and stops there.
+   * `levelAcknowledged` is deliberately left behind, which is what makes each
+   * player's sheet greet them with what they gained. Hit points are not rolled
+   * here either: the handbook offers a roll or the average and that is the
+   * player's to take, on their own sheet, where they can watch the die.
+   *
+   * Characters only. An NPC has a level for its stat block, not for a story.
+   */
+  app.post('/api/campaigns/:id/level-party', async (request) => {
+    const user = assertUser(request);
+    const { id } = request.params as { id: string };
+    await requireDM(id, user.id);
+
+    const input = z.object({ level: z.number().int().min(1).max(20) }).parse(request.body);
+
+    const party = await db
+      .select({
+        id: actors.id,
+        name: actors.name,
+        className: actors.className,
+        level: actors.level,
+        saveProficiencies: actors.saveProficiencies,
+      })
+      .from(actorCampaigns)
+      .innerJoin(actors, eq(actorCampaigns.actorId, actors.id))
+      .where(and(eq(actorCampaigns.campaignId, id), eq(actors.type, 'character')));
+
+    if (party.length === 0) {
+      throw new HttpError(400, 'No characters are assigned to this campaign yet.');
+    }
+
+    // Only the ones actually going up. Re-running at the same level must not
+    // re-announce it, and must not drag anybody who is already higher back down.
+    const climbing = party.filter((character) => character.level < input.level);
+
+    for (const character of climbing) {
+      const info = classInfo(character.className);
+      const saves: SaveProficiencies = { ...character.saveProficiencies };
+      // Added, never cleared: a multiclass or a house rule has to be able to
+      // keep a proficiency this table does not know about.
+      for (const ability of classSaves(character.className)) saves[ability] = true;
+
+      await db
+        .update(actors)
+        .set({
+          level: input.level,
+          hitDiceTotal: hitDicePool(character.className, input.level),
+          saveProficiencies: saves,
+          ...(info?.casting ? { spellcastingAbility: info.casting } : {}),
+          updatedAt: Date.now(),
+        })
+        .where(eq(actors.id, character.id));
+    }
+
+    // One banner, and only when somebody actually moved.
+    if (app.io && climbing.length > 0) {
+      const { persistAndDeliver } = await import('../realtime/chat.js');
+      await persistAndDeliver(
+        app.io,
+        id,
+        {
+          userId: user.id,
+          actorId: null,
+          kind: 'levelup',
+          body: `Level ${input.level} Reached`,
+          // Not a combat event: reaching a level belongs in the conversation,
+          // which both views of the log show.
+          combat: false,
+        },
+        { authorName: user.displayName, actorName: null },
+      );
+    }
+
+    return { level: input.level, levelled: climbing.map((c) => c.name), unchanged: party.length - climbing.length };
   });
 
   /* ------------------------------------------------------------- members */

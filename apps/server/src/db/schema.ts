@@ -568,7 +568,7 @@ export const chatMessages = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     actorId: text('actor_id').references(() => actors.id, { onDelete: 'set null' }),
-    kind: text('kind', { enum: ['text', 'roll', 'card', 'system'] })
+    kind: text('kind', { enum: ['text', 'roll', 'card', 'system', 'levelup'] })
       .notNull()
       .default('text'),
     body: text('body').notNull().default(''),
