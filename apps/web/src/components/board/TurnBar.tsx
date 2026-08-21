@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useTable } from '../../store/table.js';
+import { combatSeconds, formatCombatTime } from '@dnd/shared';
 import type { WireInitiativeEntry } from '@dnd/shared';
 import { FACE_GAP_PX, layoutTurnBar, stackOpacity } from './turnBarLayout.js';
 import { MovementMeter } from './MovementMeter.js';
@@ -128,9 +129,20 @@ export function TurnBar({ isDM }: { isDM: boolean }) {
       className="mb-3 flex items-center gap-3 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 px-3"
       style={{ height: `${TURN_BAR_HEIGHT_REM}rem` }}
     >
-      <div className="shrink-0 text-center">
+      {/* The round, and what it has cost in the world. Six seconds each, so a
+          fight everybody felt was long is often twenty seconds - which is
+          exactly the thing worth telling the table. */}
+      <div
+        className="shrink-0 text-center"
+        title={`A round is six seconds — ${formatCombatTime(encounter.round)}`}
+      >
         <div className="text-[9px] tracking-widest text-ink-500 uppercase">Round</div>
         <div className="font-display text-lg leading-none text-ember-400">{encounter.round}</div>
+        <div className="text-[9px] leading-none text-ink-600">
+          {combatSeconds(encounter.round) < 60
+            ? `${combatSeconds(encounter.round)}s`
+            : formatCombatTime(encounter.round).replace(' in', '')}
+        </div>
       </div>
 
       <div ref={attachStrip} className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">

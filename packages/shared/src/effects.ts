@@ -544,3 +544,38 @@ export function combineRollModes(
   if (disadvantage) return 'disadvantage';
   return 'normal';
 }
+
+/* --------------------------------------------------------- combat clock */
+
+/** A round of combat is six seconds of the world, by the handbook. */
+export const SECONDS_PER_ROUND = 6;
+
+/**
+ * How long a fight has taken, in the world rather than at the table.
+ *
+ * Derived from the round and stored nowhere, like every other computed value
+ * here - rounds only advance in a fight, so there is nothing to tick and
+ * nothing to keep in sync.
+ *
+ * Round 1 is the *first* six seconds, not six seconds already spent, so a fight
+ * that has just started reads zero. Two full rounds is twelve.
+ */
+export function combatSeconds(round: number): number {
+  return Math.max(0, round - 1) * SECONDS_PER_ROUND;
+}
+
+/**
+ * That number as somebody would say it out loud.
+ *
+ * Seconds while a fight is short, because "18 seconds" is the answer a player
+ * wants when they ask whether the door held. Minutes once it is long enough
+ * that counting seconds stops meaning anything.
+ */
+export function formatCombatTime(round: number): string {
+  const total = combatSeconds(round);
+  if (total < 60) return `${total} seconds in`;
+
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s in`;
+}

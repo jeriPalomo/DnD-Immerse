@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CONDITION_SUMMARY, formatModifier, tokensInTemplate } from '@dnd/shared';
+import { CONDITION_SUMMARY, formatCombatTime, formatModifier, tokensInTemplate } from '@dnd/shared';
 import { Button } from '../ui.js';
 import { useTable } from '../../store/table.js';
 import { useAuth } from '../../store/auth.js';
@@ -114,6 +114,19 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="font-display text-sm text-ink-100">
           Round {encounter.round}
+          {/* What the round means in the world. Six seconds each, derived and
+              stored nowhere - a party that has just rolled initiative has spent
+              none of it, so round 1 reads zero. */}
+          {/* A middle dot rather than margin alone: spaced apart it reads
+              correctly on screen, but as plain text - which is what a screen
+              reader gets - "Round 3" and "12 seconds in" ran together into
+              "Round 312 seconds in". */}
+          <span
+            title="A round is six seconds of game time"
+            className="ml-2 font-sans text-[10px] font-normal text-ink-500"
+          >
+            · {formatCombatTime(encounter.round)}
+          </span>
         </h2>
         {isDM && (
           <div className="flex gap-1">
