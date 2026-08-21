@@ -526,6 +526,109 @@ if (thorin) {
   check('and the gains can be asked for any two levels', other.status === 200,
     `${other.body.gains?.features?.length} features from 1 to 5`);
 
+  /**
+   * A subclass the SRD never published.
+   *
+   * The SRD carries exactly one per class - Champion, for a Fighter - so a
+   * Battle Master has nothing to draw on and its text is copyright, which is
+   * why it is written by hand rather than imported. The regression underneath
+   * all of this is silent: a Battle Master being handed Champion's features
+   * looks perfectly fine on screen.
+   */
+  await playerApi('PATCH', `/api/actors/${thorin.id}`, { subclass: '' });
+  const asChampion = await playerApi('GET', `/api/actors/${thorin.id}/level-gains?from=2&to=3`);
+  check('the sheet is told which subclass the compendium carries',
+    asChampion.body.gains?.publishedSubclassName === 'Champion',
+    String(asChampion.body.gains?.publishedSubclassName));
+  // The regression the whole change exists for: with no subclass named this
+  // used to hand back whatever the SRD published, and since nothing ever set
+  // the field, that was everybody.
+  check('but a sheet naming no subclass is given no features at all',
+    (asChampion.body.gains?.subclassFeatures ?? []).length === 0,
+    `${(asChampion.body.gains?.subclassFeatures ?? []).map((f) => f.name).join(', ') || 'nothing'}`);
+
+  await playerApi('PATCH', `/api/actors/${thorin.id}`, { subclass: 'Battle Master' });
+  const unwritten = await playerApi('GET', `/api/actors/${thorin.id}/level-gains?from=2&to=3`);
+  check('a subclass the SRD never published is never given Champion\'s features',
+    (unwritten.body.gains?.subclassFeatures ?? []).length === 0 &&
+      unwritten.body.gains?.subclassSource === null,
+    `source ${unwritten.body.gains?.subclassSource}`);
+  check('and is reported as unknown rather than as granting nothing',
+    unwritten.body.gains?.subclassKnown === false,
+    `known: ${unwritten.body.gains?.subclassKnown}`);
+
+  const wrote = await playerApi('PUT', `/api/actors/${thorin.id}/subclass-features`, {
+    features: [
+      { level: 3, name: 'Combat Superiority', description: 'Four superiority dice.' },
+      { level: 7, name: 'Know Your Enemy', description: 'Study a creature.' },
+    ],
+  });
+  check('a subclass can be written down', wrote.status === 200 && wrote.body.count === 2,
+    `${wrote.body.count} filed under ${wrote.body.subclassName}`);
+  check('filed under the subclass the sheet names, not the payload',
+    wrote.body.subclassName === 'Battle Master', wrote.body.subclassName);
+
+  const written = await playerApi('GET', `/api/actors/${thorin.id}/level-gains?from=2&to=3`);
+  check('and it arrives at the level it was written for',
+    (written.body.gains?.subclassFeatures ?? []).some((f) => f.name === 'Combat Superiority'),
+    `source ${written.body.gains?.subclassSource}`);
+  check('while a later level of it stays where it was put',
+    (written.body.gains?.subclassFeatures ?? []).every((f) => f.name !== 'Know Your Enemy'));
+
+  /**
+   * The reason the subclass name rides on every row.
+   *
+   * Renamed to another subclass the SRD does *not* publish, deliberately.
+   * Renaming to Champion proves nothing: its published rows win the tie and
+   * would hide a definition leaking through underneath them.
+   */
+  await playerApi('PATCH', `/api/actors/${thorin.id}`, { subclass: 'Eldritch Knight' });
+  const toAnother = await playerApi('GET', `/api/actors/${thorin.id}/level-gains?from=2&to=3`);
+  check('a definition never follows the sheet to another subclass',
+    (toAnother.body.gains?.subclassFeatures ?? []).length === 0,
+    `${(toAnother.body.gains?.subclassFeatures ?? []).map((f) => f.name).join(', ') || 'nothing'}`);
+
+  await playerApi('PATCH', `/api/actors/${thorin.id}`, { subclass: 'Champion' });
+  const renamed = await playerApi('GET', `/api/actors/${thorin.id}/level-gains?from=2&to=3`);
+  check('renaming the subclass stops serving the old definition',
+    (renamed.body.gains?.subclassFeatures ?? []).every((f) => f.name !== 'Combat Superiority'),
+    (renamed.body.gains?.subclassFeatures ?? []).map((f) => f.name).join(', ') || 'nothing');
+  check('and the published one is used instead',
+    renamed.body.gains?.subclassSource === 'published',
+    String(renamed.body.gains?.subclassSource));
+
+  // A published subclass at a level it grants nothing is known, not unwritten -
+  // the panel told a Champion "nothing written down for Champion" otherwise.
+  const quiet = await playerApi('GET', `/api/actors/${thorin.id}/level-gains?from=4&to=5`);
+  check('a published subclass is known even where it grants nothing',
+    quiet.body.gains?.subclassKnown === true &&
+      (quiet.body.gains?.subclassFeatures ?? []).length === 0,
+    `known: ${quiet.body.gains?.subclassKnown}`);
+
+  const noSubclass = await dmApi('PUT', `/api/actors/${thorin.id}/subclass-features`, {
+    features: [{ level: 3, name: 'Ought to be refused', description: '' }],
+  });
+  check('the DM may write a subclass on a sheet they can edit', noSubclass.status === 200,
+    String(noSubclass.status));
+
+  /**
+   * A player writing on a sheet that is not theirs is the gate that matters.
+   *
+   * Aimed at a goblin rather than at another character: the DM's roster does
+   * not list somebody else's character at all, so looking one up there found
+   * nothing and skipped this check without saying so. A goblin is always on
+   * the board, and a player may never edit one.
+   */
+  const goblinActorId = goblins.find((g) => g.actorId)?.actorId;
+  const trespass = await playerApi('PUT', `/api/actors/${goblinActorId}/subclass-features`, {
+    features: [{ level: 3, name: 'Not yours', description: '' }],
+  });
+  // 404 rather than 403, and deliberately: `requireActorWrite` answers "not
+  // found" for a sheet you cannot see at all, because a 403 would confirm it
+  // exists. 403 is reserved for a sheet you may read but not edit.
+  check("a player cannot write one on a sheet that is not theirs", trespass.status === 404,
+    `${trespass.status} against ${goblinActorId ? 'a goblin' : 'NO GOBLIN FOUND'}`);
+
   // A player levelling the whole party would be levelling other people's
   // characters, which is the DM's call by definition.
   const refused = await playerApi('POST', `/api/campaigns/${campaignId}/level-party`, { level: 20 });

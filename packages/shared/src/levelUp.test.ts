@@ -315,6 +315,32 @@ describe('subclass features', () => {
     expect(result.subclassFeatures.map((f) => f.name)).toEqual(['Know Your Enemy']);
   });
 
+  it('knows a published subclass even at a level it grants nothing', () => {
+    // The panel told a Champion "nothing published for Champion - the SRD only
+    // carries Champion", which is nonsense on its face. Granting nothing *here*
+    // and being unknown are two different sentences.
+    const result = gains({ from: 4, to: 5, subclass: 'Berserker' });
+    expect(result.subclassFeatures).toEqual([]);
+    expect(result.subclassKnown).toBe(true);
+  });
+
+  it('knows a written subclass at a level it grants nothing', () => {
+    const result = gains({
+      className: 'Fighter', subclass: 'Battle Master', from: 4, to: 5,
+      features: [],
+      customFeatures: [
+        { subclassName: 'Battle Master', level: 3, name: 'Combat Superiority', description: '' },
+      ],
+    });
+    expect(result.subclassFeatures).toEqual([]);
+    expect(result.subclassKnown).toBe(true);
+  });
+
+  it('does not know a subclass nobody has published or written', () => {
+    const result = gains({ from: 2, to: 3, subclass: 'Totem Warrior' });
+    expect(result.subclassKnown).toBe(false);
+  });
+
   it('prefers the published subclass over a definition of the same name', () => {
     // Somebody who writes their own Berserker gets the compendium's, which is
     // the one the rest of the app already agrees about.

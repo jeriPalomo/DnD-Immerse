@@ -88,6 +88,17 @@ export interface LevelGains {
   /** Where `subclassFeatures` came from, or null when there was nothing. */
   subclassSource: 'published' | 'custom' | null;
   /**
+   * Whether anything at all is known about this subclass, at any level.
+   *
+   * Separate from `subclassSource`, which only says whether it granted anything
+   * *here* - and the two are different sentences. A Champion at level 6 gains
+   * nothing from their subclass, which is ordinary; a Battle Master gains
+   * nothing because nobody has written it down, which is worth saying. Without
+   * this the panel told a Champion "nothing published for Champion - the SRD
+   * only carries Champion", which is nonsense on its face.
+   */
+  subclassKnown: boolean;
+  /**
    * The one subclass the compendium carries for this class, whether or not it
    * is this character's. The panel needs it to say "the SRD only carries
    * Champion" - which is the difference between an unexplained empty section
@@ -215,6 +226,7 @@ export function levelGains(input: {
     subclassFeatures: [],
     subclassName: input.subclass.trim(),
     subclassSource: null,
+    subclassKnown: false,
     publishedSubclassName: null,
     abilityScoreIncreases: 0,
     proficiencyBonus: null,
@@ -293,6 +305,13 @@ export function levelGains(input: {
         }))
     : [];
 
+  // Asked of the whole definition rather than the levels crossed: a subclass
+  // written down at levels 3 and 7 is still known when you reach 6.
+  const subclassKnown =
+    Boolean(wanted) &&
+    (publishedSubclassName?.trim().toLowerCase() === wanted ||
+      customFeatures.some((row) => row.subclassName.trim().toLowerCase() === wanted));
+
   // Published wins where it is genuinely this character's subclass; a
   // definition is for the subclasses the SRD never published.
   const subclassRows = publishedRows.length > 0 ? publishedRows : customRows;
@@ -360,6 +379,7 @@ export function levelGains(input: {
     subclassFeatures: nest(subclassRows),
     subclassName: wantedSubclass,
     subclassSource,
+    subclassKnown,
     publishedSubclassName,
     abilityScoreIncreases: crossed.filter((level) =>
       gainsAbilityScoreIncrease(input.className, level),

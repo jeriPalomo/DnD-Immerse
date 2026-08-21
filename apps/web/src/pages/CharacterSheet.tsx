@@ -32,6 +32,7 @@ import { RestControl } from '../components/sheet/RestControl.js';
 import { ShareSheet } from '../components/sheet/ShareSheet.js';
 import { useSheet } from '../store/sheet.js';
 import { LevelUpPanel } from '../components/sheet/LevelUpPanel.js';
+import { SubclassEditor } from '../components/sheet/SubclassEditor.js';
 import { api } from '../lib/api.js';
 
 /** Stable anchor from a section title, so the nav and the sections agree. */
@@ -137,6 +138,7 @@ export default function CharacterSheet() {
         actor={actor}
         editable={editable}
         onChange={sheet.patch}
+        publishedSubclass={sheet.publishedSubclass}
       />
 
       {/* Characters only. An NPC has a level for its stat block rather than for
@@ -304,6 +306,19 @@ export default function CharacterSheet() {
               onAdd={(name) => void sheet.addItem('feature', name)}
               onRemove={(itemId) => void sheet.removeItem(itemId)}
             />
+            {/* Here rather than as a seventh entry in the jump list: it matters
+                only to the subclasses the SRD never published, and the nav is
+                for everyone. Adjacent to the features it eventually becomes. */}
+            {actor.type === 'character' && (
+              <SubclassEditor
+                actorId={actor.id}
+                subclassName={actor.subclass}
+                publishedSubclass={sheet.publishedSubclass}
+                saved={sheet.subclassFeatures}
+                editable={editable}
+                onSaved={() => void sheet.load(actor.id)}
+              />
+            )}
           </Section>
 
           {editable && (
@@ -594,10 +609,13 @@ function Identity({
   actor,
   editable,
   onChange,
+  publishedSubclass,
 }: {
   actor: ReturnType<typeof useSheet.getState>['actor'] & object;
   editable: boolean;
   onChange: (fields: Record<string, unknown>) => void;
+  /** What the compendium calls this class's subclass, for the field to suggest. */
+  publishedSubclass: string | null;
 }) {
   const [uploading, setUploading] = useState(false);
 
@@ -704,6 +722,22 @@ function Identity({
             placeholder="Class"
             aria-label="Class"
             className={`w-28 ${field}`}
+          />
+          {/* The column has existed for the life of the project with nothing to
+              set it, which is why the level-up panel could not tell a Battle
+              Master from a Champion. The suggestion comes from the compendium
+              rather than a list here, because the editions spell it
+              differently - 2014 says "Berserker" where 2024 says "Path of the
+              Berserker". */}
+          <Suggest
+            disabled={!editable}
+            options={publishedSubclass ? [publishedSubclass] : []}
+            value={actor.subclass}
+            onChange={(e) => onChange({ subclass: e.target.value })}
+            placeholder="Subclass"
+            aria-label="Subclass"
+            title="Your archetype, domain, circle or oath. Anything may be typed; only the one the SRD publishes is suggested."
+            className={`w-32 ${field}`}
           />
           {/* Labelled: an unlabelled number box between class and background
               reads as a mystery, and it is the one number people look for. */}

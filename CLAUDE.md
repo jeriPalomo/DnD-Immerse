@@ -561,6 +561,53 @@ number — which silently dropped all 232 of its features while the import
 reported success. That is why the import prints row counts: 407 where 639 was
 expected is the only thing that catches it.
 
+**A subclass that is not the character's is never shown.** The SRD publishes
+exactly one subclass per class — Champion, Berserker, Thief, Life Domain — and
+`levelGains` used to fall back to "whatever the SRD publishes" whenever the
+sheet named nothing. Since no UI ever set `actors.subclass`, that was always:
+every Battle Master was quietly handed Champion's features. `publishedSubclassName`
+still travels so the panel can say which one the SRD *does* carry, which is the
+difference between an unexplained empty section and an honest one.
+
+**Granting nothing here and being unknown are two different sentences.**
+`subclassSource` says whether the subclass gave anything at *this* level;
+`subclassKnown` says whether anything is known about it at all. Without the
+second, a Champion at level 6 was told "nothing written down for Champion — the
+SRD only publishes Champion", which is nonsense on its face. A known subclass
+that grants nothing at a level says nothing; an unknown one explains itself.
+
+**`actor_subclass_features` is where a table writes the subclasses the SRD
+never published.** Their text is WotC copyright and can never be imported, so
+authoring is the only honest fix — written once, read at every level-up
+afterwards. Rows rather than a JSON column, and kept apart from `items`
+deliberately: a `type: 'feature'` row is something the character **has** and
+these are things they **will get**, so folding them together would put level-18
+abilities on a level-3 sheet.
+
+**A definition carries the subclass it was written for.** `subclassName` rides
+on every row, so renaming the sheet's subclass stops the old list being served
+rather than silently re-labelling it — the same reason `fog_exploration` stores
+the grid its bitmap was written for. The published subclass still wins the tie
+where it is genuinely the character's, so a hand-written Berserker never
+overrides the compendium the rest of the app agrees about. The editor says when
+rows were written for a subclass the sheet no longer names, rather than deleting
+them: putting the old name back recovers them.
+
+**The subclass name is taken from the sheet, never from the payload.** `PUT
+/api/actors/:id/subclass-features` replaces the whole list and files it under
+whatever the sheet says, so a definition cannot be filed against a subclass the
+character does not play. One route rather than three doing rows: the editor
+holds the list, one person edits their own sheet, and one guard is less to get
+wrong than per-row id scoping.
+
+**A check that cannot fail is not a check.** Both subclass guards were reverted
+to confirm the runthrough caught them, and it did not — every check set a
+subclass first, so the "no subclass named" fallback was never exercised, and the
+rename test renamed *to Champion*, whose published rows won the tie and hid the
+leak underneath. They now clear the subclass, and rename to a subclass that is
+also unpublished. Reverted again, they fail naming `Improved Critical` and
+`Combat Superiority` respectively.
+
 **A player may damage monsters, never characters.** `damage:apply` is open to
 members, but `isFairGame` refuses any token that is owned or linked to a
 `character` actor, and healing stays the DM's. Rolling damage and then asking

@@ -254,10 +254,45 @@ export function LevelUpPanel({
 
           {gains.features.length > 0 && <ul className="space-y-1.5">{gains.features.map((f) => feature(f, 'class'))}</ul>}
 
-          {gains.subclassFeatures.length > 0 && (
+          {/*
+            * The subclass section says something in every case.
+            *
+            * It used to show whatever the SRD published whenever the sheet
+            * named nothing, so a Battle Master was handed Champion's features;
+            * naming the subclass then produced an empty section with no
+            * explanation. Neither is shown now - an empty section this can
+            * explain beats a filled one that is wrong.
+            */}
+          {/* Silent when the subclass is known and simply grants nothing here:
+              a Champion at level 6 gains nothing from their subclass, which is
+              ordinary and not worth a line. */}
+          {(gains.subclassFeatures.length > 0 || !gains.subclassKnown) && (
             <>
-              <div className="text-[10px] tracking-wide text-ink-500 uppercase">Subclass</div>
-              <ul className="space-y-1.5">{gains.subclassFeatures.map((f) => feature(f, 'subclass'))}</ul>
+              <div className="text-[10px] tracking-wide text-ink-500 uppercase">
+                Subclass{gains.subclassName ? ` — ${gains.subclassName}` : ''}
+              </div>
+
+              {gains.subclassFeatures.length > 0 ? (
+                <ul className="space-y-1.5">
+                  {gains.subclassFeatures.map((f) => feature(f, 'subclass'))}
+                </ul>
+              ) : !gains.subclassName ? (
+                <p className="text-[11px] text-ink-500">
+                  No subclass set on this sheet — put it beside your class above to see what it
+                  grants.
+                </p>
+              ) : (
+                <p className="text-[11px] text-ink-400">
+                  Nothing written down for {gains.subclassName}
+                  {gains.publishedSubclassName
+                    ? ` — the SRD only publishes ${gains.publishedSubclassName}.`
+                    : '.'}{' '}
+                  <a href="#subclass-editor" className="text-arcane-400 underline">
+                    Write down what it grants
+                  </a>{' '}
+                  and every level-up after this one fills itself in.
+                </p>
+              )}
             </>
           )}
 
@@ -277,6 +312,7 @@ export function LevelUpPanel({
 
           {gains.features.length === 0 &&
             gains.subclassFeatures.length === 0 &&
+            gains.subclassKnown &&
             gains.spellSlots.length === 0 &&
             gains.counters.length === 0 &&
             gains.abilityScoreIncreases === 0 &&

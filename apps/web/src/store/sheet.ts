@@ -49,9 +49,21 @@ export interface ActorSummary extends Partial<Actor> {
   campaigns?: SheetCampaign[];
 }
 
+/** One line of a hand-written subclass: the level, and what arrives at it. */
+export interface SubclassFeature {
+  subclassName: string;
+  level: number;
+  name: string;
+  description: string;
+}
+
 interface SheetState {
   actor: Actor | null;
   items: Item[];
+  /** What this sheet's subclass grants, where somebody wrote it down. */
+  subclassFeatures: SubclassFeature[];
+  /** The subclass the compendium carries for this class, for the field to suggest. */
+  publishedSubclass: string | null;
   campaigns: SheetCampaign[];
   access: OwnershipLevel;
   grants: { userId: string; level: number }[];
@@ -83,6 +95,8 @@ let pending: Partial<ActorInput> = {};
 export const useSheet = create<SheetState>((set, get) => ({
   actor: null,
   items: [],
+  subclassFeatures: [],
+  publishedSubclass: null,
   campaigns: [],
   access: 0,
   grants: [],
@@ -105,6 +119,8 @@ export const useSheet = create<SheetState>((set, get) => ({
         campaigns: SheetCampaign[];
         access: OwnershipLevel;
         grants: { userId: string; level: number }[];
+        subclassFeatures: SubclassFeature[];
+        publishedSubclass: string | null;
       }>(`/api/actors/${id}`);
       set({ ...res, loading: false });
     } catch (err) {
@@ -116,7 +132,16 @@ export const useSheet = create<SheetState>((set, get) => ({
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = null;
     pending = {};
-    set({ actor: null, items: [], campaigns: [], access: 0, grants: [], error: null });
+    set({
+      actor: null,
+      items: [],
+      campaigns: [],
+      access: 0,
+      grants: [],
+      subclassFeatures: [],
+      publishedSubclass: null,
+      error: null,
+    });
   },
 
   patch(fields) {
