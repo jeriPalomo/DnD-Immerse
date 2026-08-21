@@ -28,6 +28,7 @@ import {
 } from '../db/schema.js';
 import { campaignAllowsStats, mayReadStats, tokenIn } from '../realtime/scene.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
+import { readCharacterPdf } from '../lib/sheetPdf.js';
 import { getActorAccess, getBulkActorAccess, requireActorRead, requireActorWrite } from '../lib/access.js';
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
@@ -394,6 +395,43 @@ const STAT_BLOCK_FIELDS = [
     await deleteOrphanedUploads([previous[0]?.url ?? null]);
 
     return { portraitUrl: stored.url };
+  });
+
+  /**
+   * Reads a filled-in character sheet PDF, and writes nothing.
+   *
+   * The answer is handed back for the player to look at and confirm, exactly as
+   * the ability roller shows a set before it is kept. An import that wrote
+   * straight to the sheet would be one bad parse away from replacing a
+   * character somebody had spent an evening on, and the fields it gets wrong
+   * are the ones nobody thinks to check.
+   *
+   * Applying is an ordinary PATCH afterwards, which means it goes through
+   * `actorInputSchema` and the bestiary lock like every other edit.
+   */
+  app.post('/api/actors/:id/import-pdf', async (request) => {
+    const user = assertUser(request);
+    const { id } = request.params as { id: string };
+    await requireActorWrite(id, user.id);
+
+    const file = await request.file();
+    if (!file) throw new HttpError(400, 'No file uploaded');
+
+    const bytes = await file.toBuffer();
+    // The same ceiling the uploads take, checked before parsing rather than
+    // after: decoding twenty megabytes to discover it is twenty megabytes is
+    // the expensive way round.
+    if (bytes.byteLength > 20 * 1024 * 1024) {
+      throw new HttpError(413, 'That file is too large (max 20MB)');
+    }
+
+    const found = await readCharacterPdf(bytes);
+    return {
+      values: found.values,
+      unread: found.unread,
+      fieldCount: found.fieldCount,
+      read: Object.keys(found.values).length,
+    };
   });
 
   /* -------------------------------------------------------- campaign assignment */

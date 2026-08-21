@@ -27,6 +27,7 @@ import {
 import { AttackList, CombatStats, SpellcastingHeader } from '../components/sheet/Combat.js';
 import { FeaturePanel, InventoryPanel, SpellPanel } from '../components/sheet/ItemPanels.js';
 import { CampaignAssign } from '../components/sheet/CampaignAssign.js';
+import { ImportPdf } from '../components/sheet/ImportPdf.js';
 import { RestControl } from '../components/sheet/RestControl.js';
 import { ShareSheet } from '../components/sheet/ShareSheet.js';
 import { useSheet } from '../store/sheet.js';
@@ -159,7 +160,11 @@ export default function CharacterSheet() {
         {/* Left rail: the derived numbers */}
         <div className="space-y-4">
           {statsEditable && !actor.abilitiesRolled && (
-            <AbilityRoller actorId={actor.id} onApply={sheet.patch} />
+            <AbilityRoller
+              actorId={actor.id}
+              onApply={sheet.patch}
+              onImported={() => void sheet.load(actor.id)}
+            />
           )}
 
           {statsLocked && (
@@ -419,9 +424,12 @@ export default function CharacterSheet() {
 function AbilityRoller({
   actorId,
   onApply,
+  onImported,
 }: {
   actorId: string;
   onApply: (fields: Record<string, unknown>) => void;
+  /** Reload the sheet after a PDF has written to it. */
+  onImported: () => void;
 }) {
   const [rolls, setRolls] = useState<{ ability: AbilityKey; total: number; dice: number[] }[]>([]);
   const [busy, setBusy] = useState(false);
@@ -457,6 +465,13 @@ function AbilityRoller({
       </Button>
 
       {failed && <p className="mt-1.5 text-[11px] text-red-400">Could not roll. Try again.</p>}
+
+      {/* Beside the roller because they answer the same question - "where do
+          these numbers come from" - and somebody arriving with a sheet already
+          filled in wants the other answer. */}
+      <div className="mt-2">
+        <ImportPdf actorId={actorId} onApplied={onImported} />
+      </div>
 
       {rolls.length > 0 && (
         <>
