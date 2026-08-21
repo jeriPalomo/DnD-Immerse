@@ -673,6 +673,66 @@ never connected. A spell that rolls to hit chains the same way; one that does
 not, like a fireball, keeps its own damage button because there is no attack
 roll to hang it off. The label names both creatures.
 
+**A swing is one message, and the damage rides inside it.** The verdict used to
+be a sentence glued onto the roll's label - `... with Handaxe — MISS against
+Goblin 2 (AC 15)` - so the answer to "did it hit" was prose at the end of a line
+the card then truncated into unreadable grey, and the damage posted as a
+*second* message with nothing tying it to the swing above. `attackData` on the
+chat row carries the attacker, the target, the outcome, the d20, and the damage
+when there is any; `AttackCard` draws a headline and a Results block under it.
+The body is still written out as text underneath, the same rule a group roll
+follows, so a message stored before the column existed still reads. The Apply
+button moved inside the card and now names the creature that was actually
+struck and the damage type it was - a bare roll card knows neither, and applied
+to whatever happened to be targeted at the time, untyped.
+
+**Blocked and missed are the same thing, and the reason is what separates
+them.** `attackVerdict` answers with an outcome and a reason - `miss` /
+`natural 1`, `miss` / `AC 15`, `critical` / `natural 20` - rather than a
+finished sentence. A sentence made the wording load-bearing: rephrasing it
+would have broken the only thing that could tell a hit from a miss. A swing at
+a creature with no armour class on record is `unresolved` and claims nothing,
+because a creature nobody typed an AC for has not been missed.
+
+**Two-handed is a grip, not a button.** `Two-handed` sat beside `Attack` on a
+versatile weapon and rolled damage with **no attack roll in front of it**, so a
+card advertising `1d8 Slashing` answered with `1d10+4` and the only way to find
+out what the button did was to press it and read the log. It is a select on the
+card now, the dice on screen changing with the grip, and `versatile` rides on
+the attack payload. The `versatile` *action* is gone from the enum rather than
+left unreachable.
+
+**Every number a card will roll is printed before it is rolled, with its
+parts.** Derived values are computed rather than stored, which is right - and
+makes them precisely the numbers a player has no way to check. `attackBonusParts`
+and `damageBonusParts` answer `STR +4 · proficiency +3` rather than `+7`, and
+one function serves the item card, the sheet's weapon table and the attack card,
+so a third copy cannot drift. A creature stamped from the bestiary reports
+`stat block` instead: its `+4 to hit` includes proficiency its stat line never
+states, so naming a Strength score that had nothing to do with it would be three
+plausible wrong pieces in place of one honest total - the same reason an NPC's
+attack rows print no ability chip.
+
+**Spell damage adds no ability modifier, on every path that rolls it.** There
+were two: the `damage` button knew this and went to some trouble to cancel it,
+while the damage rolled automatically by a landing attack read the spell's blob
+as if it were a weapon - where `ability` is absent and therefore defaults to
+`str`. Every Fire Bolt that hit rolled `1d10` plus the wizard's *Strength*
+modifier, which for a wizard is usually a penalty. `damageFor` is the one
+answer now.
+
+**A creature's own kit is shown where its name is, and it is never your kit.**
+The target panel is headed with the *target's* name and lists *your* weapons
+under it, which reads as the goblin's longsword - and was read that way. Both
+lists are captioned now, and `CreatureActions` puts what the creature can do
+back underneath, read from the stat block route so the permission is the
+server's: an enemy's kit is campaign policy, a party member's sheet is shared
+deliberately rather than by standing on the same board, and a refusal says so
+rather than drawing an empty list. Read-only - the creature you act as follows
+your own selection, and rolling somebody else's attacks is not on offer. The
+list scrolls rather than growing: the transient panels share one measured slice
+of the column, and a wizard's spell list is arbitrarily long.
+
 **Options are filed as Attacks, Support or Items, from what an item carries.**
 `categoryOf` in `TargetPanel.tsx` reads damage dice, an attack roll or a forced
 save for an attack, healing dice or a bare spell for support, and files every
@@ -795,6 +855,16 @@ how deleting a scene and clearing the log both arrived as "the button does
 nothing" while both were correct: driven with the dialog accepted, the DELETE
 returned 200 and the row went. `useConfirm()` returns a promise and reads almost
 exactly as `confirm()` did, so there is no reason to reach for the browser's.
+
+**`scrollIntoView` scrolls every ancestor, the window included.** The chat log
+followed itself with `bottom.scrollIntoView()`, which does not stop at the
+scrollable box it was in: any message arriving anywhere dragged the whole page
+down to the chat panel. Pressing **Next turn** posts a combat line, so the board
+scrolled out from under the DM on every single turn - a button that appeared to
+jump somewhere at random while doing exactly what it was asked. Scroll the
+list's own box (`box.scrollTo`) and nothing outside it can move. Only while the
+reader is already at the end, too, or scrolling back through a fight is yanked
+away by the next roll.
 
 **`loading` means "nothing to show yet", never "a request is in flight".** A
 refetch that flips it true swaps the page for a spinner, and unmounting a page

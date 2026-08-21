@@ -1048,6 +1048,7 @@ async function postSystemMessage(
     rollData: null,
     cardData: null,
     groupData: null,
+    attackData: null,
     whisperToUserId: null,
     combat: true,
     createdAt: Date.now(),

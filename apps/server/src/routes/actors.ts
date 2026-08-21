@@ -31,6 +31,7 @@ import {
   srdMonsters,
   srdTraits,
 } from '../db/schema.js';
+import type { Actor } from '../db/schema.js';
 import { campaignAllowsStats, mayReadStats, tokenIn } from '../realtime/scene.js';
 import { HttpError, assertUser, requireAuth, requireDM, requireMembership } from '../auth/guards.js';
 import { readCharacterPdf } from '../lib/sheetPdf.js';
@@ -38,6 +39,7 @@ import { getActorAccess, getBulkActorAccess, requireActorRead, requireActorWrite
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
 import { syncLinkedTokens } from '../lib/linkedTokens.js';
+import { itemNumbers } from '../lib/itemNumbers.js';
 import { itemsFromMonster } from '../lib/monsterItems.js';
 import { storeImage } from '../lib/uploads.js';
 import { deleteOrphanedUploads } from '../lib/orphans.js';
@@ -958,6 +960,61 @@ const STAT_BLOCK_FIELDS = [
     return { actor: await stampMonster(monster, campaignId, user.id) };
   });
 
+  /**
+   * What a creature can actually do, with the numbers behind it.
+   *
+   * Clicking a token used to answer with a list of names - `Longsword
+   * (weapon)` - which says nothing a player wants to know when it is not their
+   * turn and they are working out what the thing across the room is capable of.
+   * The numbers come from `itemNumbers`, the same function that fills an item
+   * card, so what this panel promises and what the dice do are one answer.
+   *
+   * Permission is decided before this is ever called: the route it serves gates
+   * on `mayReadStats` and, for a player character, on the sheet being shared.
+   * Nothing is filtered here, because a row that is drawn is a row the caller
+   * was already entitled to.
+   */
+  async function actionRows(actor: Actor) {
+    const owned = await db
+      .select()
+      .from(items)
+      .where(eq(items.ownerActorId, actor.id))
+      .orderBy(asc(items.sortOrder));
+
+    return owned
+      .map((item) => ({ item, numbers: itemNumbers(item, actor) }))
+      // An item with nothing to roll is carried, not done: a suit of plate
+      // belongs on the Carried list rather than among the attacks.
+      .filter(({ numbers }) => numbers !== null)
+      .map(({ item, numbers }) => {
+        const system = item.system as Record<string, any>;
+        return {
+          id: item.id,
+          name: item.name,
+          type: item.type,
+          numbers,
+          /** `1st level`, `Cantrip`, or empty for anything that is not a spell. */
+          spellLevel:
+            item.type === 'spell'
+              ? system.level === 0
+                ? 'Cantrip'
+                : `Level ${system.level}`
+              : '',
+          // `80/320 ft` for a bow, plain `5 ft` for a blade. A stamped
+          // monster files its melee reach as `ranged` with no long range -
+          // `reachOf` clamps touch to 5 ft and would halve a dragon's bite -
+          // so a bare `-` for the second figure is the common case here, not
+          // the exception.
+          range:
+            system.range?.type === 'ranged'
+              ? system.range.long
+                ? `${system.range.value}/${system.range.long} ft`
+                : `${system.range.value} ft`
+              : system.rangeText || '5 ft',
+        };
+      });
+  }
+
   /* ------------------------------------------------------------ stat block */
 
   /**
@@ -1028,6 +1085,11 @@ const STAT_BLOCK_FIELDS = [
           name: token.name,
           imageUrl: token.imageUrl,
           statBlock: { ...rest, data: safeData },
+          // The actions `stampMonster` wrote onto the sheet, with their numbers.
+          // The published block carries the same attacks as prose; these are the
+          // rows the board can read at a glance, and they are what the DM will
+          // actually roll.
+          actions: await actionRows(actor),
         };
       }
     }
@@ -1058,6 +1120,7 @@ const STAT_BLOCK_FIELDS = [
 
     return {
       source: 'actor' as const,
+      actions: await actionRows(actor),
       name: token.name,
       imageUrl: token.imageUrl,
       statBlock: {

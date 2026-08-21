@@ -145,14 +145,29 @@ if (weapon) {
   // One button, not two. Nobody could tell what the difference between Attack
   // and Damage was, and the answer was "press both, in order".
   check('and no separate damage button beside it', !offered.includes('damage'), JSON.stringify(offered));
+  // Nor a Two-handed one: the grip rides on the attack, because a button that
+  // rolled damage with no attack roll in front of it could only be understood
+  // by pressing it and reading the log.
+  check('and no two-handed button either', !offered.includes('versatile'), JSON.stringify(offered));
+
+  // What the buttons will actually roll, printed before anybody presses one.
+  // A card reading "1d8 Slashing" that answers with 1d10+4 is indistinguishable
+  // from a broken one.
+  const numbers = card?.message?.cardData?.numbers;
+  check('the card says what it will roll to hit', typeof numbers?.toHit === 'number',
+    JSON.stringify(numbers));
+  check('and where that number came from',
+    Array.isArray(numbers?.toHitParts) && numbers.toHitParts.length > 0,
+    JSON.stringify(numbers?.toHitParts));
 
   /**
-   * One press, the whole swing.
+   * One press, the whole swing, one message.
    *
-   * Attack rolls to hit and then rolls the damage itself when it lands, so a
-   * hit produces two messages and a miss exactly one. Repeated until both
-   * outcomes have been seen rather than trusting a single roll of a d20 -
-   * asserting "two messages" off one attack is a coin flip dressed as a check.
+   * Attack rolls to hit and then rolls the damage itself when it lands - and
+   * the damage rides inside the attack rather than posting underneath it, so
+   * the answer to "did it hit" and the number it cost are one card. Repeated
+   * until both outcomes have been seen rather than trusting a single roll of a
+   * d20: asserting either off one attack is a coin flip dressed as a check.
    */
   let sawHit = false;
   let sawMiss = false;
@@ -160,7 +175,7 @@ if (weapon) {
   for (let attempt = 0; attempt < 20 && !(sawHit && sawMiss); attempt += 1) {
     const posted = [];
     const collect = (p) => {
-      if (p?.message?.rollData) posted.push(p.message);
+      if (p?.message?.attackData) posted.push(p.message);
     };
     dm.on('chat:message', collect);
 
@@ -170,23 +185,28 @@ if (weapon) {
     await new Promise((r) => setTimeout(r, 700));
     dm.off('chat:message', collect);
 
-    const toHit = posted.find((m) => /attacks/.test(m.body));
-    if (!toHit) continue;
+    const swing = posted[0];
+    if (!swing) continue;
 
-    const hit = /HIT/.test(toHit.body);
-    const damage = posted.find((m) => /damage/i.test(m.body));
+    const attack = swing.attackData;
+    const hit = attack.outcome === 'hit' || attack.outcome === 'critical';
+
+    check('one attack makes exactly one message', posted.length === 1, `${posted.length} messages`);
 
     if (hit && !sawHit) {
       sawHit = true;
-      check('a hit rolls its damage in the same press', Boolean(damage),
-        `${toHit.body} | ${damage?.body ?? 'no damage rolled'}`);
-      check('and the damage is aimed at the creature that was struck',
-        /to Goblin/.test(damage?.body ?? ''), damage?.body);
+      check('a hit rolls its damage in the same press', Boolean(attack.damage),
+        `${attack.outcome} | ${attack.damage?.roll?.output ?? 'no damage rolled'}`);
+      check('and the damage names the creature it applies to',
+        attack.damage?.tokenId === goblins[0].id, attack.damage?.tokenId);
+      // Blocked and missed are the same thing; the reason is what separates them.
+      check('and the verdict says why', Boolean(attack.reason), attack.reason);
     }
     if (!hit && !sawMiss) {
       sawMiss = true;
-      check('a miss rolls no damage at all', !damage,
-        `${toHit.body} | ${damage?.body ?? 'nothing, as it should be'}`);
+      check('a miss rolls no damage at all', !attack.damage,
+        `${attack.outcome} | ${attack.damage?.roll?.output ?? 'nothing, as it should be'}`);
+      check('and says what it failed against', /AC \d+|natural 1/.test(attack.reason), attack.reason);
     }
   }
 

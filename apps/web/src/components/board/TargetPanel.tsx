@@ -1,4 +1,5 @@
 import { attackModeAgainst, tokenDistanceInFeet } from '@dnd/shared';
+import { CreatureActions } from './CreatureActions.js';
 import type { WireScene, WireToken } from '@dnd/shared';
 import type { Actor, Item } from '../../store/sheet.js';
 
@@ -196,6 +197,7 @@ export function TargetPanel({
   scene,
   actor,
   items,
+  campaignId,
   onUse,
   onClear,
 }: {
@@ -204,6 +206,8 @@ export function TargetPanel({
   scene: WireScene;
   actor: Actor | null;
   items: Item[];
+  /** For reading the target's own stat block, which the server gates. */
+  campaignId: string;
   onUse: (item: Item) => void;
   onClear: () => void;
 }) {
@@ -255,10 +259,21 @@ export function TargetPanel({
         </div>
       )}
 
+      {/* Whose weapons these are. The panel is headed with the TARGET's name
+          and everything under it is yours, which read as the goblin's longsword
+          - and that is how it was read. Its own kit is the section below. */}
+      <div className="mb-1 text-[10px] tracking-wider text-ink-600 uppercase">
+        What you can do to it
+      </div>
+
+      {/* Capped shorter than the list wants to be, so the creature's own kit
+          below is on screen rather than under the fold: the transient panels
+          share one measured slice of the column, and a spell list that takes
+          all of it hides whatever sits beneath. */}
       {options.length === 0 ? (
         <p className="text-sm text-ink-500">No weapons or spells on this sheet.</p>
       ) : (
-        <ul className="max-h-64 space-y-1 overflow-y-auto">
+        <ul className="max-h-40 space-y-1 overflow-y-auto">
           {/* Attacks, Support and Items kept apart, so a misclick cannot heal
               an enemy or swing at an ally. Grouping only: nothing is hidden for
               being aimed at the wrong sort of creature. */}
@@ -304,6 +319,12 @@ export function TargetPanel({
           ))}
         </ul>
       )}
+
+      {/* What the creature you clicked can do back. Read-only, and gated on
+          the server: an enemy's kit is campaign policy, and a party member's
+          sheet is shared deliberately rather than by standing on the same
+          board. */}
+      <CreatureActions campaignId={campaignId} token={target} />
     </div>
   );
 }

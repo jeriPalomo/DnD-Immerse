@@ -190,9 +190,11 @@ interface TableState {
   cardAction: (
     itemId: string,
     actorId: string,
-    action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile' | 'heal',
+    action: 'attack' | 'damage' | 'critical' | 'save' | 'heal',
     mode?: RollMode,
     targetTokenId?: string | null,
+    /** Swung two-handed, for a versatile weapon. Ignored by anything else. */
+    versatile?: boolean,
   ) => void;
   /** Corrects a mistyped initiative, or sets the round and whose turn it is. */
   setInitiative: (
@@ -805,7 +807,7 @@ export const useTable = create<TableState>((set, get) => ({
     if (showThreat) get().socket?.emit('movement:query', { tokenId: null, threat: true });
   },
 
-  cardAction(itemId, actorId, action, mode = 'normal', targetTokenId = null) {
-    get().socket?.emit('chat:cardAction', { itemId, actorId, action, mode, targetTokenId });
+  cardAction(itemId, actorId, action, mode = 'normal', targetTokenId = null, versatile = false) {
+    get().socket?.emit('chat:cardAction', { itemId, actorId, action, mode, targetTokenId, versatile });
   },
 }));

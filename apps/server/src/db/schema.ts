@@ -610,6 +610,16 @@ export const chatMessages = sqliteTable(
     cardData: text('card_data', { mode: 'json' }).$type<Record<string, unknown> | null>(),
     /** One check rolled for several creatures: a row per creature, with totals. */
     groupData: text('group_data', { mode: 'json' }).$type<Record<string, unknown> | null>(),
+    /**
+     * One swing: the d20, whether it landed, and the damage it rolled.
+     *
+     * Its own column for the reason `group_data` has one - the verdict was a
+     * sentence appended to the roll's label, which meant the answer to "did it
+     * hit" could only be read by parsing prose the client then truncated. The
+     * body is still written out underneath, so a message stored before this
+     * existed still reads.
+     */
+    attackData: text('attack_data', { mode: 'json' }).$type<Record<string, unknown> | null>(),
     whisperToUserId: text('whisper_to_user_id').references(() => users.id, { onDelete: 'cascade' }),
     /**
      * Whether this belongs in the battle log rather than the conversation.

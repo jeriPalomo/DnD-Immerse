@@ -1609,6 +1609,77 @@ Same root cause and same fix as Table item 7.
 
 ---
 
+## Read from the table — 2026-08-21
+
+Four things reported while playing, all of them about the app knowing something
+and not saying it.
+
+### 1. The attack card was unreadable — DONE
+
+The verdict was a sentence appended to the roll's label, so the card printed
+`Thorin Oakenshield attacks Goblin 2 with Handaxe — MISS against Goblin 2 (AC
+15)` in a truncated grey line at the right of the row: the answer to "did it
+hit" was the least legible thing on a card about hitting, and the damage arrived
+as a *separate* message underneath with nothing tying it to the swing above.
+
+*Shipped:* `attackData`, a column and a wire type, carrying the attacker, the
+target, the outcome, the d20 and the damage. `AttackCard` draws a headline and a
+Results block: the dice with their parts, the verdict with its reason, and the
+damage where it landed with the Apply button inside it. Blocked and missed are
+one outcome, as they are at a table - `reason` is what separates a natural 1
+from a roll that fell short.
+
+The Apply button now names the creature that was struck and the damage type it
+was. The old one applied to whatever happened to be targeted at the moment it
+was pressed, untyped, so a resistance was silently ignored and a hit from three
+messages ago landed on the wrong goblin.
+
+### 2. "Two-handed doesn't make sense, and where did the +4 come from?" — DONE
+
+Both halves were the app declining to say what it knew. The card read `1d8
+Slashing`, the button rolled `1d10+4`, and neither the second grip nor the
+Strength modifier appeared anywhere a player could see them.
+
+- **Two-handed is a grip now, not a button.** It sat beside `Attack` and rolled
+  damage with no attack roll in front of it, which is why nobody could tell what
+  it did. It is a select, the dice change on the card as the grip changes, and
+  the `versatile` action is gone from the enum rather than left unreachable.
+- **The +4 was Strength; the +7 was Strength and proficiency.** Cards, the
+  sheet's weapon table and the attack card all print the parts now
+  (`STR +4 · proficiency +3`), from one shared function. A stamped monster
+  reports `stat block` instead, because its published `+4` includes proficiency
+  its stat line never states.
+
+*Found on the way past:* **a spell that rolled to hit added the caster's
+Strength to its damage.** The `damage` button knew spell damage takes no ability
+modifier; the damage rolled automatically by a landing attack did not, and read
+the spell's blob as a weapon - where `ability` is absent and defaults to `str`.
+Every Fire Bolt that hit rolled `1d10` plus a wizard's Strength *penalty*. One
+function answers it now, and the test fails with `1d10-1` if it is reverted.
+
+### 3. Buttons jumped the page to the chat — DONE
+
+Pressing **Next turn** scrolled the board out from under the DM. The chat log
+followed itself with `bottom.scrollIntoView()`, which scrolls every scrollable
+ancestor including the window - so a message arriving anywhere dragged the whole
+page down to the panel. It scrolls its own box now, and only while the reader is
+already at the end, so scrolling back through a fight is not yanked away by the
+next roll. Verified with the page 1172px scrollable: `scrollY` stays at 0 when a
+message arrives.
+
+### 4. Clicking a creature showed your weapons, under its name — DONE
+
+The target panel is headed `Targeting Goblin` and lists *your* longsword under
+it, which reads as the goblin's longsword. Both lists are captioned now - "what
+you can do to it" and "what it can do" - and the second is real: the creature's
+own attacks with their numbers, read from the stat block route so the permission
+is the server's. An enemy's kit is campaign policy; a party member's sheet is
+shared deliberately rather than by standing on the same board, and a refusal
+says so instead of drawing an empty list. Read-only, and it scrolls rather than
+growing.
+
+---
+
 ## Later: Online mode and Local mode
 
 A direction, not a task yet.

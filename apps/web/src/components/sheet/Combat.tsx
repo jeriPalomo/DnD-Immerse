@@ -1,9 +1,12 @@
 import {
-  abilityModifier,
+  attackBonusParts,
+  bonusTotal,
+  damageBonusParts,
+  describeBonus,
   formatModifier,
-  proficiencyBonus,
   spellAttackBonus,
   spellSaveDC,
+  weaponAbility,
   type AbilityKey,
 } from '@dnd/shared';
 import type { Actor, Item } from '../../store/sheet.js';
@@ -175,7 +178,6 @@ function DeathSaves({
  */
 export function AttackList({ actor, weapons }: { actor: Actor; weapons: Item[] }) {
   const scores = { str: actor.str, dex: actor.dex, con: actor.con, int: actor.int, wis: actor.wis, cha: actor.cha };
-  const prof = proficiencyBonus(actor.level);
 
   if (weapons.length === 0) return null;
 
@@ -192,16 +194,17 @@ export function AttackList({ actor, weapons }: { actor: Actor; weapons: Item[] }
       <tbody className="divide-y divide-ink-800">
         {weapons.map((weapon) => {
           const s = weapon.system;
-          // A finesse weapon uses whichever of STR or DEX is better.
-          const ability: AbilityKey = s.finesse
-            ? abilityModifier(scores.dex) > abilityModifier(scores.str)
-              ? 'dex'
-              : 'str'
-            : (s.ability ?? 'str');
-
-          const mod = abilityModifier(scores[ability]);
-          const toHit = mod + (s.proficient ? prof : 0) + (s.attackBonus ?? 0);
-          const dmgBonus = mod + (s.damageBonus ?? 0);
+          // The same arithmetic the item card prints and the server rolls, from
+          // the same function - this table used to do its own, and read
+          // `proficient` as falsy where the roll read "not explicitly false",
+          // so an item saved without the field would have shown one number here
+          // and rolled another.
+          const published = actor.type === 'npc' && Boolean(actor.srdMonsterId);
+          const ability: AbilityKey = weaponAbility(s, scores);
+          const hitParts = attackBonusParts(s, scores, actor.level, { published });
+          const damageParts = damageBonusParts(s, scores, { published });
+          const toHit = bonusTotal(hitParts);
+          const dmgBonus = bonusTotal(damageParts);
           const range = s.range?.type === 'ranged' ? `${s.range.value}/${s.range.long ?? '-'} ft` : '5 ft';
 
           return (
@@ -221,8 +224,13 @@ export function AttackList({ actor, weapons }: { actor: Actor; weapons: Item[] }
                   </span>
                 )}
               </td>
-              <td className="py-1.5 font-mono text-ember-300">{formatModifier(toHit)}</td>
-              <td className="py-1.5 font-mono">
+              <td
+                className="py-1.5 font-mono text-ember-300"
+                title={describeBonus(hitParts) || 'no bonuses'}
+              >
+                {formatModifier(toHit)}
+              </td>
+              <td className="py-1.5 font-mono" title={describeBonus(damageParts) || 'no bonuses'}>
                 {s.damageDice}
                 {dmgBonus !== 0 && formatModifier(dmgBonus)}{' '}
                 <span className="text-ink-500">{s.damageType}</span>

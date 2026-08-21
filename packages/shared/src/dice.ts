@@ -1,4 +1,10 @@
-import { abilityModifier, proficiencyBonus, type AbilityKey, type AbilityScores } from './rules5e.js';
+import {
+  abilityModifier,
+  formatModifier,
+  proficiencyBonus,
+  type AbilityKey,
+  type AbilityScores,
+} from './rules5e.js';
 
 /**
  * Dice expression building and validation.
@@ -99,6 +105,91 @@ export function attackExpression(
     (weapon.attackBonus ?? 0);
 
   return withModifier(d20Expression(mode), bonus);
+}
+
+/**
+ * Where a number came from, part by part.
+ *
+ * A card printing `+7 to hit` and a roll printing `1d20+7` both leave the
+ * player to guess what the 7 is made of - and a longsword rolling `1d10+4`
+ * when its card says `1d8 Slashing` reads as a bug rather than as a two-handed
+ * grip plus a Strength modifier. Every bonus this app applies is derived from
+ * something on the sheet, so it can always say which something.
+ *
+ * Derived, never stored, exactly as every other computed value here.
+ */
+export interface BonusPart {
+  /** What a person would call it: `STR`, `proficiency`, `item`. */
+  label: string;
+  value: number;
+}
+
+export function bonusTotal(parts: BonusPart[]): number {
+  return parts.reduce((sum, part) => sum + part.value, 0);
+}
+
+/** `STR +4 · proficiency +3`. One spelling, so two panels cannot differ. */
+export function describeBonus(parts: BonusPart[]): string {
+  return parts.map((part) => `${part.label} ${formatModifier(part.value)}`).join(' · ');
+}
+
+/**
+ * The to-hit bonus, broken into the things that produced it.
+ *
+ * `published` is for a creature stamped from the bestiary, whose `+4 to hit`
+ * includes proficiency its stat line never states: `from-monster` cancels the
+ * ability modifier and proficiency and parks the remainder in `attackBonus`,
+ * so listing the parts would attribute the number to a Strength score that had
+ * nothing to do with it. The same reason an NPC's attack rows print no ability
+ * chip - one honest total beats three plausible and wrong pieces.
+ */
+export function attackBonusParts(
+  weapon: WeaponLike,
+  scores: AbilityScores,
+  level: number,
+  options: { published?: boolean } = {},
+): BonusPart[] {
+  const ability = weaponAbility(weapon, scores);
+  const mod = abilityModifier(scores[ability]);
+  const proficiency = weapon.proficient === false ? 0 : proficiencyBonus(level);
+  const item = weapon.attackBonus ?? 0;
+
+  if (options.published) return [{ label: 'stat block', value: mod + proficiency + item }];
+
+  const parts: BonusPart[] = [];
+  if (mod !== 0) parts.push({ label: ability.toUpperCase(), value: mod });
+  if (proficiency !== 0) parts.push({ label: 'proficiency', value: proficiency });
+  if (item !== 0) parts.push({ label: 'item', value: item });
+  return parts;
+}
+
+/**
+ * The flat damage bonus, broken up the same way.
+ *
+ * Proficiency is deliberately absent: 5e adds it to the attack roll and never
+ * to the damage. A spell adds no ability modifier either, which is why the
+ * caller passes `ability: false` rather than this guessing from `item.type`.
+ */
+export function damageBonusParts(
+  weapon: WeaponLike,
+  scores: AbilityScores,
+  options: { published?: boolean; ability?: boolean } = {},
+): BonusPart[] {
+  const useAbility = options.ability !== false;
+  const key = weaponAbility(weapon, scores);
+  const mod = useAbility ? abilityModifier(scores[key]) : 0;
+  const item = weapon.damageBonus ?? 0;
+
+  if (options.published) {
+    // A published `damage_dice` of `1d6+2` already carries its own flat bonus,
+    // so there is nothing left to name and nothing to add.
+    return mod + item === 0 ? [] : [{ label: 'stat block', value: mod + item }];
+  }
+
+  const parts: BonusPart[] = [];
+  if (mod !== 0) parts.push({ label: key.toUpperCase(), value: mod });
+  if (item !== 0) parts.push({ label: 'item', value: item });
+  return parts;
 }
 
 /**

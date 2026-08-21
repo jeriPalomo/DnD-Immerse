@@ -8,6 +8,7 @@ import {
   tokenQuantitySchema,
 } from './schemas.js';
 import type { ChatKind, MemberRole, RollResult, TokenLayer } from './schemas.js';
+import type { BonusPart } from './dice.js';
 import { TERRAIN_BRUSHES } from './terrain.js';
 import type { TerrainKind } from './terrain.js';
 
@@ -123,11 +124,43 @@ export interface WireCard {
   subtitle: string;
   description: string;
   /** Buttons the viewer may press, already filtered by what the item supports. */
-  actions: ('attack' | 'damage' | 'critical' | 'save' | 'versatile' | 'heal')[];
+  actions: ('attack' | 'damage' | 'critical' | 'save' | 'heal')[];
   saveAbility: string | null;
   saveDC: number | null;
   /** The token this was aimed at when it was posted, if any. */
   targetTokenId: string | null;
+  /**
+   * What the buttons will actually roll, and where each number came from.
+   *
+   * The card used to print `1d8 Slashing` and then roll `1d10+4`: the second
+   * grip and the Strength modifier were both real, both derived from the sheet,
+   * and neither was written anywhere the player could see. Sent as numbers
+   * rather than as a sentence so the client can put the grip on a control and
+   * the arithmetic in a tooltip.
+   *
+   * Null for an item that rolls nothing to hit and nothing for damage.
+   */
+  numbers: WireCardNumbers | null;
+}
+
+export interface WireCardNumbers {
+  /** Null when the item has no attack roll - a fireball, a potion. */
+  toHit: number | null;
+  toHitParts: BonusPart[];
+  damageDice: string;
+  damageBonus: number;
+  damageParts: BonusPart[];
+  damageType: string;
+  healingDice: string;
+  /**
+   * The second grip's dice, when the weapon has one.
+   *
+   * Empty for everything else. It is a choice made when the blow is struck
+   * rather than a button of its own: `Two-handed` sat beside `Attack` rolling
+   * damage with no attack roll behind it, so the only way to tell what it did
+   * was to press it and read the log.
+   */
+  versatileDice: string;
 }
 
 /**
@@ -172,6 +205,61 @@ export interface WireGroupRoll {
   }[];
 }
 
+/**
+ * One swing, start to finish: who swung, whether it landed, and what it cost.
+ *
+ * Structured for the reason `groupData` is. The verdict used to be a sentence
+ * glued onto the roll's label - `... with Handaxe — MISS against Goblin 2 (AC
+ * 15)` - which the card then truncated into a grey line the player could not
+ * read, put the answer to "did it hit" at the far right of the row, and left
+ * the damage in a separate message underneath with no visible connection to the
+ * attack that caused it.
+ *
+ * The damage rides along rather than posting on its own, so the result of an
+ * action appears where the action was taken. It keeps its Apply button inside
+ * the card: whose hit points move is still a separate decision.
+ */
+export interface WireAttack {
+  attacker: string;
+  /** Null for a swing at nothing in particular. */
+  target: string | null;
+  weapon: string;
+  /**
+   * `miss` covers a natural 1 as well as a roll that fell short: both are the
+   * blow not landing, and the table calls both a miss. `reason` is what
+   * separates them on screen.
+   */
+  outcome: 'critical' | 'hit' | 'miss' | 'unresolved';
+  /**
+   * Why the outcome is what it is: `natural 1`, `AC 15`, `no AC recorded`.
+   *
+   * `unresolved` is a swing at something with no armour class on record - a
+   * bare token, or no target at all. The dice are shown and nothing is claimed,
+   * because a creature whose AC nobody typed in has not been missed.
+   */
+  reason: string;
+  /** Advantage or disadvantage, and what earned it. */
+  mode: 'normal' | 'advantage' | 'disadvantage';
+  reasons: string[];
+  /** The d20 itself: expression, faces, total. */
+  roll: RollResult;
+  toHitParts: BonusPart[];
+  /** Rolled only when the blow landed. */
+  damage: WireAttackDamage | null;
+}
+
+export interface WireAttackDamage {
+  roll: RollResult;
+  type: string;
+  parts: BonusPart[];
+  /** Dice doubled, because the attack roll came up 20. */
+  critical: boolean;
+  /** Rolled with the weapon's second grip. */
+  twoHanded: boolean;
+  /** Who to apply it to, so the card can offer it without hunting the board. */
+  tokenId: string | null;
+}
+
 export interface WireChatMessage {
   id: string;
   campaignId: string;
@@ -183,6 +271,7 @@ export interface WireChatMessage {
   rollData: RollResult | null;
   cardData: WireCard | null;
   groupData: WireGroupRoll | null;
+  attackData: WireAttack | null;
   whisperToUserId: string | null;
   /** Belongs to the battle log rather than the conversation. */
   combat: boolean;

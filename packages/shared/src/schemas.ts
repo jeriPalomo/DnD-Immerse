@@ -245,8 +245,18 @@ export const cardRequestSchema = z.object({
 export const cardActionSchema = z.object({
   itemId: z.string(),
   actorId: z.string(),
-  action: z.enum(['attack', 'damage', 'critical', 'save', 'versatile', 'heal']),
+  action: z.enum(['attack', 'damage', 'critical', 'save', 'heal']),
   mode: z.enum(['normal', 'advantage', 'disadvantage']).default('normal'),
+  /**
+   * Swung with both hands, for a versatile weapon.
+   *
+   * A grip rather than an action of its own. `versatile` used to be a button
+   * beside Attack that rolled a longsword's `1d10+4` with no attack roll in
+   * front of it - so the card advertised `1d8 Slashing`, the log showed a d10
+   * and a modifier from nowhere, and the two never appeared to be about the
+   * same weapon. Ignored by every item that has no second grip.
+   */
+  versatile: z.boolean().default(false),
   /**
    * Who the spell is aimed at. A spell save is rolled by the TARGET, so without
    * this the caster rolled their own save against their own DC - which is the

@@ -3,6 +3,8 @@ import { useConfirm } from './Confirm.js';
 import {
   DICE_LIMITS,
   DIE_TYPES,
+  describeBonus,
+  formatModifier,
   tokenDistance,
   validateExpression,
   type RollMode,
@@ -10,7 +12,7 @@ import {
 import { Button } from './ui.js';
 import { useTable } from '../store/table.js';
 import { useAuth } from '../store/auth.js';
-import type { WireCard, WireChatMessage } from '@dnd/shared';
+import type { WireAttack, WireCard, WireChatMessage } from '@dnd/shared';
 
 export function ChatPanel({
   isDM = false,
@@ -56,7 +58,14 @@ export function ChatPanel({
   const [secret, setSecret] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
   const [tab, setTab] = useState<'chat' | 'battle'>('chat');
-  const bottom = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  /**
+   * Whether the reader is at the end of the log, and so wants to follow it.
+   *
+   * A ref rather than state: it is read inside an effect and never drawn, and
+   * re-rendering the whole log on every scroll event is a cost for nothing.
+   */
+  const following = useRef(true);
 
   /**
    * One stored log; Battle is a filter over it, not the other half of a split.
@@ -74,8 +83,23 @@ export function ChatPanel({
    */
   const shown = tab === 'battle' ? messages.filter((message) => message.combat) : messages;
 
+  /**
+   * The log follows itself; it never moves the page.
+   *
+   * `scrollIntoView` was the bug: it scrolls EVERY scrollable ancestor, the
+   * window included, so a message arriving anywhere dragged the whole page down
+   * to the chat panel. Pressing Next turn posts a combat line, which meant the
+   * board scrolled out from under the DM on every single turn - a button that
+   * appeared to jump somewhere at random while doing exactly what it was asked.
+   * Scrolling the list's own box cannot touch anything outside it.
+   *
+   * Only while the reader is already at the end, so scrolling back through a
+   * fight is not yanked away by the next roll.
+   */
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: 'smooth' });
+    const box = list.current;
+    if (!box || !following.current) return;
+    box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
   }, [shown.length]);
 
   function submit(event: FormEvent) {
@@ -170,7 +194,17 @@ export function ChatPanel({
         ))}
       </ul>
 
-      <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
+      <div
+        ref={list}
+        onScroll={(e) => {
+          // Within a message's height of the end counts as following: an exact
+          // comparison fails on a fractional device pixel ratio and the log
+          // then stops following for no visible reason.
+          const box = e.currentTarget;
+          following.current = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+        }}
+        className="flex-1 space-y-2 overflow-y-auto px-3 py-3"
+      >
         {shown.length === 0 ? (
           <p className="py-8 text-center text-sm text-ink-500">
             {tab === 'battle' ? (
@@ -201,10 +235,12 @@ export function ChatPanel({
                 if (failedIds.length) applyDamage(failedIds, value, type);
                 if (savedIds.length) applyDamage(savedIds, value, type, false, true);
               }}
+              // The creature the blow actually landed on, and the damage type
+              // it was - both of which the swing knows and a bare roll does not.
+              onApplyAttack={(tokenId, amount, type) => applyDamage([tokenId], amount, type)}
             />
           ))
         )}
-        <div ref={bottom} />
       </div>
 
       <div className="border-t border-ink-800 px-3 py-2">
@@ -361,6 +397,7 @@ function Message({
   isDM,
   onAnswer,
   onApplyDamage,
+  onApplyAttack,
 }: {
   message: WireChatMessage;
   selfId: string;
@@ -371,12 +408,22 @@ function Message({
   onAction: (
     itemId: string,
     actorId: string,
-    action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile' | 'heal',
+    action: 'attack' | 'damage' | 'critical' | 'save' | 'heal',
     mode?: RollMode,
     targetTokenId?: string | null,
+    versatile?: boolean,
   ) => void;
   applyTo?: string | null;
   onApply?: (amount: number) => void;
+  /**
+   * Damage from a swing, applied to the creature that was actually struck.
+   *
+   * The plain roll card applies to whatever happens to be targeted right now,
+   * untyped, because a bare roll knows neither. An attack knows both, so a
+   * resistance is honoured and a hit three messages ago still lands on the
+   * right goblin.
+   */
+  onApplyAttack: (tokenId: string, amount: number, damageType: string) => void;
 }) {
   const isWhisper = Boolean(message.whisperToUserId);
   const speaker = message.actorName ?? message.authorName;
@@ -422,7 +469,16 @@ function Message({
         </span>
       </div>
 
-      {message.kind === 'roll' && message.rollData ? (
+      {message.attackData ? (
+        <AttackCard
+          attack={message.attackData}
+          // The author of the swing, or the DM. A message stored before the
+          // damage moved inside the attack has no `attackData` and still draws
+          // as the plain roll card underneath.
+          canApply={message.userId === selfId || isDM}
+          onApply={onApplyAttack}
+        />
+      ) : message.kind === 'roll' && message.rollData ? (
         <RollCard
           roll={message.rollData}
           // Only your own damage rolls, and only while something is targeted.
@@ -642,6 +698,122 @@ function GroupRollCard({
 }
 
 /**
+ * One swing, read top to bottom: who swung, what happened, what it cost.
+ *
+ * The verdict used to be a sentence glued onto the roll's label, which the card
+ * then printed in a grey line at the right of the row and truncated - so the
+ * answer to "did it hit" was the least legible thing on a card about hitting,
+ * and the damage arrived as a separate message underneath with nothing tying
+ * the two together.
+ *
+ * The dice for every number are shown rather than only their totals, and each
+ * bonus says where it came from. `+7` is not a fact about a longsword; it is
+ * Strength and proficiency, and a player who cannot see that cannot tell a
+ * house rule from a bug.
+ */
+function AttackCard({
+  attack,
+  canApply,
+  onApply,
+}: {
+  attack: WireAttack;
+  /** Whether this viewer may put the damage on the creature. */
+  canApply: boolean;
+  onApply: (tokenId: string, amount: number, damageType: string) => void;
+}) {
+  const { damage } = attack;
+
+  const tone =
+    attack.outcome === 'critical'
+      ? 'border-emerald-500/50 bg-emerald-500/10'
+      : attack.outcome === 'miss'
+        ? 'border-ink-700 bg-ink-850'
+        : 'border-ember-500/40 bg-ink-850';
+
+  const verdict =
+    attack.outcome === 'critical'
+      ? { label: 'Critical hit', color: 'text-emerald-400' }
+      : attack.outcome === 'hit'
+        ? { label: 'Hit', color: 'text-ember-300' }
+        : attack.outcome === 'miss'
+          ? { label: 'Miss', color: 'text-red-400' }
+          : { label: 'Rolled', color: 'text-ink-400' };
+
+  return (
+    <div className={`mt-1 rounded-lg border px-3 py-2 ${tone}`}>
+      <div className="font-display text-sm text-ink-100">
+        {attack.attacker} attacks{attack.target ? ` ${attack.target}` : ''} with {attack.weapon}
+      </div>
+
+      {attack.mode !== 'normal' && (
+        <div
+          className={`mt-1 text-[11px] ${
+            attack.mode === 'advantage' ? 'text-emerald-400' : 'text-red-400'
+          }`}
+        >
+          at {attack.mode}
+          {attack.reasons.length > 0 && ` — ${attack.reasons.join('; ')}`}
+        </div>
+      )}
+
+      <div className="mt-2 text-[10px] tracking-wider text-ink-600 uppercase">Results</div>
+
+      <ul className="mt-1 space-y-1.5">
+        {/* The attack roll, with the bonus broken into what produced it. */}
+        <li className="flex items-baseline justify-between gap-3">
+          <span className="min-w-0 font-mono text-[11px] text-ink-400">
+            {attack.roll.output}
+            {attack.toHitParts.length > 0 && (
+              <span className="ml-1.5 text-ink-600">({describeBonus(attack.toHitParts)})</span>
+            )}
+          </span>
+          <span className="font-display text-lg font-bold text-ink-100">{attack.roll.total}</span>
+        </li>
+
+        <li className={`text-sm font-semibold ${verdict.color}`}>
+          {verdict.label}
+          <span className="ml-1.5 text-[11px] font-normal text-ink-500">— {attack.reason}</span>
+        </li>
+
+        {/* What landed, in hit points. Absent on a miss, because a swing that
+            never connected has no damage to show and no number to apply. */}
+        {damage && (
+          <li className="rounded border border-ink-700 bg-ink-900 px-2 py-1.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="min-w-0 font-mono text-[11px] text-ink-400">
+                {damage.roll.output}
+                {damage.parts.length > 0 && (
+                  <span className="ml-1.5 text-ink-600">({describeBonus(damage.parts)})</span>
+                )}
+              </span>
+              <span className="font-display text-xl font-bold text-ember-300">
+                {damage.roll.total}
+              </span>
+            </div>
+            <div className="mt-0.5 text-[11px] text-ink-500">
+              {damage.type || 'damage'}
+              {damage.critical && <span className="ml-1.5 text-emerald-400">dice doubled</span>}
+              {damage.twoHanded && <span className="ml-1.5 text-ink-400">two-handed</span>}
+            </div>
+
+            {/* Offered, never applied. Whose hit points move is a separate
+                decision, and this rolls for things that turn out not to count. */}
+            {canApply && damage.tokenId && (
+              <button
+                onClick={() => onApply(damage.tokenId!, damage.roll.total, damage.type)}
+                className="mt-1.5 w-full rounded border border-ember-500/50 px-2 py-1 text-[11px] text-ember-300 transition-colors hover:bg-ember-500/15"
+              >
+                Apply {damage.roll.total} to {attack.target}
+              </button>
+            )}
+          </li>
+        )}
+      </ul>
+    </div>
+  );
+}
+
+/**
  * What was rolled, what each die came up, then the total.
  *
  * The dice line is the point: "5" tells you nothing about whether the roll was
@@ -705,7 +877,6 @@ const ACTION_LABELS: Record<string, string> = {
   attack: 'Attack',
   damage: 'Damage',
   critical: 'Crit',
-  versatile: 'Two-handed',
   save: 'Save',
   heal: 'Heal',
 };
@@ -718,9 +889,10 @@ function ItemCard({
   onAction: (
     itemId: string,
     actorId: string,
-    action: 'attack' | 'damage' | 'critical' | 'save' | 'versatile' | 'heal',
+    action: 'attack' | 'damage' | 'critical' | 'save' | 'heal',
     mode?: RollMode,
     targetTokenId?: string | null,
+    versatile?: boolean,
   ) => void;
 }) {
   // The player's own call, and nothing else. Both circumstantial sources -
@@ -729,10 +901,58 @@ function ItemCard({
   // range penalty that no longer applies.
   const [mode, setMode] = useState<RollMode>('normal');
 
+  /**
+   * Which grip, for a versatile weapon.
+   *
+   * A choice rather than the second button it used to be. `Two-handed` sat
+   * beside `Attack` and rolled damage with no attack roll in front of it, so a
+   * card advertising `1d8 Slashing` answered with `1d10+4` and there was no way
+   * to find out why except by asking. Here the dice change on the card as the
+   * grip changes, before anything is rolled.
+   */
+  const [twoHanded, setTwoHanded] = useState(false);
+  const numbers = card.numbers;
+  const versatile = numbers?.versatileDice ?? '';
+  const dice = twoHanded && versatile ? versatile : (numbers?.damageDice ?? '');
+
   return (
     <div className="mt-1 rounded-lg border border-ink-700 bg-ink-850 px-3 py-2">
       <div className="font-display text-ink-100">{card.itemName}</div>
       <div className="text-xs text-ink-500">{card.subtitle}</div>
+
+      {/*
+        What the buttons will roll, before anybody presses one.
+
+        Every number here is derived from the sheet, and derived numbers are
+        exactly the ones a player cannot check: the card said `1d8 Slashing`
+        and the log said `1d10+4`, with the grip and the Strength modifier
+        both invisible. Each part carries where it came from.
+      */}
+      {numbers && (numbers.toHit !== null || dice || numbers.healingDice) && (
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[11px]">
+          {numbers.toHit !== null && (
+            <span className="text-ember-300" title={describeBonus(numbers.toHitParts) || 'no bonuses'}>
+              {formatModifier(numbers.toHit)} to hit
+              {numbers.toHitParts.length > 0 && (
+                <span className="ml-1 text-ink-600">({describeBonus(numbers.toHitParts)})</span>
+              )}
+            </span>
+          )}
+          {dice && (
+            <span className="text-ink-300" title={describeBonus(numbers.damageParts) || 'no bonuses'}>
+              {dice}
+              {numbers.damageBonus !== 0 && formatModifier(numbers.damageBonus)}{' '}
+              <span className="text-ink-500">{numbers.damageType} damage</span>
+              {numbers.damageParts.length > 0 && (
+                <span className="ml-1 text-ink-600">({describeBonus(numbers.damageParts)})</span>
+              )}
+            </span>
+          )}
+          {numbers.healingDice && (
+            <span className="text-emerald-400">{numbers.healingDice} healing</span>
+          )}
+        </div>
+      )}
 
       {card.saveDC !== null && card.saveAbility && (
         <div className="mt-1 text-xs text-ember-300">
@@ -758,11 +978,22 @@ function ItemCard({
               <option value="disadvantage">Disadvantage</option>
             </select>
           )}
+          {card.actions.includes('attack') && versatile && (
+            <select
+              value={twoHanded ? 'two' : 'one'}
+              onChange={(e) => setTwoHanded(e.target.value === 'two')}
+              aria-label="Grip"
+              className="rounded border border-ink-600 bg-ink-900 px-1.5 py-1 text-[11px] text-ink-300 focus:outline-none"
+            >
+              <option value="one">One-handed ({numbers?.damageDice})</option>
+              <option value="two">Two-handed ({versatile})</option>
+            </select>
+          )}
           {card.actions.map((action) => (
             <button
               key={action}
               onClick={() =>
-                onAction(card.itemId, card.actorId, action, mode, card.targetTokenId)
+                onAction(card.itemId, card.actorId, action, mode, card.targetTokenId, twoHanded)
               }
               className="rounded border border-ink-600 bg-ink-800 px-2 py-1 text-[11px] text-ink-200 transition-colors hover:border-ember-500 hover:text-ember-300"
             >

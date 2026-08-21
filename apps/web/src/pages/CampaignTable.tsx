@@ -411,6 +411,7 @@ export default function CampaignTable() {
               scene={scene}
               actor={actingActor}
               items={actingItems}
+              campaignId={id ?? ''}
               onUse={(item) => useItemOn(item, targeted)}
               onClear={() => table.target(null)}
             />

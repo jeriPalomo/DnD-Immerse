@@ -959,6 +959,15 @@ export function BattleMap({
             {targetPopup.token.ac !== null ? ` · AC ${targetPopup.token.ac}` : ''}
           </div>
 
+          {/* Whose weapons these are, said out loud. The panel is titled with
+              the CREATURE's name and lists YOUR options under it, which reads
+              as the goblin's handaxe rather than as yours - and that is exactly
+              how it was read. What the creature itself can do is in its own
+              panel, beside its hit points. */}
+          <div className="mb-1 text-[9px] tracking-wider text-ink-600 uppercase">
+            What you can do to it
+          </div>
+
           {targetPopup.options.length === 0 ? (
             <p className="text-[11px] text-ink-500">Nothing on this sheet to use.</p>
           ) : (

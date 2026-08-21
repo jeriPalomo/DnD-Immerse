@@ -880,3 +880,169 @@ describe('a card cannot claim a target from another campaign', () => {
     expect(await posted).toBeNull();
   });
 });
+
+/**
+ * One swing is one message, and it says where every number came from.
+ *
+ * The verdict used to be a sentence appended to the roll's label and the damage
+ * a second message underneath, which meant the answer to "did it hit" could
+ * only be had by parsing prose, and the two halves of one action could be
+ * separated by anything else the table rolled in between.
+ */
+describe('an attack is one message, and says what it did', () => {
+  let swordId: string;
+  let boltId: string;
+  let dummyId: string;
+
+  /** Fires the attack and returns the structured result. */
+  async function swing(itemId: string, targetTokenId: string, versatile = false) {
+    const posted = new Promise<any>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 4000);
+      const handler = (p: { message: { attackData: unknown } }) => {
+        if (!p.message.attackData) return;
+        clearTimeout(timer);
+        dmSocket.off('chat:message', handler);
+        resolve(p.message);
+      };
+      dmSocket.on('chat:message', handler);
+    });
+
+    aliceSocket.emit('chat:cardAction', {
+      itemId, actorId, action: 'attack', targetTokenId, versatile,
+    } as never);
+    return posted;
+  }
+
+  /**
+   * Swings until one lands.
+   *
+   * The dummy's AC of 1 is not enough on its own: a natural 1 misses whatever
+   * the numbers say, which is a one-in-twenty flake on every test below that
+   * needs a hit to inspect. Retrying is honest here because the thing under
+   * test is what a *hit* carries, not how often one happens - and a suite that
+   * fails a few runs in a hundred for no reason is worse than no suite, since
+   * the usual response to a flake is to stop believing it.
+   */
+  async function swingUntilHit(itemId: string, targetTokenId: string, versatile = false) {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const message = await swing(itemId, targetTokenId, versatile);
+      if (!message) continue;
+      const { outcome } = message.attackData;
+      if (outcome === 'hit' || outcome === 'critical') return message;
+    }
+    throw new Error('twenty swings at AC 1 and none landed');
+  }
+
+  beforeAll(async () => {
+    // Strength 8 is a -1 modifier, and an AC of 1 makes every swing land - so
+    // the damage expression is the only variable left in the check below.
+    //
+    // The level is set here rather than assumed: an earlier suite in this file
+    // pushes the actor to level 20 to force a save, and proficiency rides on
+    // it - so a test written against the level in `beforeAll` reads +6 where it
+    // expected +3 and blames the wrong thing.
+    await api(
+      'PATCH', `/api/actors/${actorId}`,
+      { str: 8, int: 18, level: 5, spellcastingAbility: 'int' },
+      alice.cookie,
+    );
+
+    const created = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, name: 'Practice dummy', x: 3, y: 2, hp: 200, maxHp: 200, ac: 1,
+    } as never);
+    dummyId = (await created)!.token.id;
+
+    const sword = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      {
+        type: 'weapon', name: 'Longsword',
+        system: { damageDice: '1d8', damageType: 'slashing', versatile: true, versatileDice: '1d10' },
+      },
+      alice.cookie,
+    );
+    swordId = sword.item.id;
+
+    const bolt = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      {
+        type: 'spell', name: 'Fire Bolt',
+        system: { level: 0, attackRoll: true, damageDice: '1d10', damageType: 'fire' },
+      },
+      alice.cookie,
+    );
+    boltId = bolt.item.id;
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  it('carries the damage inside the swing that landed it', async () => {
+    const message = await swingUntilHit(swordId, dummyId);
+    const attack = message.attackData;
+
+    expect(attack.weapon).toBe('Longsword');
+    expect(attack.target).toBe('Practice dummy');
+    // The creature it applies to travels with it, so a hit three messages ago
+    // still lands on the right goblin.
+    expect(attack.damage?.tokenId).toBe(dummyId);
+    expect(attack.damage?.type).toBe('slashing');
+  });
+
+  it('spells out where the to-hit bonus came from', async () => {
+    const message = await swing(swordId, dummyId);
+    // A -1 from Strength 8 and +3 of proficiency at level 5. Named rather than
+    // summed, because `+2` on its own is a number a player cannot check.
+    expect(message.attackData.toHitParts).toEqual([
+      { label: 'STR', value: -1 },
+      { label: 'proficiency', value: 3 },
+    ]);
+  });
+
+  it('rolls the two-handed dice when the swing was two-handed, and says so', async () => {
+    // The die SIZE is the thing under test, and the count is not: a critical
+    // doubles the dice, so a two-handed crit reads `2d10-1` and asserting on
+    // `1d10` fails one run in twenty on a test that is right.
+    const oneHanded = await swingUntilHit(swordId, dummyId, false);
+    expect(oneHanded.attackData.damage.roll.expression).toMatch(/^\d*d8/);
+    expect(oneHanded.attackData.damage.twoHanded).toBe(false);
+
+    const twoHanded = await swingUntilHit(swordId, dummyId, true);
+    expect(twoHanded.attackData.damage.roll.expression).toMatch(/^\d*d10/);
+    expect(twoHanded.attackData.damage.twoHanded).toBe(true);
+  });
+
+  /**
+   * The bug this test exists for: a spell that rolled to hit chained into
+   * `damageExpression` with the spell's own blob, where `ability` is absent and
+   * therefore defaults to `str`. Every Fire Bolt that landed rolled the
+   * wizard's *Strength* modifier into its damage - a penalty, for a wizard.
+   */
+  it('adds no ability modifier to a spell that hits', async () => {
+    const message = await swingUntilHit(boltId, dummyId);
+    // The published dice and nothing else: no +INT, and emphatically no -1
+    // from Strength. Anchored at both ends so a trailing modifier fails it,
+    // while leaving the count free - a critical doubles the dice.
+    expect(message.attackData.damage.roll.expression).toMatch(/^\d*d10$/);
+    expect(message.attackData.damage.parts).toEqual([]);
+  });
+
+  it('offers no two-handed button, and reports the grip as a number instead', async () => {
+    const carded = new Promise<any>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 4000);
+      const handler = (p: { message: { cardData: unknown } }) => {
+        if (!p.message.cardData) return;
+        clearTimeout(timer);
+        dmSocket.off('chat:message', handler);
+        resolve(p.message.cardData);
+      };
+      dmSocket.on('chat:message', handler);
+    });
+    aliceSocket.emit('chat:card', { itemId: swordId, actorId, targetTokenId: dummyId } as never);
+
+    const card = await carded;
+    expect(card.actions).not.toContain('versatile');
+    expect(card.numbers.versatileDice).toBe('1d10');
+    // What the button will roll, printed before it is pressed: -1 and +3.
+    expect(card.numbers.toHit).toBe(2);
+    expect(card.numbers.damageDice).toBe('1d8');
+  });
+});

@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import {
+  attackBonusParts,
   attackModeAgainst,
   attackExpression,
   campaignDmRoom,
@@ -7,7 +8,9 @@ import {
   combineRollModes,
   cardActionSchema,
   cardRequestSchema,
+  damageBonusParts,
   damageExpression,
+  doubleDice,
   rollRequestSchema,
   savingThrowExpression,
   sendMessageSchema,
@@ -25,12 +28,15 @@ import type {
   ClientToServerEvents,
   RollResult,
   ServerToClientEvents,
+  WireAttack,
+  WireAttackDamage,
   WireCard,
   WireChatMessage,
 } from '@dnd/shared';
 import {
   abilityModifier,
   attackVerdict,
+  OUTCOME_WORD,
   groupAnswerSchema,
   groupRollSchema,
   publishedMonsterBonus,
@@ -57,6 +63,7 @@ import { getActorAccess } from '../lib/access.js';
 import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
 import { applyCondition, conditionsOf, currentRound, effectsByToken } from '../lib/effects.js';
+import { itemNumbers, rollsToHit, scoresOf } from '../lib/itemNumbers.js';
 import { tokenIn } from './scene.js';
 import type { IOServer, SocketData } from './index.js';
 import type { Actor, Item, Token } from '../db/schema.js';
@@ -64,10 +71,6 @@ import type { Actor, Item, Token } from '../db/schema.js';
 type ChatSocket = Socket<ClientToServerEvents, ServerToClientEvents, object, SocketData>;
 
 const HISTORY_LIMIT = 100;
-
-function scoresOf(actor: Actor): AbilityScores {
-  return { str: actor.str, dex: actor.dex, con: actor.con, int: actor.int, wis: actor.wis, cha: actor.cha };
-}
 
 /**
  * The save an item forces, and the DC to beat.
@@ -170,6 +173,7 @@ export async function persistAndDeliver(
     rollData?: RollResult | null;
     cardData?: WireCard | null;
     groupData?: WireGroupRoll | null;
+    attackData?: WireAttack | null;
     whisperToUserId?: string | null;
     /** Routes this to the battle log instead of the conversation. */
     combat?: boolean;
@@ -187,6 +191,7 @@ export async function persistAndDeliver(
     rollData: row.rollData ?? null,
     cardData: row.cardData ?? null,
     groupData: row.groupData ?? null,
+    attackData: row.attackData ?? null,
     whisperToUserId: row.whisperToUserId ?? null,
     combat: row.combat ?? false,
     createdAt: Date.now(),
@@ -202,6 +207,7 @@ export async function persistAndDeliver(
     rollData: row.rollData ?? null,
     cardData: (row.cardData ?? null) as Record<string, unknown> | null,
     groupData: (row.groupData ?? null) as Record<string, unknown> | null,
+    attackData: (row.attackData ?? null) as Record<string, unknown> | null,
     whisperToUserId: row.whisperToUserId ?? null,
     combat: message.combat,
     createdAt: message.createdAt,
@@ -221,6 +227,32 @@ async function resolveActor(actorId: string | null, userId: string): Promise<Act
 
 /* ------------------------------------------------------------- cards */
 
+/**
+ * The damage an item deals, weapon or spell.
+ *
+ * One function because there were two, and they disagreed. The `damage` button
+ * knew that spell damage adds no ability modifier and went to some trouble to
+ * cancel it; the damage rolled automatically by a landing attack did not, and
+ * read the spell's blob as if it were a weapon - where `ability` is absent and
+ * so defaults to `str`. Every Fire Bolt that hit therefore rolled `1d10` plus
+ * the wizard's *Strength* modifier, which for a wizard is usually a penalty.
+ * Two ways of answering one question is one answer plus a bug.
+ */
+function damageFor(
+  item: Item,
+  scores: AbilityScores,
+  options: { critical?: boolean; versatile?: boolean } = {},
+): string {
+  const s = item.system as Record<string, any>;
+  const dice = String(s.damageDice ?? '');
+
+  // A spell's damage is what the spell says, doubled on a critical and
+  // otherwise untouched.
+  if (item.type === 'spell') return options.critical ? doubleDice(dice) : dice;
+
+  return damageExpression(s, scores, options);
+}
+
 function buildCard(item: Item, actor: Actor, targetTokenId: string | null = null): WireCard {
   const s = item.system as Record<string, any>;
   const actions: WireCard['actions'] = [];
@@ -233,9 +265,23 @@ function buildCard(item: Item, actor: Actor, targetTokenId: string | null = null
     // lands, so there is nothing to press twice and no damage rolled for a
     // swing that missed - which is also the difference nobody could see
     // between the two buttons that used to be here.
-    actions.push('attack');
-    if (s.versatileDice) actions.push('versatile');
-    subtitle = [s.damageDice, s.damageType].filter(Boolean).join(' ');
+    //
+    // A versatile weapon adds no button either: the second grip travels on the
+    // attack as a choice, because `Two-handed` beside `Attack` rolled damage
+    // with no attack roll in front of it and there was no way to learn that
+    // except by pressing it.
+    if (rollsToHit(item)) actions.push('attack');
+    // Reach and properties, not the dice: `numbers` prints `1d8+4 slashing
+    // damage` right underneath, and the same fact in two spellings a line apart
+    // is noise on a card whose whole problem was that it said too little.
+    subtitle = [
+      s.range?.type === 'ranged' && s.range?.long
+        ? `${s.range.value}/${s.range.long} ft`
+        : `${s.range?.value ?? 5} ft reach`,
+      ...(s.properties ?? []),
+    ]
+      .filter(Boolean)
+      .join(' · ');
   } else if (item.type === 'spell') {
     subtitle = [
       s.level === 0 ? 'Cantrip' : `Level ${s.level}`,
@@ -248,7 +294,7 @@ function buildCard(item: Item, actor: Actor, targetTokenId: string | null = null
     // A spell that rolls to hit chains into its damage exactly as a weapon
     // does. One that does not - a fireball - keeps its own damage button,
     // because there is no attack roll for the damage to hang off.
-    if (s.attackRoll) actions.push('attack');
+    if (rollsToHit(item)) actions.push('attack');
     if (s.damageDice && !s.attackRoll) actions.push('damage');
   } else if (item.type === 'consumable') {
     // A potion used to post a card with a name and nothing to press. It gets
@@ -293,6 +339,7 @@ function buildCard(item: Item, actor: Actor, targetTokenId: string | null = null
     subtitle,
     description: (s.description ?? '').slice(0, 2000),
     actions,
+    numbers: itemNumbers(item, actor),
     saveAbility,
     saveDC,
     targetTokenId,
@@ -516,6 +563,7 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
       rollData: message.rollData ?? null,
       cardData: (message.cardData ?? null) as WireCard | null,
       groupData: next,
+      attackData: (message.attackData ?? null) as WireAttack | null,
       whisperToUserId: message.whisperToUserId ?? null,
       combat: message.combat,
       createdAt: message.createdAt,
@@ -674,17 +722,7 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
 
       case 'damage':
       case 'critical':
-      case 'versatile':
-        expression =
-          item.type === 'spell'
-            ? // Spell damage does not add the casting modifier.
-              input.action === 'critical'
-              ? damageExpression({ damageDice: s.damageDice, ability: 'str' }, { ...scores, str: 10 }, { critical: true })
-              : s.damageDice
-            : damageExpression(s, scores, {
-                critical: input.action === 'critical',
-                versatile: input.action === 'versatile',
-              });
+        expression = damageFor(item, scores, { critical: input.action === 'critical' });
         label = `${item.name} — ${input.action === 'critical' ? 'critical damage' : 'damage'}`;
         break;
 
@@ -764,25 +802,8 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
      */
     const struck =
       input.action === 'attack' && target && target.ac !== null && target.ac !== undefined
-        ? attackVerdict(result.total, result.rolls[0], target.ac, target.name)
+        ? attackVerdict(result.total, result.rolls[0], target.ac)
         : null;
-    const verdict = struck?.text ?? '';
-
-    await persistAndDeliver(
-      io,
-      campaignId,
-      {
-        userId: user.id,
-        actorId: actor.id,
-        kind: 'roll',
-        body: label + verdict,
-        rollData: { ...result, label: result.label + verdict },
-        // Swinging something is combat; rolling a save off a card is not
-        // necessarily, so it stays in the conversation.
-        combat: input.action !== 'save',
-      },
-      { authorName: user.displayName, actorName: actor.name },
-    );
 
     /**
      * The damage, rolled by the same press that landed the blow.
@@ -792,30 +813,92 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
      * doubles the dice here rather than needing its own button - the one case
      * where the attack roll changes what the damage roll is.
      *
-     * A second message rather than a longer first one, so the damage keeps its
-     * own Apply button: `RollCard` offers that on a label containing "damage",
-     * and whose hit points move stays the separate decision it already was.
+     * It rides inside the attack rather than posting a message of its own. The
+     * second message kept its Apply button and lost everything else: it named
+     * the weapon and the target again because nothing tied it to the swing
+     * above, and on a busy round it could arrive under two other rolls. The
+     * button moves into the card with it - offered, never applied, because
+     * whose hit points move is still a separate decision.
      */
+    let damage: WireAttackDamage | null = null;
     if (struck?.hit && target && s.damageDice) {
-      const damage = rollExpression(
-        damageExpression(s, scores, { critical: struck.critical }),
+      const twoHanded = Boolean(item.type === 'weapon' && input.versatile && s.versatileDice);
+      const roll = rollExpression(
+        damageFor(item, scores, { critical: struck.critical, versatile: twoHanded }),
         `${item.name} damage${struck.critical ? ' (critical)' : ''} to ${target.name}`,
       );
 
-      await persistAndDeliver(
-        io,
-        campaignId,
-        {
-          userId: user.id,
-          actorId: actor.id,
-          kind: 'roll',
-          body: damage.label,
-          rollData: damage,
-          combat: true,
-        },
-        { authorName: user.displayName, actorName: actor.name },
-      );
+      damage = {
+        roll,
+        type: String(s.damageType ?? ''),
+        parts: damageBonusParts(s, scores, {
+          published: actor.type === 'npc' && Boolean(actor.srdMonsterId),
+          ability: item.type !== 'spell',
+        }),
+        critical: struck.critical,
+        twoHanded,
+        tokenId: target.id,
+      };
     }
+
+    /**
+     * The swing as one thing, rather than a sentence with the answer on the end.
+     *
+     * The body is still written out underneath, for the reason a group roll
+     * writes its rows as text as well: a message stored before this column
+     * existed still reads, and so does a client that has not been rebuilt.
+     */
+    const attackData: WireAttack | null =
+      input.action === 'attack'
+        ? {
+            attacker: actor.name,
+            target: target?.name ?? null,
+            weapon: item.name,
+            outcome: struck?.outcome ?? 'unresolved',
+            reason: struck?.reason ?? (target ? 'no AC recorded' : 'no target'),
+            mode,
+            reasons,
+            roll: result,
+            toHitParts: attackBonusParts(
+              item.type === 'spell'
+                ? { ability: actor.spellcastingAbility as AbilityKey | undefined, proficient: true }
+                : s,
+              scores,
+              actor.level,
+              { published: actor.type === 'npc' && Boolean(actor.srdMonsterId) },
+            ),
+            damage,
+          }
+        : null;
+
+    const body = attackData
+      ? [
+          label,
+          `${OUTCOME_WORD[attackData.outcome]} — ${attackData.reason} (${result.output})`,
+          damage
+            ? `${damage.roll.expression}${damage.type ? ` ${damage.type}` : ''} damage: ${damage.roll.output}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : label;
+
+    await persistAndDeliver(
+      io,
+      campaignId,
+      {
+        userId: user.id,
+        actorId: actor.id,
+        kind: 'roll',
+        body,
+        rollData: result,
+        attackData,
+        // Swinging something is combat; rolling a save off a card is not
+        // necessarily, so it stays in the conversation.
+        combat: input.action !== 'save',
+      },
+      { authorName: user.displayName, actorName: actor.name },
+    );
 
     if (saveAgainst) {
       await resolveSave(io, campaignId, user.id, item, actor, saveAgainst, result.total);
@@ -891,6 +974,7 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         rollData: message.rollData ?? null,
         cardData: (message.cardData ?? null) as WireCard | null,
         groupData: (message.groupData ?? null) as WireGroupRoll | null,
+        attackData: (message.attackData ?? null) as WireAttack | null,
         whisperToUserId: message.whisperToUserId,
         combat: message.combat,
         createdAt: message.createdAt,

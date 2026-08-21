@@ -162,6 +162,13 @@
       "when": 1787320753539,
       "tag": "0022_subclass_features",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1787333582991,
+      "tag": "0023_attack_data",
+      "breakpoints": true
     }
   ]
 }

@@ -1011,7 +1011,7 @@ export function publishedMonsterBonus(
 }
 
 /**
- * Whether an attack roll landed, and how to say so.
+ * Whether an attack roll landed, and why.
  *
  * Separated from the handler that rolls it so the two cases dice will not
  * reliably produce - a natural 1 and an ordinary miss - can be tested at all.
@@ -1019,24 +1019,40 @@ export function publishedMonsterBonus(
  * A natural 20 always hits and a natural 1 always misses, whatever the totals
  * say: the one place in 5e where the number on the die beats the arithmetic.
  * Meeting the AC exactly is a hit, which is the off-by-one worth pinning down.
+ *
+ * An outcome and its reason rather than a finished sentence. The sentence used
+ * to be glued onto the roll's label and read out of it again by the log, which
+ * put "did it hit" at the end of a line the card then truncated - and made the
+ * wording load-bearing, so rephrasing it would have broken the one thing that
+ * could tell a hit from a miss. Blocked is not among them: the table calls a
+ * blow that failed to land a miss whether the armour turned it or the swing
+ * went wide, and `reason` is what separates those on screen.
  */
 export function attackVerdict(
   total: number,
   natural: number | undefined,
   armorClass: number,
-  targetName: string,
-): { hit: boolean; critical: boolean; text: string } {
+): { hit: boolean; critical: boolean; outcome: 'critical' | 'hit' | 'miss'; reason: string } {
   if (natural === 20) {
-    return { hit: true, critical: true, text: ` — CRITICAL HIT on ${targetName}` };
+    return { hit: true, critical: true, outcome: 'critical', reason: 'natural 20' };
   }
   if (natural === 1) {
-    return { hit: false, critical: false, text: ` — MISS (natural 1) against ${targetName}` };
+    return { hit: false, critical: false, outcome: 'miss', reason: 'natural 1' };
   }
 
   const hit = total >= armorClass;
   return {
     hit,
     critical: false,
-    text: ` — ${hit ? 'HIT' : 'MISS'} against ${targetName} (AC ${armorClass})`,
+    outcome: hit ? 'hit' : 'miss',
+    reason: `AC ${armorClass}`,
   };
 }
+
+/** How a verdict is written into the log's plain text. */
+export const OUTCOME_WORD: Record<'critical' | 'hit' | 'miss' | 'unresolved', string> = {
+  critical: 'CRITICAL HIT',
+  hit: 'HIT',
+  miss: 'MISS',
+  unresolved: 'ROLLED',
+};
