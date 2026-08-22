@@ -316,9 +316,14 @@ payload of just an id. `wall:update` had this, then `effect:update` and
 accident. If every spread in a `set` is conditional, return early when nothing
 was sent.
 
-**No dead code.** Two audits found helpers that were written, tested, and never
-called — `movementBlocked` let players walk through walls, `deriveActor` made
-conditions decorative. Before adding a feature, check that the last one is
+**No dead code.** Three audits found helpers that were written, tested, and
+never called — `movementBlocked` let players walk through walls, `deriveActor`
+made conditions decorative, and `guards.ts` carried a whole second ownership
+layer (`getOwnershipLevel`, `setOwnershipLevel`, `canRead`, `canWrite`,
+`canSeeExistence`) that nothing had ever called, sitting beside the
+`getActorAccess` the app actually uses. An unused *permission* helper is the
+worst kind: it reads as the answer, and `canWrite(level)` was one plausible call
+away from becoming a second opinion about who may edit a sheet. Before adding a feature, check that the last one is
 actually reachable: `grep` the export and see whether anything outside its own
 module and tests uses it.
 
