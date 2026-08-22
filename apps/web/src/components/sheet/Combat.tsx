@@ -17,11 +17,22 @@ const NUMBER_BOX =
 export function CombatStats({
   actor,
   editable,
+  hpEditable = editable,
   onChange,
   rest,
 }: {
   actor: Actor;
   editable: boolean;
+  /**
+   * Hit points on their own gate.
+   *
+   * A creature stamped from the bestiary has the compendium's armour class and
+   * speed and always will, but its hit points are the one published figure the
+   * handbook expects a DM to vary - the stat block prints hit dice next to the
+   * average precisely so you can roll your own. Defaults to `editable`, so
+   * every other sheet behaves as before.
+   */
+  hpEditable?: boolean;
   onChange: (fields: Partial<Actor>) => void;
   /** The rest controls, rendered inside the hit point card. */
   rest?: React.ReactNode;
@@ -76,7 +87,7 @@ export function CombatStats({
         <div className="flex items-center gap-2">
           <input
             type="number"
-            disabled={!editable}
+            disabled={!hpEditable}
             value={actor.hpCurrent}
             onChange={(e) => onChange({ hpCurrent: Number(e.target.value) || 0 })}
             className="w-20 rounded border border-ink-600 bg-ink-900 px-2 py-1 text-center font-display text-2xl text-ink-100 focus:border-arcane-400 focus:outline-none disabled:opacity-70"
@@ -84,7 +95,7 @@ export function CombatStats({
           <span className="text-xl text-ink-500">/</span>
           <input
             type="number"
-            disabled={!editable}
+            disabled={!hpEditable}
             value={actor.hpMax}
             onChange={(e) => onChange({ hpMax: Number(e.target.value) || 0 })}
             className="w-20 rounded border border-ink-600 bg-ink-900 px-2 py-1 text-center font-display text-2xl text-ink-100 focus:border-arcane-400 focus:outline-none disabled:opacity-70"
@@ -93,7 +104,7 @@ export function CombatStats({
             <div className="text-[10px] tracking-wider text-ink-400 uppercase">Temp</div>
             <input
               type="number"
-              disabled={!editable}
+              disabled={!hpEditable}
               value={actor.hpTemp}
               onChange={(e) => onChange({ hpTemp: Number(e.target.value) || 0 })}
               className="w-16 rounded border border-ink-600 bg-ink-900 px-2 py-0.5 text-center text-ink-200 focus:border-arcane-400 focus:outline-none disabled:opacity-70"

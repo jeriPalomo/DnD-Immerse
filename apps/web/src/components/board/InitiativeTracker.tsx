@@ -27,37 +27,18 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
   if (!encounter) {
     if (!isDM) return null;
 
-    // Everything on the board, in one press. Adding combatants one at a time
-    // still exists below for a straggler arriving mid-fight, but it was the
-    // *only* way in - and it lived behind "Start encounter", so the ordinary
-    // move of starting a fight was two steps with the second one buried in a
-    // wrap of one button per creature.
-    const everyone = tokens.filter((t) => t.layer !== 'gm').map((t) => t.id);
-
+    // One button, because there is one thing to do here. "Roll monsters, ask
+    // the players" used to sit beside it and start the fight *as well as*
+    // filling it, so the panel offered two ways to begin and no way to tell
+    // which one you had pressed. It lives in the turn order now, with the rest
+    // of the controls for putting creatures into a fight that already exists.
     return (
       <div className="space-y-3 p-2">
         <div>
           <h2 className="mb-2 font-display text-sm text-ink-100">Combat</h2>
-          <div className="flex flex-wrap gap-1.5">
-            <Button size="sm" variant="secondary" onClick={() => startEncounter()}>
-              Start encounter
-            </Button>
-            {everyone.length > 0 && (
-              <Button
-                size="sm"
-                title="Rolls your creatures now and asks each player for their own"
-                onClick={() => {
-                  startEncounter();
-                  // Queued behind the encounter it belongs to: the handler
-                  // refuses entries with no active encounter, and the socket
-                  // delivers in order, so this only needs to be sent second.
-                  addToInitiative(everyone, true);
-                }}
-              >
-                Roll monsters, ask the players
-              </Button>
-            )}
-          </div>
+          <Button size="sm" variant="secondary" onClick={() => startEncounter()}>
+            Start encounter
+          </Button>
         </div>
       </div>
     );
@@ -365,6 +346,19 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
                     className="rounded border border-arcane-500/50 px-1.5 py-0.5 text-[10px] text-arcane-400"
                   >
                     + roll all
+                  </button>
+                )}
+                {/* The DM's creatures roll now because they have nobody to ask;
+                    each character's entry waits with a Roll button on it. Here
+                    rather than beside "Start encounter", where it was a second
+                    way to begin a fight. */}
+                {onBoard.length > 0 && (
+                  <button
+                    onClick={() => addToInitiative(onBoard.map((t) => t.id), true)}
+                    title="Rolls your creatures now and asks each player for their own"
+                    className="rounded border border-ember-500/50 px-1.5 py-0.5 text-[10px] text-ember-300"
+                  >
+                    + roll monsters, ask the players
                   </button>
                 )}
               </div>

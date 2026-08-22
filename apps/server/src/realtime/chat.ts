@@ -64,6 +64,10 @@ import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
 import { applyCondition, conditionsOf, currentRound, effectsByToken } from '../lib/effects.js';
 import { itemNumbers, rollsToHit, scoresOf } from '../lib/itemNumbers.js';
+// `isFairGame` was written out twice, here and in combat.ts, word for word -
+// the rule about whose hit points a player may move. One copy now, because two
+// readings of that question is one reading plus a hole.
+import { applyDamageTo, isFairGame } from './combat.js';
 import { tokenIn } from './scene.js';
 import type { IOServer, SocketData } from './index.js';
 import type { Actor, Item, Token } from '../db/schema.js';
@@ -828,6 +832,12 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         `${item.name} damage${struck.critical ? ' (critical)' : ''} to ${target.name}`,
       );
 
+      // Decided before the card is built rather than after it is sent: the card
+      // has to say whether the hit points have gone, and a button offered on a
+      // blow that already landed is a way to apply it twice.
+      const swinger = await getMembership(campaignId, user.id);
+      const applied = Boolean(swinger?.isDM) || (await isFairGame(target));
+
       damage = {
         roll,
         type: String(s.damageType ?? ''),
@@ -838,6 +848,7 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         critical: struck.critical,
         twoHanded,
         tokenId: target.id,
+        applied,
       };
     }
 
@@ -899,6 +910,29 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
       },
       { authorName: user.displayName, actorName: actor.name },
     );
+
+    /**
+     * A blow that landed takes the hit points, without being asked twice.
+     *
+     * Damage used to be offered rather than applied, because it gets rolled
+     * for things that turn out not to count. That reason is gone here and only
+     * here: this damage exists *because* an attack roll beat an armour class,
+     * so there is nothing left to decide and the Apply button was a second
+     * press confirming what the dice already said. Every other damage roll - a
+     * fireball waiting on saves, a potion, the DM's own box - is still offered.
+     *
+     * Through `applyDamageTo`, the same path the button uses, so resistances,
+     * the concentration save and the redaction all still happen. The rule about
+     * whose hit points may move is unchanged: a player may subtract from a
+     * monster and never from somebody's character, and the DM may touch
+     * anything.
+     */
+    if (damage?.applied && target) {
+      await applyDamageTo(io, campaignId, user.id, [target], {
+        amount: damage.roll.total,
+        damageType: damage.type,
+      });
+    }
 
     if (saveAgainst) {
       await resolveSave(io, campaignId, user.id, item, actor, saveAgainst, result.total);
@@ -1097,26 +1131,6 @@ async function actorOfToken(token: Token): Promise<Actor | null> {
   if (!token.actorId) return null;
   const rows = await db.select().from(actors).where(eq(actors.id, token.actorId)).limit(1);
   return rows[0] ?? null;
-}
-
-/**
- * Whether a player may condition this token.
- *
- * The same rule damage follows: monsters yes, anybody's character no. An owned
- * token is somebody's character by construction, and a token linked to a
- * `character` actor is one even when the DM placed it unowned - so both are
- * checked rather than trusting the ownership column alone.
- */
-async function isFairGame(token: Token): Promise<boolean> {
-  if (token.ownerUserId) return false;
-  if (!token.actorId) return true;
-
-  const rows = await db
-    .select({ type: actors.type })
-    .from(actors)
-    .where(eq(actors.id, token.actorId))
-    .limit(1);
-  return rows[0]?.type !== 'character';
 }
 
 /** A line from the table, flagged for the battle log - a save landing is combat. */

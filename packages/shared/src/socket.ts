@@ -256,8 +256,19 @@ export interface WireAttackDamage {
   critical: boolean;
   /** Rolled with the weapon's second grip. */
   twoHanded: boolean;
-  /** Who to apply it to, so the card can offer it without hunting the board. */
+  /** Who it was dealt to, so the card can name them without hunting the board. */
   tokenId: string | null;
+  /**
+   * Whether the hit points have already come off.
+   *
+   * An attack that landed applies its own damage - the roll exists *because*
+   * the dice beat an armour class, so the Apply button was a second press
+   * confirming what had already been decided. It stays false where the server
+   * declined to move them: a player swinging at another player's character,
+   * which is the DM's call and always was. The card offers the button then, and
+   * only then, so nothing can be applied twice.
+   */
+  applied: boolean;
 }
 
 export interface WireChatMessage {

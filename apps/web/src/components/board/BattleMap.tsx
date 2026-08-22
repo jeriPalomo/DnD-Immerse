@@ -20,11 +20,12 @@ import KonvaGlobal from 'konva';
 import type Konva from 'konva';
 import type { TerrainBrush, WireScene, WireToken } from '@dnd/shared';
 import type { Actor, Item } from '../../store/sheet.js';
-import { evaluateOptions, groupOptions } from './TargetPanel.js';
+import { evaluateOptions, groupOptions, reachBands } from './TargetPanel.js';
 import { DoorLayer, FogLayer, NoteLayer, WallLayer } from './FogLayer.js';
 import { DrawingLayer } from './DrawingLayer.js';
 import { TerrainLayer } from './TerrainLayer.js';
 import { MovementLayer } from './MovementLayer.js';
+import { ReachLayer } from './ReachLayer.js';
 import { TemplateLayer } from './TemplateLayer.js';
 import { LightLayer, WeatherLayer } from './AtmosphereLayer.js';
 import { FLOATER_LIFE_MS, useTable } from '../../store/table.js';
@@ -240,6 +241,13 @@ export function BattleMap({
   const [pingStroke, setPingStroke] = useState<number[] | null>(null);
   // Remembered across reloads: it is a hint, not a setting worth re-making.
   const [hints, setHints] = useState(() => getPref('board-hints', true));
+  /**
+   * Whether to draw your own reach.
+   *
+   * On by default: "I moved here, what can I hit" is the question the board was
+   * silent about, and a feature nobody switches on is a feature nobody has.
+   */
+  const [showReach, setShowReach] = useState(() => getPref('board-reach', true));
   // Read by the drag guard below, which fires before React has re-rendered with
   // the state above, so the state would still be null there.
   const pinging = useRef(false);
@@ -474,6 +482,15 @@ export function BattleMap({
    * Null unless there is somebody to act, something to act with, and a creature
    * that is not the actor: an empty menu pinned to a goblin is worse than none.
    */
+  /**
+   * The bands the overlay draws, from the acting creature's own sheet.
+   *
+   * `reachBands` reads the same `reachOf` that decides whether an option is
+   * legal against a creature, so what is drawn and what is allowed are one
+   * answer.
+   */
+  const reach = reachBands(actingItems, actingActor);
+
   const targetPopup = (() => {
     if (!targeted || !actingToken || !actingActor || actingItems.length === 0) return null;
     if (targeted.id === actingToken.id) return null;
@@ -825,6 +842,19 @@ export function BattleMap({
             moveDisposition={selected?.disposition ?? 'friendly'}
             threatSquares={showThreat ? threatRange : []}
           />
+          {/* What the creature you are playing can hit from where it stands.
+              Drawn for your own creature only, and from items this client
+              already holds - it is your own sheet, so nothing is revealed that
+              you did not already have. */}
+          {showReach && actingToken && reach.normal > 0 && (
+            <ReachLayer
+              grid={grid}
+              token={actingToken}
+              feetPerSquare={scene.feetPerSquare}
+              normalFeet={reach.normal}
+              longFeet={reach.long}
+            />
+          )}
         </Layer>
 
         <Layer>
@@ -849,13 +879,24 @@ export function BattleMap({
 
                   select(token.id);
 
-                  // Clicking a creature you do not run also aims at it, which is
-                  // what opens the menu below. Shift-to-target still works and
-                  // is still the only way to aim at your own party; clicking
-                  // your own token selects it and nothing more, since you are
-                  // far more often moving it than attacking it.
-                  const mine = token.ownerUserId === user?.id;
-                  if (!mine && token.id !== actingToken?.id) target(token.id);
+                  // Clicking a creature you are not playing also aims at it,
+                  // which is what opens the menu below. Shift-to-target still
+                  // works and is still the only way to aim at your own party;
+                  // clicking your own token selects it and nothing more, since
+                  // you are far more often moving it than attacking it.
+                  if (token.id === actingToken?.id) return;
+
+                  if (isDM) {
+                    // Ownership is the wrong question for a DM - they run every
+                    // monster on the board, so "not mine" would rule out the
+                    // goblin they are trying to hit with another goblin. What
+                    // matters is whether they have said who they are playing:
+                    // until then a click is inspection, not an attack.
+                    if (actingToken) target(token.id);
+                    return;
+                  }
+
+                  if (token.ownerUserId !== user?.id) target(token.id);
                 }}
                 onMove={moveToken}
                 onCommit={commitToken}
@@ -1054,6 +1095,22 @@ export function BattleMap({
             {focused ? 'Exit focus' : 'Focus'}
           </button>
         )}
+        {/* Your own reach, remembered the way the other board toggles are: how
+            you left it is how you want it next session. */}
+        <button
+          onClick={() => {
+            setShowReach(!showReach);
+            setPref('board-reach', !showReach);
+          }}
+          title="Show how far the creature you are playing can hit"
+          className={`rounded border px-2 py-1 text-[10px] transition-colors ${
+            showReach
+              ? 'border-ember-500 bg-ember-500/20 text-ember-300'
+              : 'border-ink-700 bg-ink-950/85 text-ink-400 hover:border-ember-500 hover:text-ember-300'
+          }`}
+        >
+          Reach
+        </button>
         <button
           onClick={toggleThreat}
           title="Show how far every enemy you can see could move (R)"
@@ -1117,11 +1174,19 @@ export function BattleMap({
 
       {/* What a blow came to, over the creature it came to. HTML rather than
           Konva, like the tooltip and the target menu, so it stays sharp however
-          far the board is zoomed out. */}
+          far the board is zoomed out.
+
+          Anchored to the BOTTOM edge, which is where the hit point bar is
+          drawn, so the number rises off the bar rather than off the top of the
+          art. On a creature whose bar the viewer is allowed to see, the figure
+          and the bar it just moved are the same glance; on one whose hit points
+          are redacted there is no bar and the number is the only thing said -
+          which is the whole of what a player is meant to learn from a blow
+          landing. */}
       {floaters.map((floater) => {
         const token = tokens.find((t) => t.id === floater.tokenId);
         if (!token) return null;
-        const at = gridToPixel({ x: token.x + token.w / 2, y: token.y }, grid);
+        const at = gridToPixel({ x: token.x + token.w / 2, y: token.y + token.h }, grid);
         return (
           <Floater
             key={floater.id}

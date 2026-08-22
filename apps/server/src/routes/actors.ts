@@ -356,10 +356,18 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
  * Its name, portrait and notes are yours - "Grix the goblin" is a perfectly
  * reasonable thing to write on a stamped goblin. The numbers are the
  * compendium's.
+ *
+ * **Hit points are not among them.** They are the one published figure the
+ * handbook itself expects a DM to vary - every stat block gives hit dice
+ * beside the average, and "this one is the chieftain's bodyguard on 12" is
+ * ordinary play rather than a sheet disagreeing with the bestiary. The rest
+ * change what the creature *is*: retyping a goblin's Dexterity leaves the sheet
+ * claiming to be a goblin while every token stamped from the entry afterwards
+ * still carries the published number.
  */
 const STAT_BLOCK_FIELDS = [
   'str', 'dex', 'con', 'int', 'wis', 'cha',
-  'hpCurrent', 'hpMax', 'armorClass', 'speed',
+  'armorClass', 'speed',
 ] as const;
 
   app.patch('/api/actors/:id', async (request) => {

@@ -52,7 +52,9 @@ export function TokenHUD({
   const [showSight, setShowSight] = useState(false);
   /** Rounds the next condition is applied for. Blank means until removed. */
   const [rounds, setRounds] = useState('');
-  const { applyEffect, updateEffect, removeEffect, applyDamage } = useTable();
+  const { applyEffect, updateEffect, removeEffect, applyDamage, setActing, actingTokenId } =
+    useTable();
+  const acting = actingTokenId === token.id;
 
   /**
    * Damage and healing, through the same path the rest of the app uses.
@@ -167,6 +169,27 @@ export function TokenHUD({
         <div className="flex shrink-0 items-center gap-1.5">
           {token.ac !== null && (
             <span className="rounded bg-ink-800 px-2 py-0.5 text-xs text-ink-300">AC {token.ac}</span>
+          )}
+          {/* Which creature the DM is playing, held apart from the selection so
+              that clicking a target cannot take it over. During a fight the
+              turn order sets this on its own; this is for the rest of the time,
+              and for running a second monster out of turn. */}
+          {isDM && (
+            <button
+              onClick={() => setActing(acting ? null : token.id)}
+              title={
+                acting
+                  ? `Playing ${token.name || 'this creature'} — its attacks are the ones offered`
+                  : `Play as ${token.name || 'this creature'}, so its attacks are the ones offered`
+              }
+              className={`rounded border px-1.5 py-0.5 text-[10px] transition-colors ${
+                acting
+                  ? 'border-ember-400 bg-ember-500/20 text-ember-300'
+                  : 'border-ink-700 text-ink-500 hover:text-ink-200'
+              }`}
+            >
+              {acting ? 'Playing' : 'Play as'}
+            </button>
           )}
           {/* Offered on the server's answer, not the client's opinion: the
               route re-checks, so drawing this anyway earns a 403. */}

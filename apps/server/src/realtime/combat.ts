@@ -207,6 +207,30 @@ function scoresOfToken(actor: { str: number; dex: number; con: number; int: numb
 
 /* ------------------------------------------------------------ handlers */
 
+/**
+ * Whether a player may subtract hit points from this creature.
+ *
+ * Monsters, yes; anybody's character, no. Owned tokens are somebody's
+ * character by construction, and a token linked to a `character` actor is one
+ * even if the DM placed it unowned - so both are checked rather than trusting
+ * the ownership column alone.
+ *
+ * Exported because a landing attack applies its own damage now and has to ask
+ * the same question the manual button asks. Two readings of "may I hit this"
+ * is one reading plus a hole.
+ */
+export async function isFairGame(token: { ownerUserId: string | null; actorId: string | null }) {
+  if (token.ownerUserId) return false;
+  if (!token.actorId) return true;
+
+  const rows = await db
+    .select({ type: actors.type })
+    .from(actors)
+    .where(eq(actors.id, token.actorId))
+    .limit(1);
+  return rows[0]?.type !== 'character';
+}
+
 export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void {
   const user = socket.data.user;
 
@@ -261,17 +285,6 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
    * even if the DM placed it unowned - so both are checked rather than trusting
    * the ownership column alone.
    */
-  async function isFairGame(token: { ownerUserId: string | null; actorId: string | null }) {
-    if (token.ownerUserId) return false;
-    if (!token.actorId) return true;
-
-    const rows = await db
-      .select({ type: actors.type })
-      .from(actors)
-      .where(eq(actors.id, token.actorId))
-      .limit(1);
-    return rows[0]?.type !== 'character';
-  }
 
   socket.on('encounter:start', async ({ sceneId }) => {
     const ctx = await requireDM();
@@ -747,114 +760,12 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       }
     }
 
-    const results: {
-      tokenId: string;
-      name: string;
-      amount: number;
-      healing: boolean;
-      before: number;
-      after: number;
-      reason: string;
-    }[] = [];
-    const lines: string[] = [];
-
-    for (const token of targets) {
-      if (token.hp === null || token.maxHp === null) continue;
-
-      const amount = input.halved ? Math.floor(input.amount / 2) : input.amount;
-
-      let after: number;
-      let reason = 'normal';
-
-      if (input.healing) {
-        after = applyHealing({ hp: token.hp, maxHp: token.maxHp }, amount).hpAfter;
-        reason = 'healing';
-      } else {
-        const modifiers = await damageModifiersFor(token);
-        const outcome = applyDamage({ hp: token.hp, maxHp: token.maxHp }, amount, input.damageType, modifiers);
-        after = outcome.hpAfter;
-        reason = outcome.reason;
-      }
-
-      await db.update(tokens).set({ hp: after }).where(eq(tokens.id, token.id));
-
-      // A linked token writes through to its sheet, as everywhere else.
-      if (token.actorLinked && token.actorId) {
-        await db.update(actors).set({ hpCurrent: after, updatedAt: Date.now() }).where(eq(actors.id, token.actorId));
-      }
-
-      results.push({
-        tokenId: token.id,
-        name: token.name,
-        // What the creature actually took, after resistances - the number the
-        // board floats, and the only part a player may be told.
-        amount: Math.abs(token.hp - after),
-        healing: Boolean(input.healing),
-        before: token.hp,
-        after,
-        reason,
-      });
-
-      const verb = input.healing ? 'heals' : 'takes';
-      const suffix = reason === 'normal' || reason === 'healing' ? '' : ` (${reason})`;
-      lines.push(`${token.name} ${verb} ${Math.abs(token.hp - after)}${suffix} — ${after}/${token.maxHp}`);
-
-      // Concentration is checked only on real damage that got through.
-      if (!input.healing && token.hp !== after && (await hasCondition(token.id, 'concentrating'))) {
-        const dc = concentrationDC(token.hp - after);
-        let expression = '1d20';
-
-        if (token.actorId) {
-          const found = await db.select().from(actors).where(eq(actors.id, token.actorId)).limit(1);
-          if (found[0]) {
-            expression = concentrationSave(
-              scoresOfToken(found[0]),
-              found[0].level,
-              Boolean(found[0].saveProficiencies?.con),
-            ).expression;
-          }
-        }
-
-        const save = rollExpression(expression, `${token.name} concentration`);
-        const held = save.total >= dc;
-        lines.push(`  concentration DC ${dc}: rolled ${save.total} — ${held ? 'held' : 'BROKEN'}`);
-
-        if (!held) await removeCondition(token.id, 'concentrating');
-      }
-    }
-
-    // Every scene touched, not just the first target's. Nothing visibly breaks
-    // without this today - the cache is read for positions, speed and sight,
-    // and damage moves none of those - but a hit can span two scenes, and the
-    // day damage does something that touches speed this is already a trap.
-    for (const sceneId of new Set(targets.map((token) => token.sceneId))) {
-      invalidateDragCache(sceneId);
-    }
-
-    /**
-     * The amount to the table, the pool to the DM.
-     *
-     * This used to send `before` and `after` to the whole room, and the
-     * initiative tracker rendered them - so a player watching a fight read
-     * "Goblin 2 12 to 5" off their own screen, which is the exact number every
-     * other payload in this app redacts. Watching a blow land tells you what it
-     * took; it does not tell you how much the creature had left.
-     */
-    // `.except` matters: the DM is in both rooms, so emitting to each in turn
-    // would hand them the redacted copy as well and leave which one arrived
-    // last to chance.
-    io
-      .to(campaignRoom(ctx.campaignId))
-      .except(campaignDmRoom(ctx.campaignId))
-      .emit('damage:applied', {
-        results: results.map(({ before: _before, after: _after, ...rest }) => rest),
-      });
-    io.to(campaignDmRoom(ctx.campaignId)).emit('damage:applied', { results });
-    await postSystemMessage(io, ctx.campaignId, user.id, lines.join('\n'));
-
-    const { broadcastSceneState } = await import('./scene.js');
-    await broadcastSceneState(io, ctx.campaignId);
-    await broadcastEncounter(io, ctx.campaignId);
+    await applyDamageTo(io, ctx.campaignId, user.id, targets, {
+      amount: input.amount,
+      damageType: input.damageType,
+      healing: input.healing,
+      halved: input.halved,
+    });
   });
 
   /* ------------------------------------------------------------ effects */
@@ -1001,6 +912,146 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
  * room membership does not say which campaign it came from. Joined through the
  * token to its scene so an id borrowed from another game is simply not found.
  */
+/**
+ * Subtracts hit points, and tells the table what happened.
+ *
+ * Lifted out of the `damage:apply` handler so the damage a landing attack
+ * rolls can go through the *same* path rather than a second copy of it: the
+ * resistances off the sheet, the concentration save a hurt caster owes, the
+ * battle-log line and the redaction all live here, and two of these would
+ * drift the way the token HUD and the tracker once did.
+ *
+ * Who is allowed to apply it is decided by the caller - this only does it.
+ */
+export async function applyDamageTo(
+  io: IOServer,
+  campaignId: string,
+  userId: string,
+  targets: Token[],
+  options: { amount: number; damageType: string; healing?: boolean; halved?: boolean },
+): Promise<void> {
+  const results: {
+    tokenId: string;
+    name: string;
+    amount: number;
+    healing: boolean;
+    before: number;
+    after: number;
+    reason: string;
+  }[] = [];
+  const lines: string[] = [];
+
+  for (const token of targets) {
+    if (token.hp === null || token.maxHp === null) continue;
+
+    const amount = options.halved ? Math.floor(options.amount / 2) : options.amount;
+
+    let after: number;
+    let reason = 'normal';
+
+    if (options.healing) {
+      after = applyHealing({ hp: token.hp, maxHp: token.maxHp }, amount).hpAfter;
+      reason = 'healing';
+    } else {
+      const modifiers = await damageModifiersFor(token);
+      const outcome = applyDamage({ hp: token.hp, maxHp: token.maxHp }, amount, options.damageType, modifiers);
+      after = outcome.hpAfter;
+      reason = outcome.reason;
+    }
+
+    await db.update(tokens).set({ hp: after }).where(eq(tokens.id, token.id));
+
+    // A linked token writes through to its sheet, as everywhere else.
+    if (token.actorLinked && token.actorId) {
+      await db.update(actors).set({ hpCurrent: after, updatedAt: Date.now() }).where(eq(actors.id, token.actorId));
+    }
+
+    results.push({
+      tokenId: token.id,
+      name: token.name,
+      // What the creature actually took, after resistances - the number the
+      // board floats, and the only part a player may be told.
+      amount: Math.abs(token.hp - after),
+      healing: Boolean(options.healing),
+      before: token.hp,
+      after,
+      reason,
+    });
+
+    /**
+     * What landed, and not what is left.
+     *
+     * This line carried `— 2/7` to the whole table, which is the exact number
+     * the payload three lines above goes to some trouble to redact: the
+     * socket stripped `before` and `after` for players and then the chat
+     * message printed the survivor of the two anyway. Watching a blow land
+     * tells you what it took; how close a creature is to dying stays the
+     * DM's to narrate, and they have the tracker for it.
+     */
+    const verb = options.healing ? 'heals' : 'takes';
+    const noun = options.healing ? '' : ' damage';
+    const suffix = reason === 'normal' || reason === 'healing' ? '' : ` (${reason})`;
+    lines.push(`${token.name} ${verb} ${Math.abs(token.hp - after)}${noun}${suffix}`);
+
+    // Concentration is checked only on real damage that got through.
+    if (!options.healing && token.hp !== after && (await hasCondition(token.id, 'concentrating'))) {
+      const dc = concentrationDC(token.hp - after);
+      let expression = '1d20';
+
+      if (token.actorId) {
+        const found = await db.select().from(actors).where(eq(actors.id, token.actorId)).limit(1);
+        if (found[0]) {
+          expression = concentrationSave(
+            scoresOfToken(found[0]),
+            found[0].level,
+            Boolean(found[0].saveProficiencies?.con),
+          ).expression;
+        }
+      }
+
+      const save = rollExpression(expression, `${token.name} concentration`);
+      const held = save.total >= dc;
+      lines.push(`  concentration DC ${dc}: rolled ${save.total} — ${held ? 'held' : 'BROKEN'}`);
+
+      if (!held) await removeCondition(token.id, 'concentrating');
+    }
+  }
+
+  // Every scene touched, not just the first target's. Nothing visibly breaks
+  // without this today - the cache is read for positions, speed and sight,
+  // and damage moves none of those - but a hit can span two scenes, and the
+  // day damage does something that touches speed this is already a trap.
+  for (const sceneId of new Set(targets.map((token) => token.sceneId))) {
+    invalidateDragCache(sceneId);
+  }
+
+  /**
+   * The amount to the table, the pool to the DM.
+   *
+   * This used to send `before` and `after` to the whole room, and the
+   * initiative tracker rendered them - so a player watching a fight read
+   * "Goblin 2 12 to 5" off their own screen, which is the exact number every
+   * other payload in this app redacts. Watching a blow land tells you what it
+   * took; it does not tell you how much the creature had left.
+   */
+  // `.except` matters: the DM is in both rooms, so emitting to each in turn
+  // would hand them the redacted copy as well and leave which one arrived
+  // last to chance.
+  io
+    .to(campaignRoom(campaignId))
+    .except(campaignDmRoom(campaignId))
+    .emit('damage:applied', {
+      results: results.map(({ before: _before, after: _after, ...rest }) => rest),
+    });
+  io.to(campaignDmRoom(campaignId)).emit('damage:applied', { results });
+  await postSystemMessage(io, campaignId, userId, lines.join('\n'));
+
+
+  const { broadcastSceneState } = await import('./scene.js');
+  await broadcastSceneState(io, campaignId);
+  await broadcastEncounter(io, campaignId);
+}
+
 async function effectIn(
   effectId: string,
   campaignId: string,

@@ -359,12 +359,15 @@ failures to act on. A character with nothing on the active scene carries a null
 `tokenId` and is **named as skipped** rather than silently dropped.
 
 **Initiative follows the same split: monsters roll, characters are asked.**
-"Roll monsters, ask the players" starts the fight and puts everyone in it in one
-press - the DM's creatures roll immediately because they have nobody to ask, so
+"Roll monsters, ask the players" puts everyone into a fight in one press - the DM's creatures roll immediately because they have nobody to ask, so
 a fight is never held up by a goblin, and each character's entry waits with a
 `Roll +N` button on it. The button is in the turn order rather than in a banner,
 because that is where somebody is already looking when a fight starts. The DM
-may roll any waiting entry, for whoever is not at the table. `pending` is a flag
+may roll any waiting entry, for whoever is not at the table. **It lives in the
+turn order, not beside "Start encounter"**: sitting there it both began the
+fight and filled it, so the panel offered two ways to start one and no way to
+tell which you had pressed. Starting a fight is one button; putting creatures
+into it is the row of controls inside it. `pending` is a flag
 rather than a null initiative, and `sortInitiative` puts pending entries last
 **explicitly**: the column stores 0 while waiting, and a Dexterity of 1 rolling
 a 1 scores -4, so ordering on the stored number alone puts somebody who has not
@@ -752,11 +755,25 @@ Players get `amount`; the DM gets the pool, on the DM room, with `.except` so
 they are not handed both. Two tests asserted the leak rather than the rule
 (`after < before` on a *player's* payload) and now assert the redaction.
 
+**And the line in the log said it anyway.** `damage:apply` stripped `before`
+and `after` from the socket payload and then posted `Goblin 3 takes 5 — 2/7` to
+the whole campaign room as a system message, which is the survivor of the two
+numbers the redaction exists to hide. It reads `Goblin 3 takes 5 damage` now.
+Redacting in one place is only redacting if every place agrees, and a chat line
+is a place.
+
 **A number floats when it is true, not when it is rolled.** Damage rises off a
 creature at the moment it is *applied*, because resistance means the roll and
 the result differ and the roll is the wrong one to show. A miss floats at once,
 having nothing to apply - and only the miss, since a hit is announced by the
 damage that follows it and two numbers over one token is noise.
+
+**It rises off the hit point bar, not off the top of the art.** The bar is drawn
+at the token's bottom edge, so the floater anchors there: on a creature whose
+bar the viewer may see, the number and the bar it just moved are one glance. On
+one whose hit points are redacted there is no bar, and the number is the whole
+of what a player is meant to learn from a blow landing - which is the hint, and
+is as much of a hint as they get.
 
 **A player may damage monsters, never characters.** `damage:apply` is open to
 members, but `isFairGame` refuses any token that is owned or linked to a
@@ -788,9 +805,21 @@ one potion's dice onto the other. `auditPotionHealing` runs inside
 `srd:import`, and its smell test earned its keep immediately by catching that
 the 2024 dataset letter-spaces its prose ("H i t   P o i n t").
 
-**A heal rolls and posts; it never applies.** Exactly as damage already
-behaves, so "healing stays the DM's" needs no exception - whose hit points move
-is still a separate click.
+**A heal rolls and posts; it never applies.** So "healing stays the DM's" needs
+no exception - whose hit points move is still a separate click. This was once
+true of damage too, and is deliberately no longer: see below.
+
+**A blow that landed takes the hit points, without being asked twice.** The one
+exception to "rolled, never applied", and it holds only where an attack roll
+decided it: that damage exists *because* the dice beat an armour class, so the
+Apply button was a second press confirming what was already settled. Everything
+else is still offered - a fireball waiting on saves, a potion, the DM's own
+damage box - because those get rolled for things that turn out not to count. It
+goes through `applyDamageTo`, the same path the button uses, so resistances, the
+concentration check and the redaction all still happen; and `isFairGame` still
+decides whose hit points may move, so a player's swing at another player's
+character rolls, does not apply, and offers the button instead.
+`WireAttackDamage.applied` says which happened, so nothing can be applied twice.
 
 **A hand-entered item fills the same `system` blob an imported one does.** The
 manual form's fields are the ones the attack table and target panel read, not a
@@ -1188,8 +1217,36 @@ measured from, and the `actorId` stamped on their chat messages. It also made
 the monster attacks stamped by `from-monster` unreachable: with a goblin
 selected the panel read "No weapons or spells on this sheet", because it was
 looking at the Ancient Red Dragon. `mine` now requires `type === 'character'`,
-and a DM's acting creature follows their selection — the only answer that can
-be right when they run every monster on the board.
+and a DM's acting creature is theirs to choose — the only answer that can be
+right when they run every monster on the board.
+
+**And selection is not that choice.** Following `selectedTokenId` looked right
+and was unusable: clicking a creature both selects *and* targets it, so the
+instant the DM clicked the thing they meant to hit, the goblin doing the hitting
+was replaced by the target and its scimitar left the panel. Attacking with a
+monster was possible only by knowing that shift-click targets without selecting,
+which nothing says. `actingTokenId` is held apart from the selection, set at
+each turn change to whichever creature the DM runs is up — during a fight the
+turn order already holds the answer — and by a "Play as" button on the token HUD
+the rest of the time. Ownership is the wrong question for the DM's click,
+too: they run every monster, so "not mine" would rule out the goblin they are
+swinging at. What matters is whether they have said who they are playing.
+
+**A creature's reach is drawn as a rectangle, because that is what the
+measurement makes it.** `tokenDistance` counts diagonals as one square, so the
+squares within N of a footprint are exactly that footprint grown by N on every
+side — a circle would be prettier and would disagree with `evaluateOptions` at
+the corners, which is the trap AoE outlines already avoid by sharing their
+geometry with the target list. `reachBands` reads the same `reachOf`, skips a
+spell with no slots left and a `self` spell, and drops a sight-range one whose
+outline would be the whole map. The inner band lands without penalty; the
+dashed outer one is the long-range band a bow still covers at disadvantage.
+Client-side, unlike the movement overlay, because it is computed from the
+viewer's *own* sheet and reveals nothing they were not already sent.
+
+**An overlay nobody can see is an overlay nobody has.** The first version drew
+at 1.5px and 55% opacity over a lit stone floor, and only a pixel diff of two
+screenshots could prove it was rendering at all. Measured, not guessed.
 
 **Repeated creatures are numbered, and never renamed afterwards.**
 `nextTokenName` leaves the first "Goblin" alone and calls the next ones
@@ -1209,10 +1266,15 @@ and the panel says "by hand" for them instead of pretending. Unit tests check
 the table against `CONDITIONS` in both directions, because a curated table
 checked against itself proves nothing.
 
-**A stamped monster's stat block is the compendium's, not the DM's.** An actor
-carrying `srdMonsterId` refuses edits to its six scores, hit points, armour class
-and speed — on the server, not merely hidden on the sheet, because a hidden input
-is a layout decision and this is a rule. Its name, portrait and notes stay
+**A stamped monster's stat block is the compendium's, not the DM's — except its
+hit points.** An actor carrying `srdMonsterId` refuses edits to its six scores,
+armour class and speed — on the server, not merely hidden on the sheet, because
+a hidden input is a layout decision and this is a rule. **Hit points are not
+locked**, and never should have been: every stat block prints hit dice beside
+the average precisely so a DM can roll their own, and "this one is the
+chieftain's bodyguard on 12" is ordinary play rather than a sheet contradicting
+the bestiary. The others change what the creature *is*. `CombatStats` takes
+`hpEditable` apart from `editable` for exactly this one field. Its name, portrait and notes stay
 editable: "Grix the goblin" is a reasonable thing to write on a stamped goblin.
 Retyping the numbers would leave the sheet disagreeing with the entry it claims
 to be, while every token stamped from that entry afterwards still carried the

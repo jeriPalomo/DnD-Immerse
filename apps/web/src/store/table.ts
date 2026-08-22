@@ -103,6 +103,21 @@ interface TableState {
    */
   journalVersion: number;
   selectedTokenId: string | null;
+  /**
+   * The creature the DM is playing, which selection must not steal.
+   *
+   * A player's acting creature is their character and never moves. The DM's
+   * followed `selectedTokenId`, and clicking a creature both selects AND
+   * targets it - so the moment the DM clicked the thing they meant to hit, the
+   * goblin they were swinging with was replaced by the target, and its scimitar
+   * vanished from the panel. There was no way to attack anything with a monster
+   * except by knowing that shift-click targets without selecting.
+   *
+   * Set when the DM picks a creature to run, and again at each turn change for
+   * whichever of their creatures is up. Null for a player, whose answer is
+   * their own character.
+   */
+  actingTokenId: string | null;
   /** The token a player has targeted, which drives the action panel. */
   targetTokenId: string | null;
   /** Ephemeral. A ping with `points` is a dragged stroke rather than a dot. */
@@ -158,6 +173,8 @@ interface TableState {
 
   startEncounter: () => void;
   endEncounter: () => void;
+  /** The creature the DM is playing. Ignored for a player. */
+  setActing: (tokenId: string | null) => void;
   addToInitiative: (tokenIds: string[], askPlayers?: boolean) => void;
   /** Answer an initiative entry that is waiting on you. */
   rollInitiative: (entryId: string) => void;
@@ -301,6 +318,7 @@ export const useTable = create<TableState>((set, get) => ({
   tokens: [],
   selectedTokenId: null,
   targetTokenId: null,
+  actingTokenId: null,
   pings: [],
   vision: null,
   doors: [],
@@ -473,6 +491,7 @@ export const useTable = create<TableState>((set, get) => ({
         tokens: get().tokens.filter((t) => t.id !== tokenId),
         selectedTokenId: get().selectedTokenId === tokenId ? null : get().selectedTokenId,
         targetTokenId: get().targetTokenId === tokenId ? null : get().targetTokenId,
+        actingTokenId: get().actingTokenId === tokenId ? null : get().actingTokenId,
       }),
     );
     // Drag frames from other clients: position only, no database round trip.
@@ -529,6 +548,10 @@ export const useTable = create<TableState>((set, get) => ({
 
   postCard(itemId, actorId, targetTokenId = null) {
     get().socket?.emit('chat:card', { itemId, actorId, targetTokenId });
+  },
+
+  setActing(tokenId) {
+    set({ actingTokenId: tokenId });
   },
 
   select(tokenId) {

@@ -1680,6 +1680,90 @@ growing.
 
 ---
 
+## The DM's side of the table — 2026-08-21
+
+Seven raised in one go after the attack card landed.
+
+### 1. "Roll monsters, ask the players" appeared before there was a fight — DONE
+
+It sat beside **Start encounter** and did both jobs, so the panel offered two
+ways to begin and no way to tell which one you had pressed. Starting a fight is
+one button now; the roll-and-ask control moved into the turn order beside
+"+ roll all", with the rest of the ways to put creatures into a fight that
+already exists.
+
+### 2. The DM could not attack with a monster — DONE
+
+**Root cause:** their acting creature followed `selectedTokenId`, and clicking a
+creature both selects *and* targets it. So the moment the DM clicked the thing
+they meant to hit, the goblin doing the hitting was replaced by the target and
+its scimitar left the panel. It was possible only by knowing shift-click targets
+without selecting — which nothing says.
+
+`actingTokenId` is held apart from the selection now. During a fight the turn
+order sets it: on their own creature's turn, that is who the DM is playing. Out
+of combat a **Play as** button on the token HUD sets it by hand. Their click also
+stopped asking about ownership, which is the wrong question for someone who runs
+every monster on the board — "not mine" ruled out the goblin they were trying to
+hit with another goblin.
+
+### 3. Nothing showed what you could reach from where you stood — DONE
+
+`ReachLayer` draws the acting creature's reach on the board: an inner band that
+lands without penalty and a dashed outer one for the long-range band a bow
+covers at disadvantage. A **rectangle**, not a circle, because `tokenDistance`
+counts diagonals as one square — the squares within N of a footprint are that
+footprint grown by N on every side, and a circle would disagree with
+`evaluateOptions` at the corners. `reachBands` reads the same `reachOf` the
+option list measures with. Toggleable and remembered, on by default.
+
+*Worth recording:* the first version was invisible. At 1.5px and 55% opacity
+over a lit stone floor only a pixel diff of two screenshots could prove it was
+rendering at all — 6152 differing subpixels and nothing the eye could find.
+
+### 4. The log printed hit points — DONE, and it was a leak
+
+`Goblin 3 takes 5 — 2/7`. The `damage:applied` payload strips `before` and
+`after` for players, and then the system message posted the survivor of the two
+to the whole campaign room. It reads `Goblin 3 takes 5 damage` now. Redacting in
+one place is only redacting if every place agrees, and a chat line is a place.
+
+### 5. Combat automatic and informational — DONE
+
+The "Results" heading is gone (a word explaining what a card about hitting
+things was about), the verdict is the display face in bold with its reason
+beside it, and the damage sits under it as one number with the dice small and
+to the right.
+
+**A landed blow now applies its own damage.** The one exception to "rolled,
+never applied": this damage exists *because* the dice beat an armour class, so
+the button was a second press confirming a settled thing. Everything else is
+still offered — a fireball waiting on saves, a potion, the DM's own box. It goes
+through `applyDamageTo`, the same path the button uses, so resistances, the
+concentration check and the redaction all still happen, and `isFairGame` still
+decides whose hit points may move.
+
+*Found on the way past:* `isFairGame` existed twice, word for word, in `chat.ts`
+and `combat.ts`. One copy now.
+
+### 6. Bestiary hit points were locked — DONE
+
+They should never have been. Every stat block prints hit dice beside the average
+precisely so a DM can roll their own, and "this one is the chieftain's bodyguard
+on 12" is ordinary play rather than a sheet contradicting the bestiary. Ability
+scores, armour class and speed stay locked: those change what the creature *is*.
+`CombatStats` takes `hpEditable` apart from `editable` for this one field.
+
+### 7. The damage number floats over the hit point bar — DONE
+
+The bar is drawn at the token's bottom edge, so the floater anchors there rather
+than above the art. On a creature whose bar the viewer may see, the number and
+the bar it just moved are one glance; on one whose hit points are redacted there
+is no bar, and the number is the whole of what a player learns from a blow
+landing — which is the hint, and is as much of a hint as they get.
+
+---
+
 ## Later: Online mode and Local mode
 
 A direction, not a task yet.

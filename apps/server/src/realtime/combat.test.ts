@@ -1046,3 +1046,94 @@ describe('an attack is one message, and says what it did', () => {
     expect(card.numbers.damageDice).toBe('1d8');
   });
 });
+
+/**
+ * A blow that landed takes the hit points, and says so without saying how many
+ * are left.
+ */
+describe('a landed attack applies its own damage', () => {
+  let clubId: string;
+  let dummyId: string;
+
+  beforeAll(async () => {
+    await api('PATCH', `/api/actors/${actorId}`, { str: 10, level: 5 }, alice.cookie);
+
+    const created = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, name: 'Straw dummy', x: 5, y: 5, hp: 500, maxHp: 500, ac: 1,
+    } as never);
+    dummyId = (await created)!.token.id;
+
+    const club = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      { type: 'weapon', name: 'Club', system: { damageDice: '1d4', damageType: 'bludgeoning' } },
+      alice.cookie,
+    );
+    clubId = club.item.id;
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  /** Swings until one lands, and returns the attack and the board after it. */
+  async function landOne() {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const posted = new Promise<any>((resolve) => {
+        const timer = setTimeout(() => resolve(null), 4000);
+        const handler = (p: { message: { attackData: unknown } }) => {
+          if (!p.message.attackData) return;
+          clearTimeout(timer);
+          dmSocket.off('chat:message', handler);
+          resolve(p.message);
+        };
+        dmSocket.on('chat:message', handler);
+      });
+
+      aliceSocket.emit('chat:cardAction', {
+        itemId: clubId, actorId, action: 'attack', targetTokenId: dummyId,
+      } as never);
+
+      const message = await posted;
+      if (!message) continue;
+      const { outcome } = message.attackData;
+      if (outcome === 'hit' || outcome === 'critical') {
+        await new Promise((r) => setTimeout(r, 500));
+        return message;
+      }
+    }
+    throw new Error('twenty swings at AC 1 and none landed');
+  }
+
+  it('takes the hit points off without being asked', async () => {
+    const before = (await boardTokenById(dummyId))!.hp!;
+    const message = await landOne();
+
+    expect(message.attackData.damage.applied).toBe(true);
+    const after = (await boardTokenById(dummyId))!.hp!;
+    expect(before - after).toBe(message.attackData.damage.roll.total);
+  });
+
+  /**
+   * The line the whole table reads used to end `— 2/7`, which is the exact
+   * number the `damage:applied` payload three lines above goes to some trouble
+   * to redact for players. Watching a blow land says what it took, never what
+   * is left.
+   */
+  it('says what it took and not what is left', async () => {
+    const posted = new Promise<string>((resolve) => {
+      const timer = setTimeout(() => resolve(''), 5000);
+      const handler = (p: { message: { kind: string; body: string } }) => {
+        if (p.message.kind !== 'system' || !/takes/.test(p.message.body)) return;
+        clearTimeout(timer);
+        aliceSocket.off('chat:message', handler);
+        resolve(p.message.body);
+      };
+      aliceSocket.on('chat:message', handler);
+    });
+
+    await landOne();
+    const body = await posted;
+
+    expect(body).toMatch(/Straw dummy takes \d+ damage/);
+    // No `12/500`, and no bare "of" either - nothing that reports the pool.
+    expect(body).not.toMatch(/\d+\s*\/\s*\d+/);
+  });
+});

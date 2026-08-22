@@ -164,8 +164,34 @@ export default function CampaignTable() {
    */
   const selectedActorId =
     campaign?.role === 'dm'
-      ? (table.tokens.find((t) => t.id === table.selectedTokenId)?.actorId ?? null)
+      ? (table.tokens.find((t) => t.id === (table.actingTokenId ?? table.selectedTokenId))?.actorId ??
+        null)
       : null;
+
+  /**
+   * The DM plays whichever of their creatures is up.
+   *
+   * Their acting creature used to be whatever was selected - and clicking a
+   * creature both selects and targets it, so the instant the DM clicked the
+   * thing they meant to hit, the goblin doing the hitting was replaced by the
+   * target and its scimitar left the panel. Attacking with a monster was
+   * possible only by knowing that shift-click targets without selecting.
+   *
+   * Anchored to the turn order instead, which is where the answer already is
+   * during a fight: on their own creature's turn, that is who they are playing.
+   * Only tokens they run - a player's character coming up does not hand the DM
+   * their sheet - and out of combat the HUD's "Play as" button sets it by hand.
+   */
+  const activeTurnTokenId =
+    table.encounter?.entries[table.encounter.activeIndex]?.tokenId ?? null;
+
+  useEffect(() => {
+    if (campaign?.role !== 'dm' || !activeTurnTokenId) return;
+
+    const store = useTable.getState();
+    const token = store.tokens.find((t) => t.id === activeTurnTokenId);
+    if (token && token.ownerUserId === user?.id) store.setActing(activeTurnTokenId);
+  }, [activeTurnTokenId, campaign?.role, user?.id]);
 
   useEffect(() => {
     if (!selectedActorId) {
@@ -236,8 +262,15 @@ export default function CampaignTable() {
   const actingActor = isDM ? dmActor : myActor;
   const actingItems = isDM ? dmItems : myItems;
   const actingActorId = isDM ? (dmActor?.id ?? null) : activeActorId;
-  /** The origin for range checks: the creature actually swinging. */
-  const actingToken = isDM ? selected : (myToken ?? selected);
+  /**
+   * The origin for range checks: the creature actually swinging.
+   *
+   * The DM's is held in the store so that clicking a target cannot replace it;
+   * it falls back to the selection when they have not chosen one, which is the
+   * old behaviour and right before a fight has started.
+   */
+  const actingFromStore = tokens.find((t) => t.id === table.actingTokenId) ?? null;
+  const actingToken = isDM ? (actingFromStore ?? selected) : (myToken ?? selected);
 
   /**
    * Use an item on a creature.

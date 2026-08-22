@@ -485,10 +485,28 @@ describe('a bestiary sheet keeps the compendium’s numbers', () => {
     await expect(api('PATCH', `/api/actors/${goblinId}`, { str: 18 })).rejects.toThrow(/bestiary/i);
   });
 
-  it('refuses an edit to its hit points, armour class or speed', async () => {
-    for (const patch of [{ hpMax: 99 }, { armorClass: 22 }, { speed: 60 }]) {
+  it('refuses an edit to its armour class or speed', async () => {
+    for (const patch of [{ armorClass: 22 }, { speed: 60 }]) {
       await expect(api('PATCH', `/api/actors/${goblinId}`, patch)).rejects.toThrow(/bestiary/i);
     }
+  });
+
+  /**
+   * Hit points are the exception, and deliberately.
+   *
+   * Every stat block prints hit dice beside the average precisely so a DM can
+   * roll their own, and "this one is the chieftain's bodyguard on 12" is
+   * ordinary play rather than a sheet contradicting the bestiary. The rest
+   * change what the creature *is*.
+   */
+  it('lets its hit points be set, which the handbook expects', async () => {
+    const saved = await api<{ actor: { hpMax: number; hpCurrent: number } }>(
+      'PATCH',
+      `/api/actors/${goblinId}`,
+      { hpMax: 12, hpCurrent: 12 },
+    );
+    expect(saved.actor.hpMax).toBe(12);
+    expect(saved.actor.hpCurrent).toBe(12);
   });
 
   it('still lets its name and notes be changed', async () => {

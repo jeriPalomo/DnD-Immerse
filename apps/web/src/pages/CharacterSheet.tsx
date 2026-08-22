@@ -184,8 +184,8 @@ export default function CharacterSheet() {
 
           {statsLocked && (
             <p className="rounded-lg border border-ink-700 bg-ink-850 px-2 py-1.5 text-[11px] text-ink-500">
-              From the bestiary, so its numbers are the compendium's. Name, portrait
-              and notes are yours.
+              From the bestiary, so its ability scores, armour class and speed are
+              the compendium's. Name, portrait, notes and hit points are yours.
             </p>
           )}
 
@@ -220,6 +220,9 @@ export default function CharacterSheet() {
           <CombatStats
             actor={actor}
             editable={statsEditable}
+            // Hit points stay yours on a stamped creature: the handbook prints
+            // hit dice beside the average so a DM can roll their own.
+            hpEditable={editable}
             onChange={sheet.patch}
             rest={
               <RestControl

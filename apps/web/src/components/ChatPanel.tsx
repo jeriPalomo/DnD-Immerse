@@ -747,7 +747,7 @@ function AttackCard({
 
       {attack.mode !== 'normal' && (
         <div
-          className={`mt-1 text-[11px] ${
+          className={`mt-0.5 text-[11px] ${
             attack.mode === 'advantage' ? 'text-emerald-400' : 'text-red-400'
           }`}
         >
@@ -756,59 +756,61 @@ function AttackCard({
         </div>
       )}
 
-      <div className="mt-2 text-[10px] tracking-wider text-ink-600 uppercase">Results</div>
-
-      <ul className="mt-1 space-y-1.5">
-        {/* The attack roll, with the bonus broken into what produced it. */}
-        <li className="flex items-baseline justify-between gap-3">
-          <span className="min-w-0 font-mono text-[11px] text-ink-400">
-            {attack.roll.output}
-            {attack.toHitParts.length > 0 && (
-              <span className="ml-1.5 text-ink-600">({describeBonus(attack.toHitParts)})</span>
-            )}
-          </span>
-          <span className="font-display text-lg font-bold text-ink-100">{attack.roll.total}</span>
-        </li>
-
-        <li className={`text-sm font-semibold ${verdict.color}`}>
+      {/* The verdict first and in the display face, because it is the question
+          being asked. A "Results" heading over it was a word explaining what a
+          card about hitting things was about. */}
+      <div className="mt-2 flex items-baseline gap-2">
+        <span className={`font-display text-base font-bold tracking-wide uppercase ${verdict.color}`}>
           {verdict.label}
-          <span className="ml-1.5 text-[11px] font-normal text-ink-500">— {attack.reason}</span>
-        </li>
+        </span>
+        <span className="text-[11px] text-ink-500">{attack.reason}</span>
+        <span
+          className="ml-auto shrink-0 font-mono text-[11px] text-ink-500"
+          title={describeBonus(attack.toHitParts) || 'no bonuses'}
+        >
+          {attack.roll.output}
+        </span>
+      </div>
 
-        {/* What landed, in hit points. Absent on a miss, because a swing that
-            never connected has no damage to show and no number to apply. */}
-        {damage && (
-          <li className="rounded border border-ink-700 bg-ink-900 px-2 py-1.5">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="min-w-0 font-mono text-[11px] text-ink-400">
-                {damage.roll.output}
-                {damage.parts.length > 0 && (
-                  <span className="ml-1.5 text-ink-600">({describeBonus(damage.parts)})</span>
-                )}
-              </span>
-              <span className="font-display text-xl font-bold text-ember-300">
-                {damage.roll.total}
-              </span>
-            </div>
-            <div className="mt-0.5 text-[11px] text-ink-500">
-              {damage.type || 'damage'}
-              {damage.critical && <span className="ml-1.5 text-emerald-400">dice doubled</span>}
-              {damage.twoHanded && <span className="ml-1.5 text-ink-400">two-handed</span>}
-            </div>
+      {/* What it cost, and the fact that it has already come off. The Apply
+          button is gone from a landed blow: the damage exists because the dice
+          beat an armour class, so pressing it again only risked applying twice. */}
+      {damage && (
+        <div className="mt-1.5 flex items-baseline gap-2 rounded border border-ink-700 bg-ink-900 px-2 py-1.5">
+          <span className="font-display text-xl font-bold text-ember-300">
+            {damage.roll.total}
+          </span>
+          <span className="text-[11px] text-ink-400">
+            {damage.type || 'damage'}
+            {damage.critical && <span className="ml-1.5 text-emerald-400">dice doubled</span>}
+            {damage.twoHanded && <span className="ml-1.5 text-ink-500">two-handed</span>}
+          </span>
+          <span
+            className="ml-auto shrink-0 font-mono text-[10px] text-ink-600"
+            title={describeBonus(damage.parts) || 'no bonuses'}
+          >
+            {damage.roll.output}
+          </span>
+        </div>
+      )}
 
-            {/* Offered, never applied. Whose hit points move is a separate
-                decision, and this rolls for things that turn out not to count. */}
-            {canApply && damage.tokenId && (
-              <button
-                onClick={() => onApply(damage.tokenId!, damage.roll.total, damage.type)}
-                className="mt-1.5 w-full rounded border border-ember-500/50 px-2 py-1 text-[11px] text-ember-300 transition-colors hover:bg-ember-500/15"
-              >
-                Apply {damage.roll.total} to {attack.target}
-              </button>
-            )}
-          </li>
-        )}
-      </ul>
+      {damage && attack.target && (
+        damage.applied ? (
+          <div className="mt-1 text-[11px] text-ink-500">
+            Taken off {attack.target}.
+          </div>
+        ) : (
+          canApply &&
+          damage.tokenId && (
+            <button
+              onClick={() => onApply(damage.tokenId!, damage.roll.total, damage.type)}
+              className="mt-1.5 w-full rounded border border-ember-500/50 px-2 py-1 text-[11px] text-ember-300 transition-colors hover:bg-ember-500/15"
+            >
+              Apply {damage.roll.total} to {attack.target}
+            </button>
+          )
+        )
+      )}
     </div>
   );
 }

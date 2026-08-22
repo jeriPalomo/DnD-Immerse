@@ -107,6 +107,37 @@ function slotsAvailable(actor: Actor, level: number): boolean {
   return max - used > 0;
 }
 
+/**
+ * How far anything on this sheet reaches, in feet.
+ *
+ * `normal` is the furthest an option lands without penalty; `long` is the band
+ * beyond it that a thrown or ranged weapon still covers at disadvantage. Both
+ * come from `reachOf`, the same function `evaluateOptions` measures with, so
+ * the area drawn on the board and the list of what is legal against a creature
+ * cannot disagree - the rule AoE templates already follow.
+ *
+ * A spell with no slots left is skipped: drawing the reach of something you
+ * cannot cast promises a shot you have not got. So is a `self` spell, which
+ * reaches nobody, and a sight-range one, whose circle would be the whole map.
+ */
+export function reachBands(items: Item[], actor: Actor | null): { normal: number; long: number } {
+  let normal = 0;
+  let long = 0;
+
+  for (const item of items) {
+    const { reach, selfOnly, long: far } = reachOf(item);
+    if (selfOnly || reach === null || !Number.isFinite(reach)) continue;
+
+    const level = (item.system.level as number | undefined) ?? 0;
+    if (item.type === 'spell' && actor && !slotsAvailable(actor, level)) continue;
+
+    normal = Math.max(normal, reach);
+    long = Math.max(long, far ?? reach);
+  }
+
+  return { normal, long };
+}
+
 export function evaluateOptions({
   items,
   actor,
