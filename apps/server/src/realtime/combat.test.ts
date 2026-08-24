@@ -1137,3 +1137,84 @@ describe('a landed attack applies its own damage', () => {
     expect(body).not.toMatch(/\d+\s*\/\s*\d+/);
   });
 });
+
+/**
+ * The DM's corrections, without an announcement.
+ *
+ * Putting right a creature killed a round early should not read to the party as
+ * the creature being healed - that is a louder wrong answer than the mistake
+ * was. Enforced on the server rather than by the client declining to render it,
+ * because a player asking for quiet would be asking to hit somebody without it
+ * being written down.
+ */
+describe('a quiet DM adjustment says nothing', () => {
+  let dummyId: string;
+
+  beforeAll(async () => {
+    const created = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, name: 'Quiet dummy', x: 8, y: 8, hp: 30, maxHp: 30,
+    } as never);
+    dummyId = (await created)!.token.id;
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  /** The next system line mentioning that creature, or '' if none arrives. */
+  function nextLineAbout(socket: Socket, name: string, ms = 1500): Promise<string> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        socket.off('chat:message', handler);
+        resolve('');
+      }, ms);
+      const handler = (p: { message: { kind: string; body: string } }) => {
+        if (p.message.kind !== 'system' || !p.message.body.includes(name)) return;
+        clearTimeout(timer);
+        socket.off('chat:message', handler);
+        resolve(p.message.body);
+      };
+      socket.on('chat:message', handler);
+    });
+  }
+
+  it('writes no line and tells no player', async () => {
+    const line = nextLineAbout(dmSocket, 'Quiet dummy');
+    const toPlayer = next<{ results: unknown[] }>(aliceSocket, 'damage:applied', 1500);
+
+    dmSocket.emit('damage:apply', {
+      tokenIds: [dummyId], amount: 6, damageType: 'slashing', quiet: true,
+    } as never);
+
+    expect(await line).toBe('');
+    expect(await toPlayer).toBeNull();
+
+    // The hit points still moved - quiet is about the announcement, not the
+    // arithmetic. The board carries the new value to everyone regardless.
+    await new Promise((r) => setTimeout(r, 400));
+    expect((await boardTokenById(dummyId))?.hp).toBe(24);
+  });
+
+  it('still tells the DM, so they can see their own correction land', async () => {
+    const toDm = next<{ results: { amount: number }[] }>(dmSocket, 'damage:applied', 2000);
+    dmSocket.emit('damage:apply', {
+      tokenIds: [dummyId], amount: 4, damageType: 'slashing', quiet: true,
+    } as never);
+    expect((await toDm)?.results[0]?.amount).toBe(4);
+  });
+
+  it('announces it when the DM has not asked for quiet', async () => {
+    const line = nextLineAbout(dmSocket, 'Quiet dummy', 3000);
+    dmSocket.emit('damage:apply', {
+      tokenIds: [dummyId], amount: 3, damageType: 'slashing',
+    } as never);
+    expect(await line).toMatch(/Quiet dummy takes 3 damage/);
+  });
+
+  it('refuses a player asking for it', async () => {
+    // Alice may damage a monster, but never without it being written down.
+    const line = nextLineAbout(dmSocket, 'Quiet dummy', 3000);
+    aliceSocket.emit('damage:apply', {
+      tokenIds: [dummyId], amount: 2, damageType: 'slashing', quiet: true,
+    } as never);
+    expect(await line).toMatch(/Quiet dummy takes 2 damage/);
+  });
+});

@@ -229,6 +229,7 @@ export function TargetPanel({
   actor,
   items,
   campaignId,
+  isDM = false,
   onUse,
   onClear,
 }: {
@@ -239,13 +240,21 @@ export function TargetPanel({
   items: Item[];
   /** For reading the target's own stat block, which the server gates. */
   campaignId: string;
+  /** A DM has no character of their own, so the refusal has to say so. */
+  isDM?: boolean;
   onUse: (item: Item) => void;
   onClear: () => void;
 }) {
   if (!self) {
+    // A DM has no "own token" - they run every monster on the board - so the
+    // player's wording sent them looking for something that does not exist.
     return (
       <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
-        <p className="text-sm text-ink-500">Select your own token to see what you can do.</p>
+        <p className="text-sm text-ink-500">
+          {isDM
+            ? 'Click the creature you want to act as, then click what it is aiming at.'
+            : 'Select your own token to see what you can do.'}
+        </p>
       </div>
     );
   }

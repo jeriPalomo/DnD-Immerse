@@ -1764,6 +1764,109 @@ landing — which is the hint, and is as much of a hint as they get.
 
 ---
 
+## Eight from a session — 2026-08-22
+
+### 1 & 2. The 2024 books — AUDITED, see [RULES-2024.md](RULES-2024.md)
+
+The links given were scans of the full PHB and DMG. Those are WotC copyright and
+this project is built on the SRD; nothing was copied out of them. What *is* fair
+game is the arithmetic — a threshold table is a fact about a game, not a passage
+of writing — so the rules engine was audited against 2024 instead.
+
+**The headline: `rules5e.ts` never reads `campaigns.ruleset`.** The column
+exists and decides which compendium is imported, but every rule in the engine is
+2014 in every campaign. Six divergences are listed in the audit, worst first:
+species ability increases (2024 moves them to background), encounter building
+(the 2024 DMG dropped the multiplier entirely), inert weapon mastery, no feats,
+and exhaustion — which 2024 made arithmetic and therefore implementable, where
+2014's six-tier table never was.
+
+### 3. A DM could not fight with an enemy token — DONE
+
+**Root cause, and it was not the one it looked like.** `actingTokenId` was added
+last session to hold the creature the DM is playing, with a turn-order writer
+meant to set it automatically. That writer tested `token.ownerUserId ===
+user.id` — and the server files an NPC token with a **null** owner, so it was
+false for every monster on the board and never fired once. With nothing ever
+writing the field, the old behaviour was fully intact: the first click targeted
+nothing, and the second replaced the attacker with its own target.
+
+Fixed at both ends. The turn-order writer now asks `!token.ownerUserId`, which
+is the same question the server's own `isFairGame` asks. And the DM's first
+click on a creature nobody else runs adopts it as the acting creature, so the
+gesture is two plain clicks — your goblin, then what it is swinging at. The
+"select your own token" empty state also stopped misdirecting a DM, who has no
+own token.
+
+### 4. Chat reads newest-first, and filters — DONE
+
+Reversed on the copy `filter` already returns rather than sorted on `createdAt`:
+a group roll refills its own card in place, and sorting would shuffle a message
+that had not moved. The auto-follow flipped with it — the end of the log is the
+top of the box now.
+
+Two filters. The presence row doubles as the per-person picker, since the names
+were already there and already the right list; it filters on `userId`, never on
+`actorName`, which changes per message for anyone playing two characters. The
+word search reads the roll label, the card and the attack as well as the body —
+a search for "goblin" that missed the card naming the creature hit would be
+worse than none.
+
+### 5. The sheet drawer is editable, and complete — DONE
+
+It was read-only by design, on the grounds that a drawer which can change hit
+points can lose an edit when a damage roll lands on top of it. Wrong trade:
+marking a spell prepared and spending a hit die are things you do *during* a
+session. It goes through `useSheet` now — the same debounced store the sheet
+page uses — and takes an `actorId` rather than a snapshot, so it reloads on open
+instead of showing what the table fetched when the page mounted.
+
+Gained: hit points with the bar and temp HP, AC, speed, hit dice, short and long
+rest, proficiency and passives, editable ability scores, saving throws, skills,
+and working prepared/equipped/remove on the item panels. The hand-rolled ability
+grid and stat row are gone — they were visual duplicates of the sheet's own
+panels and already drifting.
+
+### 6. The battle summary is on the map — DONE
+
+`encounter:summary` carries the finished text; `BattleSummary` draws it over the
+board until dismissed. Chat was where it was least likely to be read: a fight
+ends with everyone looking at the map, and four lines arrived under the last
+damage roll and scrolled away with it.
+
+Real-life time is gone. It answered a question nobody asks and made two
+durations for one fight.
+
+### 7. The DM gets a quiet toggle — DONE
+
+`damage:apply` takes a `quiet` flag, honoured for the DM alone. It suppresses
+the chat line and the players' `damage:applied` — no float, no log — while the
+DM still gets their own copy and the board updates for everyone, because a
+creature's bar is visible regardless. The case it exists for is a creature
+killed a round early and healed back: announced, that reads to the party as the
+creature being healed.
+
+### 8. How healing works — ANSWERED
+
+Recorded because the answer has three surprises in it.
+
+- `applyHealing` clamps at `hpMax` and floors at zero. **Temporary hit points
+  are not part of it at all** — `applyDamage` has a `tempHp` pool that absorbs
+  first, and healing neither grants nor consumes it. Only a rest clears temp HP.
+- **Healing from 0 does not clear `unconscious`,** and does not touch death save
+  successes or failures. The only code that removes `unconscious` is the natural
+  20 on a death save. A DM healing a downed character has to clear the condition
+  by hand.
+- `halved` applies to healing as well as damage, which is almost certainly not
+  intended — it exists for a saved-against fireball.
+- Only the DM may heal through `damage:apply`. **Rests are the exception** and
+  deliberately so: `POST /api/actors/:id/rest` is gated on `requireActorWrite`,
+  so a player rests their own character. A long rest restores everything
+  outright rather than going through `applyHealing`; a short rest rolls hit dice
+  server-side at `CON` per die with a floor of 1. Neither posts to chat.
+
+---
+
 ## Later: Online mode and Local mode
 
 A direction, not a task yet.

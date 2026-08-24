@@ -679,17 +679,16 @@ export function battleSummary(input: {
  */
 export function formatBattleSummary(
   summary: BattleSummary,
-  realSeconds?: number,
   /** Set when the share was written to the sheets, so the line can say so. */
   awarded = false,
 ): string {
   const lines = [`Battle Summary — ${summary.rounds} round${summary.rounds === 1 ? '' : 's'}`];
 
-  const atTheTable =
-    realSeconds !== undefined && realSeconds >= 60
-      ? ` (${formatDuration(realSeconds)} at the table)`
-      : '';
-  lines.push(`Time elapsed: ${formatDuration(summary.seconds)}${atTheTable}`);
+  // How long the fight took *in the world*, and nothing about how long it took
+  // at the table. Real time answered a question nobody was asking - a party
+  // does not care that the goblins took eleven minutes to kill, and printing it
+  // beside the in-world figure made two durations of one fight.
+  lines.push(`Time elapsed: ${formatDuration(summary.seconds)}`);
 
   // "None" rather than a missing line: a fight that was fled, talked down or
   // called off is a real outcome, and a summary that silently drops the row

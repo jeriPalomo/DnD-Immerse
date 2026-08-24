@@ -1,44 +1,57 @@
-import { abilityModifier, formatModifier, proficiencyBonus } from '@dnd/shared';
-import { AttackList, SpellcastingHeader } from '../sheet/Combat.js';
+import { useEffect } from 'react';
+import { OWNERSHIP, type AbilityKey, type ProficiencyLevel, type SkillKey } from '@dnd/shared';
+import { AbilityScoresBlock, DerivedStats, SavingThrows, SkillList } from '../sheet/Abilities.js';
+import { AttackList, CombatStats, SpellcastingHeader } from '../sheet/Combat.js';
 import { FeaturePanel, InventoryPanel, SpellPanel } from '../sheet/ItemPanels.js';
-import type { Actor, Item } from '../../store/sheet.js';
-
-const ABILITIES = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
+import { RestControl } from '../sheet/RestControl.js';
+import { useSheet } from '../../store/sheet.js';
+import { Spinner } from '../ui.js';
 
 /**
- * Your own sheet, at the table.
+ * Your own sheet, at the table, and yours to write on.
  *
  * Checking what a spell does used to mean leaving the board: the target panel
  * only offers items while you are aiming at something, and the sheet itself is
  * a different page - which during someone else's turn costs you the map, the
  * chat and your scroll position.
  *
- * Read-only on purpose. Editing mid-combat is what the sheet page is for, and
- * a drawer that can change hit points is a drawer that can lose an edit when
- * the socket pushes a damage roll over the top of it. Every panel here is the
- * one the sheet already uses, with `editable` off, so the two cannot describe
- * the same spell differently.
+ * It was read-only, on the grounds that a drawer which can change hit points is
+ * one that can lose an edit when a damage roll arrives over the top of it. That
+ * was the wrong trade: marking a spell prepared, spending a hit die and ticking
+ * off a torch are all things you do *during* a session, and sending a player to
+ * another page for them costs exactly what this drawer was built to save. The
+ * hazard is answered instead by going through `useSheet`, the same debounced
+ * store the sheet page uses - so an edit here and an edit there cannot disagree,
+ * and the drawer reloads from the server each time it opens rather than reading
+ * a snapshot taken when the table did.
+ *
+ * Every panel is the one the sheet page already uses. Two renderings of one
+ * spell list is how a table ends up with two descriptions of one spell.
  */
-export function MySheetDrawer({
-  actor,
-  items,
-  onClose,
-}: {
-  actor: Actor;
-  items: Item[];
-  onClose: () => void;
-}) {
-  const scores = {
-    str: actor.str, dex: actor.dex, con: actor.con,
-    int: actor.int, wis: actor.wis, cha: actor.cha,
-  };
+export function MySheetDrawer({ actorId, onClose }: { actorId: string; onClose: () => void }) {
+  const sheet = useSheet();
 
-  const weapons = items.filter((i) => i.type === 'weapon');
-  const spells = items.filter((i) => i.type === 'spell');
-  const gear = items.filter((i) => i.type === 'equipment' || i.type === 'consumable');
-  const features = items.filter((i) => i.type === 'feature');
+  // Loaded fresh on open. The table holds a copy of the actor taken when the
+  // page mounted, and by mid-session that copy is behind - the DM's damage, a
+  // level, an item picked up an hour ago.
+  useEffect(() => {
+    void sheet.load(actorId);
+    return () => {
+      // Anything typed in the last 600ms is still sitting in the debounce.
+      void useSheet.getState().flush();
+      useSheet.getState().clear();
+    };
+    // Reload only when the character changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actorId]);
 
-  const noop = () => undefined;
+  const actor = sheet.actor;
+  const editable = sheet.access >= OWNERSHIP.owner;
+
+  const weapons = sheet.items.filter((i) => i.type === 'weapon');
+  const spells = sheet.items.filter((i) => i.type === 'spell');
+  const gear = sheet.items.filter((i) => i.type === 'equipment' || i.type === 'consumable');
+  const features = sheet.items.filter((i) => i.type === 'feature');
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm" onClick={onClose}>
@@ -48,97 +61,145 @@ export function MySheetDrawer({
       >
         <div className="flex items-center gap-3 border-b border-ink-800 p-4">
           <div className="size-10 shrink-0 overflow-hidden rounded-lg border border-ink-700 bg-ink-800">
-            {actor.portraitUrl ? (
+            {actor?.portraitUrl ? (
               <img src={actor.portraitUrl} alt="" className="size-full object-cover" />
             ) : (
-              <div className="flex size-full items-center justify-center font-display text-ink-500">
-                {actor.name.slice(0, 1).toUpperCase()}
+              <div className="flex size-full items-center justify-center text-sm text-ink-500">
+                {(actor?.name ?? '?').slice(0, 1).toUpperCase()}
               </div>
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="truncate font-display text-lg text-ink-100">{actor.name}</h2>
+            <h2 className="truncate font-display text-lg text-ink-100">{actor?.name ?? 'Sheet'}</h2>
             <p className="truncate text-xs text-ink-500">
-              {[actor.race, actor.className && `${actor.className} ${actor.level}`]
+              {[actor?.race, actor?.className, actor?.level ? `level ${actor.level}` : '']
                 .filter(Boolean)
-                .join(' ') || 'Unfinished sheet'}
+                .join(' · ')}
             </p>
           </div>
+          {/* The same indicator the sheet page carries. An edit that is saving
+              and an edit that failed look identical without it. */}
+          <span className="shrink-0 text-[11px] text-ink-500">
+            {sheet.saving ? 'Saving…' : editable ? 'Saved' : 'View only'}
+          </span>
           <button
             onClick={onClose}
-            className="rounded px-2 py-1 text-ink-400 hover:bg-ink-800 hover:text-ink-100"
             aria-label="Close"
+            className="shrink-0 rounded px-2 py-1 text-ink-400 hover:bg-ink-800 hover:text-ink-100"
           >
             ✕
           </button>
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          <div className="grid grid-cols-3 gap-2 text-center sm:grid-cols-6">
-            {ABILITIES.map((key) => (
-              <div key={key} className="rounded-lg border border-ink-800 bg-ink-850 py-1.5">
-                <div className="text-[10px] tracking-wide text-ink-500 uppercase">{key}</div>
-                <div className="font-mono text-ink-100">
-                  {formatModifier(abilityModifier(scores[key]))}
-                </div>
-                <div className="text-[10px] text-ink-600">{scores[key]}</div>
-              </div>
-            ))}
-          </div>
+          {!actor ? (
+            <Spinner />
+          ) : (
+            <>
+              {sheet.error && <p className="text-xs text-red-400">{sheet.error}</p>}
 
-          <div className="flex flex-wrap gap-3 text-xs text-ink-400">
-            <span>AC <span className="font-mono text-ink-100">{actor.armorClass}</span></span>
-            <span>
-              HP <span className="font-mono text-ink-100">{actor.hpCurrent}/{actor.hpMax}</span>
-            </span>
-            <span>Speed <span className="font-mono text-ink-100">{actor.speed} ft</span></span>
-            <span>
-              Prof <span className="font-mono text-ink-100">
-                {formatModifier(proficiencyBonus(actor.level))}
-              </span>
-            </span>
-          </div>
-
-          {weapons.length > 0 && (
-            <section>
-              <h3 className="mb-1 font-display text-sm text-ink-100">Attacks</h3>
-              <AttackList actor={actor} weapons={weapons} />
-            </section>
-          )}
-
-          {spells.length > 0 && (
-            <section>
-              <h3 className="mb-1 font-display text-sm text-ink-100">Spells</h3>
-              <SpellcastingHeader actor={actor} />
-              <SpellPanel spells={spells} editable={false} onTogglePrepared={noop} onRemove={noop} />
-            </section>
-          )}
-
-          {gear.length > 0 && (
-            <section>
-              <h3 className="mb-1 font-display text-sm text-ink-100">Inventory</h3>
-              <InventoryPanel
-                items={gear}
-                editable={false}
-                strength={actor.str}
-                onToggleEquipped={noop}
-                onRemove={noop}
+              <CombatStats
+                actor={actor}
+                editable={editable}
+                onChange={sheet.patch}
+                rest={
+                  <RestControl
+                    actorId={actor.id}
+                    hitDiceTotal={actor.hitDiceTotal}
+                    hitDiceUsed={actor.hitDiceUsed}
+                    onRested={() => void sheet.load(actor.id)}
+                  />
+                }
               />
-            </section>
-          )}
 
-          {features.length > 0 && (
-            <section>
-              <h3 className="mb-1 font-display text-sm text-ink-100">Features &amp; Traits</h3>
-              <FeaturePanel features={features} editable={false} onAdd={noop} onRemove={noop} />
-            </section>
+              <DerivedStats actor={actor} />
+
+              <AbilityScoresBlock
+                actor={actor}
+                editable={editable}
+                onChange={(key: AbilityKey, value) => sheet.patch({ [key]: value })}
+              />
+
+              <SavingThrows
+                actor={actor}
+                editable={editable}
+                onToggle={(ability, proficient) =>
+                  sheet.patch({
+                    saveProficiencies: { ...actor.saveProficiencies, [ability]: proficient },
+                  })
+                }
+              />
+
+              <SkillList
+                actor={actor}
+                editable={editable}
+                onCycle={(skill: SkillKey, level: ProficiencyLevel) =>
+                  sheet.patch({
+                    skillProficiencies: { ...actor.skillProficiencies, [skill]: level },
+                  })
+                }
+              />
+
+              <Block title="Attacks">
+                <AttackList actor={actor} weapons={weapons} />
+              </Block>
+
+              {actor.spellcastingAbility && (
+                <Block title="Spells">
+                  <SpellcastingHeader actor={actor} />
+                  <SpellPanel
+                    spells={spells}
+                    editable={editable}
+                    onTogglePrepared={(itemId, prepared) =>
+                      void sheet.patchItem(itemId, { system: { prepared } })
+                    }
+                    onRemove={(itemId) => void sheet.removeItem(itemId)}
+                  />
+                </Block>
+              )}
+
+              <Block title="Inventory">
+                <InventoryPanel
+                  items={gear}
+                  editable={editable}
+                  strength={actor.str}
+                  onToggleEquipped={(itemId, equipped) =>
+                    void sheet.patchItem(itemId, { system: { equipped } })
+                  }
+                  onRemove={(itemId) => void sheet.removeItem(itemId)}
+                />
+              </Block>
+
+              <Block title="Features & Traits">
+                <FeaturePanel
+                  features={features}
+                  editable={editable}
+                  onAdd={(name) => void sheet.addItem('feature', name)}
+                  onRemove={(itemId) => void sheet.removeItem(itemId)}
+                />
+              </Block>
+
+              {/* Adding a spell or a weapon means browsing the compendium, and
+                  that is a modal on top of a drawer on top of the board - two
+                  layers too many mid-session. The full page is one click away
+                  and is where a shopping trip belongs. */}
+              <p className="border-t border-ink-800 pt-3 text-[11px] text-ink-600">
+                Rolling up, browsing the compendium and your backstory live on the full
+                sheet, under Characters.
+              </p>
+            </>
           )}
         </div>
-
-        <p className="border-t border-ink-800 p-3 text-[11px] text-ink-600">
-          Read-only. Open the full sheet from Characters to make changes.
-        </p>
       </div>
     </div>
+  );
+}
+
+function Block({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-1.5 text-[10px] tracking-wider text-ink-500 uppercase">{title}</h3>
+      {children}
+    </section>
   );
 }

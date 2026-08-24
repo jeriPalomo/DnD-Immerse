@@ -190,7 +190,14 @@ export default function CampaignTable() {
 
     const store = useTable.getState();
     const token = store.tokens.find((t) => t.id === activeTurnTokenId);
-    if (token && token.ownerUserId === user?.id) store.setActing(activeTurnTokenId);
+
+    // A creature the DM *runs*, which is one with no owner - the server files
+    // an NPC token as `ownerUserId: null` and only a player's character carries
+    // an id. Testing `ownerUserId === user.id` was therefore false for every
+    // monster on the board, so this never once fired for the creatures it was
+    // written for and the DM was left pressing "Play as" by hand or, far more
+    // often, not finding it at all.
+    if (token && !token.ownerUserId) store.setActing(activeTurnTokenId);
   }, [activeTurnTokenId, campaign?.role, user?.id]);
 
   useEffect(() => {
@@ -445,6 +452,7 @@ export default function CampaignTable() {
               actor={actingActor}
               items={actingItems}
               campaignId={id ?? ''}
+              isDM={Boolean(isDM)}
               onUse={(item) => useItemOn(item, targeted)}
               onClear={() => table.target(null)}
             />
@@ -538,7 +546,10 @@ export default function CampaignTable() {
 
       {showHelp && <ShortcutHelp onClose={() => setShowHelp(false)} />}
       {showSheet && myActor && (
-        <MySheetDrawer actor={myActor} items={myItems} onClose={() => setShowSheet(false)} />
+        // By id, not by the snapshot this page took when it mounted: the drawer
+        // loads the sheet fresh each time it opens, so a level the DM set or an
+        // item picked up an hour ago is there.
+        <MySheetDrawer actorId={myActor.id} onClose={() => setShowSheet(false)} />
       )}
 
       <Toast />

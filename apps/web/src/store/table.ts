@@ -190,6 +190,15 @@ interface TableState {
   showHandout: (pageId: string) => void;
   /** A handout being shown large right now. */
   reveal: { imageUrl: string; title: string } | null;
+  /**
+   * The summary of the fight that just ended, drawn over the board.
+   *
+   * Not auto-dismissed like a handout: a handout is a picture everyone glances
+   * at, while this is four lines of numbers somebody will want to read twice
+   * and possibly write down. It goes when it is dismissed.
+   */
+  battleSummary: string | null;
+  dismissBattleSummary: () => void;
   dismissReveal: () => void;
   undo: () => void;
   dismissToast: () => void;
@@ -200,6 +209,14 @@ interface TableState {
     healing?: boolean,
     halved?: boolean,
   ) => void;
+  /**
+   * Whether the DM's own adjustments are announced.
+   *
+   * Remembered like the board toggles. Ignored by the server for anyone who is
+   * not the DM, so a player cannot damage somebody quietly.
+   */
+  quietDM: boolean;
+  setQuietDM: (quiet: boolean) => void;
   /** `rounds` null lasts until removed; a number counts down in combat. */
   applyEffect: (tokenIds: string[], condition: string, rounds?: number | null) => void;
   updateEffect: (effectId: string, patch: { rounds?: number | null; disabled?: boolean }) => void;
@@ -337,6 +354,8 @@ export const useTable = create<TableState>((set, get) => ({
   undoStack: [],
   toast: null,
   reveal: null,
+  battleSummary: null,
+  quietDM: getPref('dm-quiet', false),
   templates: [],
 
   setActiveActor(actorId) {
@@ -435,6 +454,8 @@ export const useTable = create<TableState>((set, get) => ({
       if (threat) set({ threatRange: squares });
       else set({ moveRange: { tokenId, squares, leftFeet, maxFeet, dashed } });
     });
+    socket.on('encounter:summary', ({ text }) => set({ battleSummary: text }));
+
     socket.on('handout:reveal', (reveal) => {
       set({ reveal });
       // Long enough to take in, short enough not to block the table.
@@ -670,6 +691,10 @@ export const useTable = create<TableState>((set, get) => ({
     set({ reveal: null });
   },
 
+  dismissBattleSummary() {
+    set({ battleSummary: null });
+  },
+
   undo() {
     const stack = get().undoStack;
     const entry = stack[stack.length - 1];
@@ -792,7 +817,17 @@ export const useTable = create<TableState>((set, get) => ({
   },
 
   applyDamage(tokenIds, amount, damageType, healing = false, halved = false) {
-    get().socket?.emit('damage:apply', { tokenIds, amount, damageType, healing, halved });
+    get().socket?.emit('damage:apply', {
+      tokenIds, amount, damageType, healing, halved,
+      // Sent on every call and enforced on the server, so there is no path
+      // that forgets it - the alternative was every call site remembering.
+      quiet: get().quietDM,
+    });
+  },
+
+  setQuietDM(quietDM) {
+    setPref('dm-quiet', quietDM);
+    set({ quietDM });
   },
 
   applyEffect(tokenIds, condition, rounds = null) {

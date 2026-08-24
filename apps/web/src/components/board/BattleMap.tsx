@@ -25,6 +25,7 @@ import { DoorLayer, FogLayer, NoteLayer, WallLayer } from './FogLayer.js';
 import { DrawingLayer } from './DrawingLayer.js';
 import { TerrainLayer } from './TerrainLayer.js';
 import { MovementLayer } from './MovementLayer.js';
+import { BattleSummary } from './BattleSummary.js';
 import { ReachLayer } from './ReachLayer.js';
 import { TemplateLayer } from './TemplateLayer.js';
 import { LightLayer, WeatherLayer } from './AtmosphereLayer.js';
@@ -205,7 +206,7 @@ export function BattleMap({
   const {
     scene, tokens, selectedTokenId, targetTokenId, pings, floaters, vision, doors, walls, wallTool, templates, notes,
     drawings, encounter, activeActorId, moveRange, threatRange, showThreat, queryMovement, toggleThreat,
-    select, target, moveToken, commitToken, pingMap, createWall, deleteWall, updateWall, toggleDoor, clearTemplate,
+    select, target, setActing, actingTokenId, moveToken, commitToken, pingMap, createWall, deleteWall, updateWall, toggleDoor, clearTemplate,
     placeNote, toggleNote, removeNote, addDrawing, eraseDrawing, terrain, paintTerrain,
   } = useTable();
 
@@ -890,9 +891,19 @@ export function BattleMap({
                     // Ownership is the wrong question for a DM - they run every
                     // monster on the board, so "not mine" would rule out the
                     // goblin they are trying to hit with another goblin. What
-                    // matters is whether they have said who they are playing:
-                    // until then a click is inspection, not an attack.
-                    if (actingToken) target(token.id);
+                    // matters is which creature they are playing.
+                    //
+                    // With none declared, the first creature they click that
+                    // nobody else runs becomes it. That is the whole gesture:
+                    // click your goblin, then click what it is swinging at.
+                    // Requiring "Play as" first meant the first click of a
+                    // session targeted nothing and the second one quietly
+                    // replaced the attacker with its own target.
+                    if (!actingTokenId && !token.ownerUserId) {
+                      setActing(token.id);
+                      return;
+                    }
+                    if (actingTokenId) target(token.id);
                     return;
                   }
 
@@ -1196,6 +1207,9 @@ export function BattleMap({
           />
         );
       })}
+
+      {/* Over the board, because a fight ends with everyone looking at it. */}
+      <BattleSummary />
 
       {wallStart && (
         <div className="pointer-events-none absolute top-2 left-2 rounded bg-arcane-500/20 px-2 py-1 text-[10px] text-arcane-400">

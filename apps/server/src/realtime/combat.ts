@@ -415,12 +415,12 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
             .where(inArray(actors.id, earners));
         }
 
-        await postSystemMessage(
-          io,
-          ctx.campaignId,
-          user.id,
-          formatBattleSummary(summary, Math.round((Date.now() - ending.createdAt) / 1000), each > 0),
-        );
+        // On the board, not in the log. A fight ends with everyone looking at
+        // the map, and four lines of chat arriving under the last damage roll
+        // is where a summary is least likely to be read.
+        io.to(campaignRoom(ctx.campaignId)).emit('encounter:summary', {
+          text: formatBattleSummary(summary, each > 0),
+        });
       }
     }
 
@@ -765,6 +765,9 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       damageType: input.damageType,
       healing: input.healing,
       halved: input.halved,
+      // The DM's alone. A player asking for quiet would be asking to hit
+      // somebody without it being written down.
+      quiet: ctx.isDM && input.quiet,
     });
   });
 
@@ -928,7 +931,21 @@ export async function applyDamageTo(
   campaignId: string,
   userId: string,
   targets: Token[],
-  options: { amount: number; damageType: string; healing?: boolean; halved?: boolean },
+  options: {
+    amount: number;
+    damageType: string;
+    healing?: boolean;
+    halved?: boolean;
+    /**
+     * Move the hit points and say nothing.
+     *
+     * The board still updates - a creature's bar is what everyone can see
+     * anyway - but no line is written and no number floats over the token.
+     * This is the DM correcting something, and a correction announced is a
+     * correction that confuses the table more than the mistake did.
+     */
+    quiet?: boolean;
+  },
 ): Promise<void> {
   const results: {
     tokenId: string;
@@ -1034,18 +1051,23 @@ export async function applyDamageTo(
    * other payload in this app redacts. Watching a blow land tells you what it
    * took; it does not tell you how much the creature had left.
    */
-  // `.except` matters: the DM is in both rooms, so emitting to each in turn
-  // would hand them the redacted copy as well and leave which one arrived
-  // last to chance.
-  io
-    .to(campaignRoom(campaignId))
-    .except(campaignDmRoom(campaignId))
-    .emit('damage:applied', {
-      results: results.map(({ before: _before, after: _after, ...rest }) => rest),
-    });
-  io.to(campaignDmRoom(campaignId)).emit('damage:applied', { results });
-  await postSystemMessage(io, campaignId, userId, lines.join('\n'));
-
+  if (options.quiet) {
+    // To the DM alone, so they can see their own correction land. Nothing
+    // reaches the players and nothing is written to the log.
+    io.to(campaignDmRoom(campaignId)).emit('damage:applied', { results });
+  } else {
+    // `.except` matters: the DM is in both rooms, so emitting to each in turn
+    // would hand them the redacted copy as well and leave which one arrived
+    // last to chance.
+    io
+      .to(campaignRoom(campaignId))
+      .except(campaignDmRoom(campaignId))
+      .emit('damage:applied', {
+        results: results.map(({ before: _before, after: _after, ...rest }) => rest),
+      });
+    io.to(campaignDmRoom(campaignId)).emit('damage:applied', { results });
+    await postSystemMessage(io, campaignId, userId, lines.join('\n'));
+  }
 
   const { broadcastSceneState } = await import('./scene.js');
   await broadcastSceneState(io, campaignId);

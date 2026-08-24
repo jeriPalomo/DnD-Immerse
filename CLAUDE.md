@@ -439,6 +439,21 @@ rows filtered on a `combat` flag set at write time by the handlers that produce
 combat events — never derived from the message text, which would break the first
 time a label was reworded. Clearing takes both, and the confirm says so.
 
+**Newest first, and the end of the log is the top of the box.** Reversed with
+`.reverse()` on the copy `filter` already returned, never by sorting on
+`createdAt`: a group roll refills its own card in place, so re-sorting would
+shuffle a message that had not moved. The auto-follow and the "is the reader
+still following" test both flip with it — following now means `scrollTop < 80`,
+not a measurement against `scrollHeight`.
+
+**The log is filtered by `userId`, never by name.** `actorName` is a display
+string and changes per message for anybody speaking as more than one character.
+The presence row doubles as the picker rather than growing a second dropdown of
+the same people, and the word search reads the roll label, the card and the
+attack as well as the body — searching "goblin" that missed the card naming the
+creature hit would be worse than no search. An empty list under a filter says
+so, because "Nothing yet" is a lie when a filter is what emptied it.
+
 **Konva bubbles drag events.** A token's `dragend` reaches the Stage, so the
 Stage's own drag handler must check `e.target === e.target.getStage()` the way
 its click handler does — unguarded, dropping a token wrote the token's pixel
@@ -462,10 +477,23 @@ that is mostly creatures. The context menu is suppressed, since it would open
 the instant the drag ended.
 
 **A fight ends with a summary: how long, what died, what it was worth.**
-`encounter:end` posts four lines to the whole table — six seconds a round is
+`encounter:end` sends four lines to the whole table — six seconds a round is
 the surprising half, and a fight everybody felt was long is usually under half
-a minute. Real time is named only from a minute up, so a mis-press does not
-announce a four-second battle, and a fight nobody was ever in posts nothing.
+a minute. A fight nobody was ever in sends nothing.
+
+**On the board, not in the log.** It went to chat, which is where it was least
+likely to be read: a fight ends with everyone still looking at the map, and the
+summary arrived under the last damage roll and scrolled away with it.
+`encounter:summary` carries the finished text and `BattleSummary` draws it over
+the board until it is dismissed by hand — unlike a handout, which is a picture
+people glance at, this is a column of numbers somebody may want to write down.
+The text is the server's; re-deriving the lines in the client would be a second
+opinion about how long a fight took.
+
+**The summary times the fight, never the table.** `Time elapsed` is the
+in-world figure and nothing else. Real time answered a question nobody was
+asking — a party does not care that the goblins took eleven minutes — and
+printing it alongside made two durations for one fight.
 
 **A finished fight's duration is not the running clock's number.**
 `combatSeconds(round)` answers "how long have we been fighting", which part-way
@@ -759,6 +787,16 @@ points off their own screen - the one number every other payload here redacts.
 Players get `amount`; the DM gets the pool, on the DM room, with `.except` so
 they are not handed both. Two tests asserted the leak rather than the rule
 (`after < before` on a *player's* payload) and now assert the redaction.
+
+**A DM's correction is not an announcement.** `damage:apply` carries a `quiet`
+flag, honoured for the DM alone — a player asking for quiet would be asking to
+hit somebody without it being written down. It suppresses the chat line and the
+players' `damage:applied`, so no number floats and nothing is logged; the DM
+still gets their own copy, and the board updates for everyone, because a
+creature's bar is what they can all see anyway. The case it exists for is a
+creature killed a round early and healed back: announced, that reads to the
+party as the creature being healed, which is a louder wrong answer than the
+mistake was.
 
 **And the line in the log said it anyway.** `damage:apply` stripped `before`
 and `after` from the socket payload and then posted `Goblin 3 takes 5 — 2/7` to
@@ -1225,6 +1263,19 @@ looking at the Ancient Red Dragon. `mine` now requires `type === 'character'`,
 and a DM's acting creature is theirs to choose — the only answer that can be
 right when they run every monster on the board.
 
+**The DM's first click on a creature nobody else runs adopts it.** Requiring
+"Play as" first meant the opening click of a session targeted nothing and the
+second one quietly replaced the attacker with its own target — the store field
+existed and nothing ever wrote to it, so the old behaviour was fully intact.
+Clicking a monster now makes it the acting creature, and the next click is what
+it is aiming at. Two clicks, no chrome.
+
+**"A creature the DM runs" is `!token.ownerUserId`, not `ownerUserId ===
+user.id`.** The server files an NPC token with a null owner and only a player's
+character carries an id, so the turn-order writer that was meant to set the
+acting creature at each turn change tested false for every monster on the board
+and never once fired for the creatures it was written for.
+
 **And selection is not that choice.** Following `selectedTokenId` looked right
 and was unusable: clicking a creature both selects *and* targets it, so the
 instant the DM clicked the thing they meant to hit, the goblin doing the hitting
@@ -1375,13 +1426,25 @@ the other. What a condition does is the same kind of thing as what a key does �
 something you look up mid-turn and then close — and it used to be a collapsed
 section sitting between the DM and the fight.
 
-**A player reads their own sheet without leaving the table.** `MySheetDrawer`
-is read-only on purpose: editing mid-combat is what the sheet page is for, and
-a drawer that can write hit points is one that can lose an edit when a damage
-roll arrives over the top of it. Every panel in it is the one the sheet already
-uses with `editable` off, so the two cannot describe the same spell
-differently. It has a visible button as well as the `C` key — the lesson of the
-shortcut panel, which nobody found while it was a keystroke only.
+**A player reads *and writes* their own sheet without leaving the table.**
+`MySheetDrawer` was read-only, on the grounds that a drawer which can change hit
+points can lose an edit when a damage roll arrives over the top of it. That was
+the wrong trade: marking a spell prepared, spending a hit die and ticking off a
+torch are things you do *during* a session, and sending a player to another page
+for them costs exactly what the drawer was built to save. The hazard is answered
+instead by going through `useSheet` — the same debounced store the sheet page
+uses, so an edit here and an edit there cannot disagree — and by taking an
+`actorId` rather than a snapshot, so it **reloads from the server each time it
+opens**. The table's copy of the actor is taken at mount and is behind by
+mid-session: the DM's damage, a level, an item picked up an hour ago.
+
+Every panel is the one the sheet page already uses, now with `editable` on. Two
+renderings of one spell list is how a table ends up with two descriptions of one
+spell — which is what the hand-rolled ability grid and stat row in there were
+already drifting towards. Rolling up, the compendium and the backstory stay on
+the full page: a picker is a modal on top of a drawer on top of the board. It
+has a visible button as well as the `C` key — the lesson of the shortcut panel,
+which nobody found while it was a keystroke only.
 
 **An NPC's attack rows print no ability chip.** The chip tells a player which
 score drives a weapon, which is true for a character and a lie for a stamped

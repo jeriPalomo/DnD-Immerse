@@ -14,6 +14,30 @@ import { useTable } from '../store/table.js';
 import { useAuth } from '../store/auth.js';
 import type { WireAttack, WireCard, WireChatMessage } from '@dnd/shared';
 
+/**
+ * Everything in a message a word search should reach.
+ *
+ * The body alone is not enough: a roll's arithmetic lives in `rollData.label`
+ * and a swing's verdict in `attackData`, so searching "goblin" would miss the
+ * card that says who was hit. Built per message per keystroke, which is cheap
+ * against the 300 the store keeps and avoids a cache that can go stale when a
+ * group roll refills its own card.
+ */
+function searchText(message: WireChatMessage): string {
+  const attack = message.attackData;
+  return [
+    message.body,
+    message.authorName,
+    message.actorName ?? '',
+    message.rollData?.label ?? '',
+    message.cardData?.itemName ?? '',
+    message.groupData?.label ?? '',
+    attack ? `${attack.attacker} ${attack.target ?? ''} ${attack.weapon} ${attack.outcome}` : '',
+  ]
+    .join(' ')
+    .toLowerCase();
+}
+
 export function ChatPanel({
   isDM = false,
   myActorIds = [],
@@ -58,6 +82,9 @@ export function ChatPanel({
   const [secret, setSecret] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
   const [tab, setTab] = useState<'chat' | 'battle'>('chat');
+  /** Narrow the log to one person, and to the word you remember. */
+  const [fromUserId, setFromUserId] = useState<string>('');
+  const [find, setFind] = useState('');
   const list = useRef<HTMLDivElement>(null);
   /**
    * Whether the reader is at the end of the log, and so wants to follow it.
@@ -81,7 +108,24 @@ export function ChatPanel({
    * action was taken. Battle is still the fight on its own, for a DM who wants
    * the conversation out of the way.
    */
-  const shown = tab === 'battle' ? messages.filter((message) => message.combat) : messages;
+  const needle = find.trim().toLowerCase();
+
+  const shown = messages
+    .filter((message) => (tab === 'battle' ? message.combat : true))
+    // Filtered on `userId`, never on the name: `actorName` is a display string
+    // that changes per message for anyone speaking as more than one character.
+    .filter((message) => (fromUserId ? message.userId === fromUserId : true))
+    .filter((message) => (needle ? searchText(message).includes(needle) : true))
+    /**
+     * Newest first.
+     *
+     * Reversed here rather than by sorting: the store holds server insertion
+     * order and a group roll refills its own card in place, so re-sorting on
+     * `createdAt` would shuffle a card that had not moved. The copy is what
+     * `filter` already returned, so reversing it cannot touch the store's own
+     * array - `messages.reverse()` would have.
+     */
+    .reverse();
 
   /**
    * The log follows itself; it never moves the page.
@@ -99,7 +143,8 @@ export function ChatPanel({
   useEffect(() => {
     const box = list.current;
     if (!box || !following.current) return;
-    box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+    // Newest first, so the end of the log is the TOP of the box.
+    box.scrollTo({ top: 0, behavior: 'smooth' });
   }, [shown.length]);
 
   function submit(event: FormEvent) {
@@ -179,19 +224,58 @@ export function ChatPanel({
         </span>
       </header>
 
-      <ul className="flex flex-wrap gap-1.5 border-b border-ink-800 px-3 py-2">
-        {members.map((member) => (
-          <li
-            key={member.user.id}
-            className={`rounded px-1.5 py-0.5 text-xs ${
-              member.online ? 'bg-ink-800 text-ink-200' : 'text-ink-600'
-            }`}
-            title={member.online ? 'Online' : 'Offline'}
-          >
-            {member.user.displayName}
-            {member.role === 'dm' && <span className="ml-1 text-ember-400">DM</span>}
-          </li>
-        ))}
+      {/* The presence row doubles as the per-person filter: the names were
+          already here and already the right list, so a second dropdown of the
+          same people would have been one more thing to keep in step. Pressing
+          a name again clears it. */}
+      <ul className="flex flex-wrap items-center gap-1.5 border-b border-ink-800 px-3 py-2">
+        {members.map((member) => {
+          const only = fromUserId === member.user.id;
+          return (
+            <li key={member.user.id}>
+              <button
+                onClick={() => setFromUserId(only ? '' : member.user.id)}
+                title={
+                  only
+                    ? `Showing only ${member.user.displayName} — press again for everyone`
+                    : `Show only ${member.user.displayName}`
+                }
+                className={`rounded px-1.5 py-0.5 text-xs transition-colors ${
+                  only
+                    ? 'bg-ember-500/20 text-ember-300 ring-1 ring-ember-500/50'
+                    : member.online
+                      ? 'bg-ink-800 text-ink-200 hover:text-ink-100'
+                      : 'text-ink-600 hover:text-ink-400'
+                }`}
+              >
+                {member.user.displayName}
+                {member.role === 'dm' && <span className="ml-1 text-ember-400">DM</span>}
+              </button>
+            </li>
+          );
+        })}
+
+        <li className="ml-auto flex items-center gap-1">
+          {(fromUserId || find) && (
+            <button
+              onClick={() => {
+                setFromUserId('');
+                setFind('');
+              }}
+              title="Show everything again"
+              className="rounded px-1 text-[11px] text-ink-500 hover:text-ink-200"
+            >
+              clear
+            </button>
+          )}
+          <input
+            value={find}
+            onChange={(e) => setFind(e.target.value)}
+            placeholder="Find…"
+            aria-label="Find in the log"
+            className="w-24 rounded border border-ink-700 bg-ink-850 px-1.5 py-0.5 text-xs text-ink-200 placeholder:text-ink-600 focus:border-ember-500 focus:outline-none"
+          />
+        </li>
       </ul>
 
       <div
@@ -200,14 +284,18 @@ export function ChatPanel({
           // Within a message's height of the end counts as following: an exact
           // comparison fails on a fractional device pixel ratio and the log
           // then stops following for no visible reason.
-          const box = e.currentTarget;
-          following.current = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+          // Within a message's height of the newest, which is now the top.
+          following.current = e.currentTarget.scrollTop < 80;
         }}
         className="flex-1 space-y-2 overflow-y-auto px-3 py-3"
       >
         {shown.length === 0 ? (
+          /* "Nothing yet" is a lie when a filter is what emptied the list, and
+             the filter that did it may well be off the top of the panel. */
           <p className="py-8 text-center text-sm text-ink-500">
-            {tab === 'battle' ? (
+            {fromUserId || find ? (
+              'Nothing matches that filter.'
+            ) : tab === 'battle' ? (
               'No blows landed yet.'
             ) : (
               <>

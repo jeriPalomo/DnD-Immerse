@@ -742,7 +742,13 @@ for (const goblin of goblins) {
 }
 await new Promise((r) => setTimeout(r, 900));
 
-const summarised = nextWhere(
+// On the board, not in the log: a fight ends with everyone looking at the map,
+// and four lines of chat arriving under the last damage roll is where a summary
+// is least likely to be read.
+const summarised = next(player, 'encounter:summary', 3000);
+// Nothing about it should reach the log. Armed before the emit, or the message
+// would have come and gone before anyone was listening.
+const loggedInstead = nextWhere(
   player,
   'chat:message',
   (p) => /battle summary/i.test(p?.message?.body ?? ''),
@@ -750,7 +756,9 @@ const summarised = nextWhere(
 );
 emit(dm, 'encounter:end', {});
 const ended = await summarised;
-const summaryBody = ended?.message?.body ?? '';
+const summaryBody = ended?.text ?? '';
+check('the summary goes to the board rather than the log', Boolean(summaryBody),
+  summaryBody.slice(0, 60));
 const lineOf = (label) =>
   summaryBody.split('\n').find((line) => line.toLowerCase().startsWith(label)) ?? '';
 
@@ -795,8 +803,8 @@ if (thorin) {
   check('and no NPC is counted among the earners', across === 1,
     'three goblins were in the same order');
 }
-check('filed with the fight rather than the conversation', ended?.message?.combat === true,
-  `combat: ${ended?.message?.combat}`);
+check('and nothing about it lands in the log', (await loggedInstead) === null,
+  'the summary belongs to the board, not the conversation');
 
 // Four separate facts, so four lines - a paragraph buries all of them.
 check('it is written as lines rather than a sentence', summaryBody.split('\n').length === 4,
@@ -827,7 +835,7 @@ check('and divides the take across the party', /each across \d+ character/.test(
 
 // Twice is a mis-press, not a second fight: there is no encounter left to
 // summarise, so nothing should be posted.
-const again = nextWhere(player, 'chat:message', (p) => /battle summary/i.test(p?.message?.body ?? ''), 1500);
+const again = next(player, 'encounter:summary', 1500);
 emit(dm, 'encounter:end', {});
 check('ending a fight that is already over says nothing', (await again) === null);
 

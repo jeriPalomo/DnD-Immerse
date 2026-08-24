@@ -110,10 +110,16 @@ describe('the summary as the table reads it', () => {
     expect(text).toContain('with no published XP');
   });
 
-  it('mentions the time at the table only once it is worth mentioning', () => {
+  /**
+   * The elapsed time is the fight's, in the world - eighteen seconds for three
+   * rounds. How long it took at the table was a second duration for one fight,
+   * answering a question nobody asks, so it is gone.
+   */
+  it('times the fight in the world and never at the table', () => {
     const summary = battleSummary({ rounds: 3, foes: goblins, characters: 4 });
-    expect(formatBattleSummary(summary, 41)).not.toContain('at the table');
-    expect(formatBattleSummary(summary, 754)).toContain('12m 34s at the table');
+    const text = formatBattleSummary(summary);
+    expect(text).toContain('Time elapsed: 18 seconds');
+    expect(text).not.toContain('at the table');
   });
 
   it('is written as lines, because it is separate facts', () => {

@@ -14,6 +14,7 @@ import { useAuth } from '../../store/auth.js';
 export function InitiativeTracker({ isDM }: { isDM: boolean }) {
   const {
     encounter, tokens, selectedTokenId, lastDamage, templates, scene, clearTemplate, rollDeathSave,
+    quietDM, setQuietDM,
     startEncounter, endEncounter, addToInitiative, removeFromInitiative, setInitiative,
     nextTurn, previousTurn, select, rollInitiative,
   } = useTable();
@@ -111,6 +112,26 @@ export function InitiativeTracker({ isDM }: { isDM: boolean }) {
         </h2>
         {isDM && (
           <div className="flex gap-1">
+            {/* Corrections without an announcement. A creature killed a round
+                early and healed back should not read to the party as the
+                creature being healed - that is a louder wrong answer than the
+                mistake was. Enforced on the server for the DM only. */}
+            <button
+              onClick={() => setQuietDM(!quietDM)}
+              title={
+                quietDM
+                  ? 'Quiet: your damage and healing are not announced'
+                  : 'Announce your damage and healing to the table'
+              }
+              aria-pressed={quietDM}
+              className={`rounded border px-2 py-0.5 text-xs transition-colors ${
+                quietDM
+                  ? 'border-arcane-400 bg-arcane-500/20 text-arcane-300'
+                  : 'border-ink-700 text-ink-500 hover:text-ink-200'
+              }`}
+            >
+              {quietDM ? 'Quiet' : 'Announced'}
+            </button>
             <button
               onClick={() => previousTurn()}
               className="rounded border border-ink-700 px-2 py-0.5 text-xs text-ink-400 hover:text-ink-100"

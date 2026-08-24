@@ -512,6 +512,15 @@ export const damageApplySchema = z.object({
   healing: z.boolean().default(false),
   /** Half on a successful save, for area spells. */
   halved: z.boolean().default(false),
+  /**
+   * Do it without telling the table.
+   *
+   * For the DM putting right what the dice or a mis-click got wrong: healing a
+   * creature that was killed a round too early should not read to the party as
+   * the creature being healed. Honoured for the DM alone - a player asking for
+   * quiet would be asking to hit somebody without it being logged.
+   */
+  quiet: z.boolean().default(false),
 });
 
 export const initiativeAddSchema = z.object({
@@ -752,6 +761,16 @@ export interface ServerToClientEvents {
   'template:state': (payload: { templates: WireTemplate[] }) => void;
   /** Shown large on every screen for a moment, then it settles into the journal. */
   'handout:reveal': (payload: { imageUrl: string; title: string }) => void;
+  /**
+   * The summary of a fight that just ended, for the board rather than the log.
+   *
+   * It used to be four lines of chat, which is where it was least likely to be
+   * read: a fight ends with everyone looking at the map, and the summary
+   * scrolled past under the last damage roll. Sent as the finished text so the
+   * client draws it without recomputing anything - two renderings of one
+   * summary is how a table gets told two different numbers for one fight.
+   */
+  'encounter:summary': (payload: { text: string }) => void;
   /**
    * A journal entry was shown to the party or taken back. Carries nothing: the
    * panel refetches, so what a player may read is still decided server-side.
