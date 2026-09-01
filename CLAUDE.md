@@ -1330,12 +1330,38 @@ looking at the Ancient Red Dragon. `mine` now requires `type === 'character'`,
 and a DM's acting creature is theirs to choose — the only answer that can be
 right when they run every monster on the board.
 
-**The DM's first click on a creature nobody else runs adopts it.** Requiring
-"Play as" first meant the opening click of a session targeted nothing and the
-second one quietly replaced the attacker with its own target — the store field
-existed and nothing ever wrote to it, so the old behaviour was fully intact.
-Clicking a monster now makes it the acting creature, and the next click is what
-it is aiming at. Two clicks, no chrome.
+**One click rule, both sides: click your own to play it, click theirs to aim.**
+For a player "yours" is their own token; for a DM it is any creature they run,
+which is `!ownerUserId`. Shift-click targets anything, which is how either of
+them aims at their own side — a player healing an ally, a DM's charmed goblin
+turning on its friends. Adopting used to happen on the **first** such click
+only, and every click after it targeted: so playing a second goblin silently
+aimed the first at it, and the panel read "Targeting Goblin 2" with Goblin 1's
+scimitar underneath, one press from a swing nobody asked for. That is the same
+mis-aim that was fixed for the opening click and left in place for every switch
+after it. The gesture is stated in the board's hint rather than discovered — a
+modifier nobody is told about is folklore, which is what "I cannot erase my
+walls" cost.
+
+**The DM's swing is as easy as a player's, and the tests now prove it.** A DM's
+monster attack auto-applies its damage exactly as a player's landed swing at a
+monster does — `applied = Boolean(swinger?.isDM) || isFairGame(target)` — and
+`resolveActor` gives the DM `owner` on any NPC in their campaign, so the server
+never refuses. Nothing had ever driven that path: every `chat:cardAction` in
+the runthrough came from the *player* socket and no test emitted `chat:card`
+from the DM. That is the blind spot that produced `actingTokenId` never firing,
+monster attacks being unreachable, and the stat block route leaking a party
+sheet — each read correct until somebody sat in the DM's chair.
+
+**A token takes its armour class from the sheet, or nothing can ever hit it.**
+`attackVerdict` reads a creature with no AC on record as `unresolved` and claims
+nothing, which is right — and `npm run seed` wrote its **party** tokens straight
+into the table instead of through `token:create`, so the demo characters had no
+armour class, no hit points and no maximum at all. Every goblin swing at the
+demo party was a silent no-op forever, which reads exactly like a DM who cannot
+fight back. `tokenDefaultsFromActor` is shared by the route and the seed now,
+the same fix `stampMonster` already got for the seed's NPCs: two copies of a
+rule is one copy plus a bug waiting.
 
 **"A creature the DM runs" is `!token.ownerUserId`, not `ownerUserId ===
 user.id`.** The server files an NPC token with a null owner and only a player's

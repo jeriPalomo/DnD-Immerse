@@ -83,6 +83,7 @@ import {
   wallsOf,
 } from './vision.js';
 import { getMembership } from '../auth/guards.js';
+import { tokenDefaultsFromActor } from '../lib/tokenDefaults.js';
 import { newId } from '../lib/id.js';
 import type { IOServer, SocketData } from './index.js';
 import type { Scene, Token, Wall } from '../db/schema.js';
@@ -1111,22 +1112,16 @@ export function registerSceneHandlers(io: IOServer, socket: SceneSocket): void {
         .limit(1);
       const actor = found[0];
       if (actor) {
-        const proto = actor.prototypeToken;
-        name = name || actor.name;
-        imageUrl = imageUrl ?? actor.portraitUrl;
-        w = w !== 1 ? w : (proto.w ?? 1);
-        h = h !== 1 ? h : (proto.h ?? 1);
-        actorLinked = proto.actorLinked ?? false;
-        // `??`-guarded like ac/hp/maxHp below, rather than the unconditional
-        // overwrite this used to be: an explicit disposition on the wire is a
-        // deliberate choice, and undo re-creating a deleted token was silently
-        // losing it.
-        disposition = disposition ?? proto.disposition;
-        ac = ac ?? actor.armorClass;
-        // An unlinked token copies HP so each goblin tracks its own.
-        hp = hp ?? actor.hpCurrent;
-        maxHp = maxHp ?? actor.hpMax;
-        ownerUserId = ownerUserId ?? (actor.type === 'character' ? actor.ownerUserId : null);
+        // Shared with `npm run seed`, which used to write its party tokens
+        // straight into the table and so gave them no armour class at all -
+        // making every DM swing at the demo party `unresolved` forever. Two
+        // copies of a rule is one copy plus a bug waiting, the same lesson
+        // `stampMonster` already carries.
+        const defaults = tokenDefaultsFromActor(actor, {
+          name, imageUrl, w, h, hp, maxHp, ac, disposition, ownerUserId,
+        });
+        ({ name, imageUrl, w, h, hp, maxHp, ac, actorLinked, ownerUserId } = defaults);
+        disposition = defaults.disposition as typeof disposition;
       }
     }
 

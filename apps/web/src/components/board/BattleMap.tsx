@@ -206,7 +206,7 @@ export function BattleMap({
   const {
     scene, tokens, selectedTokenId, targetTokenId, pings, floaters, vision, doors, walls, wallTool, templates, notes,
     drawings, encounter, activeActorId, moveRange, threatRange, showThreat, queryMovement, toggleThreat,
-    select, target, setActing, actingTokenId, moveToken, commitToken, pingMap, createWall, deleteWall, updateWall, toggleDoor, clearTemplate,
+    select, target, setActing, moveToken, commitToken, pingMap, createWall, deleteWall, updateWall, toggleDoor, clearTemplate,
     placeNote, toggleNote, removeNote, addDrawing, eraseDrawing, terrain, paintTerrain,
   } = useTable();
 
@@ -882,28 +882,40 @@ export function BattleMap({
 
                   // Clicking a creature you are not playing also aims at it,
                   // which is what opens the menu below. Shift-to-target still
-                  // works and is still the only way to aim at your own party;
+                  // works and is still the only way to aim at your own side;
                   // clicking your own token selects it and nothing more, since
                   // you are far more often moving it than attacking it.
                   if (token.id === actingToken?.id) return;
 
                   if (isDM) {
-                    // Ownership is the wrong question for a DM - they run every
-                    // monster on the board, so "not mine" would rule out the
-                    // goblin they are trying to hit with another goblin. What
-                    // matters is which creature they are playing.
-                    //
-                    // With none declared, the first creature they click that
-                    // nobody else runs becomes it. That is the whole gesture:
-                    // click your goblin, then click what it is swinging at.
-                    // Requiring "Play as" first meant the first click of a
-                    // session targeted nothing and the second one quietly
-                    // replaced the attacker with its own target.
-                    if (!actingTokenId && !token.ownerUserId) {
+                    /**
+                     * One rule, both sides: click your own to play it, click
+                     * theirs to aim at it.
+                     *
+                     * "Yours" for a DM is a creature they *run*, which is
+                     * `!ownerUserId` and never `ownerUserId === user.id` - the
+                     * server files an NPC token with a null owner, and testing
+                     * the id was false for every monster on the board the last
+                     * time this was got wrong.
+                     *
+                     * Adopting used to happen only on the *first* such click,
+                     * and every one after it targeted instead. So playing a
+                     * second goblin silently aimed the first at it: the panel
+                     * read "Targeting Goblin 2" with Goblin 1's scimitar under
+                     * it, one press from a swing nobody asked for. That is the
+                     * same mis-aim that was fixed for the opening click and
+                     * left in place for every switch afterwards.
+                     *
+                     * Shift-click still targets anything, which is how a DM
+                     * aims at their own - a charmed goblin, a fireball catching
+                     * its own side - exactly as a player shift-clicks to aim at
+                     * their own party.
+                     */
+                    if (!token.ownerUserId) {
                       setActing(token.id);
                       return;
                     }
-                    if (actingTokenId) target(token.id);
+                    target(token.id);
                     return;
                   }
 
@@ -1177,7 +1189,10 @@ export function BattleMap({
                     : `drawing ${wallTool}s — click to place points, double-click to finish, alt-click a wall to delete`) +
                 ' · right-drag to pan'
               : isDM
-                ? 'scroll to zoom · drag to pan · alt-click a door to lock it · shift-click a token to target · ? for keys'
+                ? // The gesture is stated rather than discovered. A modifier
+                  // nobody is told about is folklore, which is what "I cannot
+                  // erase my walls" cost the last time.
+                  'click your creature to play it, click theirs to aim · shift-click to aim at your own · alt-click a door to lock it · ? for keys'
                 : 'scroll to zoom · drag to pan · alt-click to ping, alt-drag to draw one · shift-click a token to target · ? for keys'}
           </div>
         )}

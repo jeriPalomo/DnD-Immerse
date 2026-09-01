@@ -415,6 +415,74 @@ await dm('DELETE', `/api/scenes/${bareId}`);
 watcher.emit('scene:activate', { sceneId: scene.id });
 await new Promise((r) => setTimeout(r, 800));
 
+/**
+ * The DM's two-click swing, and switching which creature is swinging.
+ *
+ * Only a browser can see this: it is entirely about where a click is routed,
+ * and the board is one `<canvas>` that no selector reaches. Clicking a
+ * creature the DM runs used to adopt it only the *first* time - every click
+ * after that targeted instead, so playing a second goblin silently aimed the
+ * first at it and the panel read "Targeting Goblin 2" with Goblin 1's scimitar
+ * underneath, one press from a swing nobody asked for.
+ */
+console.log('\n=== 35. the DM picks who is swinging, then what at ===');
+{
+  watcher.emit('scene:activate', { sceneId: scene.id });
+  await new Promise((r) => setTimeout(r, 800));
+  await page.locator('button', { hasText: /^Fit$/ }).first().click();
+  await page.waitForTimeout(900);
+
+  const cast = (await boardNow()).tokens;
+  const one = cast.find((t) => t.name === 'Goblin');
+  const two = cast.find((t) => t.name === 'Goblin 2');
+  const hero = cast.find((t) => t.name?.startsWith('Thorin'));
+
+  const clickToken = async (t) => {
+    const p = middleOf(t.x, t.y);
+    await page.mouse.click(p.x, p.y);
+    await page.waitForTimeout(700);
+    return page.locator('body').innerText();
+  };
+
+  if (one && two && hero) {
+    const afterFirst = await clickToken(one);
+    check('clicking your own creature plays it rather than aiming at it',
+      afterFirst.includes('Playing') && !afterFirst.includes('Targeting'),
+      afterFirst.includes('Targeting') ? 'it opened a target panel' : 'Playing, no target');
+
+    // The half that was broken: a second creature must take over as the one
+    // swinging, not become the thing swung at.
+    const afterSecond = await clickToken(two);
+    check('clicking a second creature moves who is playing, not who is targeted',
+      afterSecond.includes('Playing') && !afterSecond.includes('Targeting'),
+      afterSecond.includes('Targeting') ? 'it aimed the first goblin at the second' : 'Playing moved');
+
+    const afterHero = await clickToken(hero);
+    check('clicking a character aims at them', afterHero.includes('Targeting'),
+      afterHero.includes('Targeting') ? 'target panel open' : 'nothing targeted');
+    check('and names them', /Targeting[\s\S]{0,40}Thorin/.test(afterHero),
+      afterHero.includes('Thorin') ? 'Thorin named' : 'no name');
+
+    // Friendly fire is the escape hatch, and it is the same modifier a player
+    // already uses to aim at their own party.
+    // Held on the keyboard, not passed to `mouse.click` - its options are
+    // button/clickCount/delay and it silently ignores `modifiers`, so that
+    // spelling sent a plain click and the check blamed the app for not
+    // targeting when nothing had ever pressed Shift.
+    const p = middleOf(one.x, one.y);
+    await page.keyboard.down('Shift');
+    await page.mouse.click(p.x, p.y);
+    await page.keyboard.up('Shift');
+    await page.waitForTimeout(700);
+    const afterShift = await page.locator('body').innerText();
+    const around = afterShift.slice(Math.max(0, afterShift.indexOf('Targeting')), afterShift.indexOf('Targeting') + 60).replace(/\s+/g, ' ');
+    check('shift-click aims at your own creature', /Targeting[\s\S]{0,40}Goblin/.test(afterShift), around);
+  } else {
+    check('the crypt has two goblins and a character to click (skipped)', true,
+      `goblin=${Boolean(one)} goblin2=${Boolean(two)} hero=${Boolean(hero)}`);
+  }
+}
+
 check('nothing threw while all that was clicked', pageErrors.length === 0,
   pageErrors.length ? pageErrors[0] : 'no page errors');
 

@@ -1930,6 +1930,51 @@ immunities (only a stamped one brings them). None is a regression.
 
 ---
 
+## Can the DM fight the party as easily as the party fights back? — 2026-09-01
+
+Asked exactly that. Traced both paths, and the answer had three parts.
+
+**The swing was already symmetric, on the server.** `applied =
+Boolean(swinger?.isDM) || isFairGame(target)`, so a DM's goblin takes hit points
+off a fighter in one press just as a player's sword does on a goblin — through
+`applyDamageTo`, so resistances, the concentration check and the redaction all
+run. `resolveActor` gives the DM owner on any NPC in their campaign. During a
+fight the click count is identical, because the turn order adopts whichever
+creature the DM runs is up.
+
+**But the demo party could not be hit at all.** `npm run seed` inserted the
+party's tokens straight into the table rather than going through
+`token:create`, so they carried **no armour class** — and `attackVerdict`
+correctly reads a creature with no AC on record as `unresolved` and claims
+nothing. Every goblin swing at the seeded party was a silent no-op, forever.
+This is the same drift already recorded here about the seed's NPCs, which were
+hand-built until `stampMonster` was extracted; `tokenDefaultsFromActor` is the
+other half of it. Found by *running* the DM's swing, not by reading it: the
+debug line said `"outcome":"unresolved","reason":"no AC recorded"`. Real
+campaigns were never affected, because every token made through the UI goes
+through the route.
+
+**And switching monsters mis-aimed.** Clicking a creature the DM runs adopted
+it only the first time; every click after targeted instead, so playing a second
+goblin silently aimed the first at it. One rule now, both sides: click your own
+to play it, click theirs to aim, shift-click to aim at your own.
+
+**The DM's half of combat had no coverage of any kind** — every
+`chat:cardAction` in the runthrough came from the player socket. Now four socket
+tests, six runthrough checks reading Thorin's hit points back from the server,
+and a Part E section driving the clicks in a browser. Part E is the only thing
+that could see the gesture bug, and it was reverted to confirm it goes red:
+*"it aimed the first goblin at the second."*
+
+**Two of my own checks were wrong again, both the same way — a payload shaped
+from memory.** `WireAttack` carries `attacker`/`target`/`weapon`, not
+`attackerName`/`targetName`. And `page.mouse.click` has no `modifiers` option
+(it is `button`/`clickCount`/`delay`), so the shift-click check sent a plain
+click and then blamed the app for not targeting. Read the handler, and read the
+type.
+
+---
+
 ## Later: Online mode and Local mode
 
 A direction, not a task yet.

@@ -839,6 +839,70 @@ const again = next(player, 'encounter:summary', 1500);
 emit(dm, 'encounter:end', {});
 check('ending a fight that is already over says nothing', (await again) === null);
 
+/* ------------------------------------- the DM swings a monster at a character */
+
+console.log('\n=== the DM fights the party, not only the other way round ===');
+{
+  // Half of every combat, and nothing in this file had ever driven it: every
+  // chat:cardAction above is emitted by the *player*. That is the blind spot
+  // that produced actingTokenId never firing, monster attacks being
+  // unreachable, and the stat block route leaking a party sheet.
+  const goblinActorId = goblins[0]?.actorId;
+  check('the DM has a goblin with a sheet behind it', Boolean(goblinActorId), goblins[0]?.name ?? 'none');
+
+  const block = await dmApi('GET', `/api/actors/${goblinActorId}`);
+  const scimitar = (block.body?.items ?? []).find((i) => /scimitar/i.test(i.name));
+  check('and it is stamped with its own scimitar', Boolean(scimitar), scimitar?.name ?? 'no weapon');
+
+  const hpOfThorin = async () => {
+    const pushed = next(dm, 'scene:state', 3000);
+    emit(dm, 'scene:activate', { sceneId: crypt.id });
+    const state = await pushed;
+    return state?.tokens?.find((t) => t.id === thorinToken.id)?.hp;
+  };
+
+  if (scimitar) {
+    const before = await hpOfThorin();
+
+    // Swung until one lands: a natural 1 always misses, so a single attempt is
+    // a one-in-twenty flake on a check about what a hit does.
+    let landed = null;
+    for (let attempt = 0; attempt < 25 && !landed; attempt += 1) {
+      const posted = new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), 3000);
+        const handler = (p) => {
+          if (!p.message?.attackData) return;
+          clearTimeout(timer);
+          dm.off('chat:message', handler);
+          resolve(p.message.attackData);
+        };
+        dm.on('chat:message', handler);
+      });
+      emit(dm, 'chat:cardAction', {
+        itemId: scimitar.id, actorId: goblinActorId, action: 'attack', targetTokenId: thorinToken.id,
+      });
+      const data = await posted;
+      if (data && (data.outcome === 'hit' || data.outcome === 'critical')) landed = data;
+    }
+
+    check('a goblin can swing at a character and land one', Boolean(landed),
+      landed ? `${landed.outcome} for ${landed.damage?.roll?.total}` : 'nothing landed in 25 swings');
+
+    if (landed) {
+      check('the swing names both creatures', /goblin/i.test(landed.attacker) && /thorin/i.test(landed.target),
+        `${landed.attacker} -> ${landed.target}`);
+      // The grant: a DM's blow applies itself, exactly as a player's landed
+      // swing at a monster does.
+      check('and applies its own damage', landed.damage?.applied === true,
+        `applied=${landed.damage?.applied}`);
+
+      const after = await hpOfThorin();
+      check('the hit points actually moved on the board', before - after === landed.damage.roll.total,
+        `${before} -> ${after}, rolled ${landed.damage.roll.total}`);
+    }
+  }
+}
+
 /* ---------------------------------------- spell slots, read from the server */
 
 console.log('\n=== spell slots are spent, and run out ===');

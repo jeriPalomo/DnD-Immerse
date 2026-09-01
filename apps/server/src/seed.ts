@@ -38,6 +38,7 @@ import {
 import { runMigrations } from './db/migrate.js';
 import { hashPassword } from './auth/password.js';
 import { ensureDataDirs, paths } from './env.js';
+import { tokenDefaultsFromActor } from './lib/tokenDefaults.js';
 import { stampMonster } from './routes/actors.js';
 import { newId, newInviteCode } from './lib/id.js';
 
@@ -148,19 +149,46 @@ async function buildScene(
     } as never);
   }
 
-  // The party, in the west room, each token owned by its player so they can
-  // move it - and carrying a torch, since the scene is unlit.
+  /**
+   * The party, in the west room, each token owned by its player so they can
+   * move it - and carrying a torch, since the scene is unlit.
+   *
+   * Armour class and hit points come from the sheet through the same helper
+   * `token:create` uses. Written by hand here, they were simply absent: the
+   * seeded characters had **no AC at all**, so `attackVerdict` read every
+   * goblin's swing at them as `unresolved` and the DM could not land a blow on
+   * the demo party. Correct behaviour on a creature nobody typed an AC for,
+   * and a demo campaign where half of combat silently did nothing.
+   */
   let column = 0;
   for (const member of party) {
+    const sheet = (
+      await db.select().from(actors).where(eq(actors.id, member.actorId)).limit(1)
+    )[0];
+
+    const defaults = sheet
+      ? tokenDefaultsFromActor(sheet, {
+          name: member.name,
+          ownerUserId: member.ownerUserId,
+          disposition: 'friendly',
+        })
+      : null;
+
     await db.insert(tokens).values({
       id: newId(),
       sceneId,
       actorId: member.actorId,
+      // Linked, so the DM's damage reaches the sheet and a rest reaches the
+      // board. The prototype says so too; stated here because the party's
+      // tokens are the one case where it is never anything else.
       actorLinked: true,
       ownerUserId: member.ownerUserId,
       name: member.name,
       x: 2 + column,
       y: 3,
+      hp: defaults?.hp ?? null,
+      maxHp: defaults?.maxHp ?? null,
+      ac: defaults?.ac ?? null,
       disposition: 'friendly',
       visionRange: 60,
       darkvisionRange: 30,

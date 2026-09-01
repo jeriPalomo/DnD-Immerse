@@ -1452,3 +1452,198 @@ describe('condition immunity is honoured', () => {
     expect(body).toMatch(/Iron Golem is immune/i);
   });
 });
+
+/**
+ * The DM's half of a fight, which nothing has ever driven.
+ *
+ * Every `chat:cardAction` in the runthrough is emitted by the *player* socket
+ * and no test here emitted `chat:card` from the DM, so the path a monster takes
+ * to hit a character has only ever been read, never run. That is precisely the
+ * blind spot that produced the last three DM bugs - `actingTokenId` testing
+ * `ownerUserId === user.id` and so never firing for a creature with a null
+ * owner, monster attacks being unreachable at all, and the stat block route
+ * handing one player another's sheet. Each read correct until somebody sat in
+ * the DM's chair.
+ */
+describe('a DM swings a monster at a character', () => {
+  let scimitarId: string;
+  let goblinActorId: string;
+
+  /** Hit points on the character's TOKEN, which is what the board shows. */
+  async function pcTokenHp(): Promise<number | null | undefined> {
+    const pushed = next<{ tokens: WireToken[] }>(dmSocket, 'scene:state', 3000);
+    dmSocket.emit('scene:activate', { sceneId });
+    return (await pushed)?.tokens.find((t) => t.id === tokenId)?.hp;
+  }
+
+  /** And on the sheet behind it, which a linked token must keep in step. */
+  async function pcSheetHp(): Promise<number> {
+    const { actor } = await api<{ actor: { hpCurrent: number } }>(
+      'GET', `/api/actors/${actorId}`, undefined, alice.cookie,
+    );
+    return actor.hpCurrent;
+  }
+
+  /**
+   * Swings until one lands, and answers with the attack.
+   *
+   * Alice's AC is low but a natural 1 always misses, so a single swing is a
+   * one-in-twenty flake on a test about what a *hit* carries.
+   */
+  async function dmSwingUntilHit() {
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const posted = new Promise<any>((resolve) => {
+        const timer = setTimeout(() => resolve(null), 4000);
+        const handler = (p: { message: { attackData: unknown } }) => {
+          if (!p.message.attackData) return;
+          clearTimeout(timer);
+          dmSocket.off('chat:message', handler);
+          resolve(p.message);
+        };
+        dmSocket.on('chat:message', handler);
+      });
+
+      dmSocket.emit('chat:cardAction', {
+        itemId: scimitarId, actorId: goblinActorId, action: 'attack', targetTokenId: tokenId,
+      } as never);
+
+      const message = await posted;
+      if (message?.attackData?.outcome === 'hit' || message?.attackData?.outcome === 'critical') {
+        return message.attackData;
+      }
+    }
+    return null;
+  }
+
+  beforeAll(async () => {
+    // A monster the DM runs, written by hand rather than stamped so its numbers
+    // are known: +10 to hit against Alice's armour class, so a miss is a
+    // natural 1 and nothing else.
+    const goblin = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors',
+      { name: 'Test Goblin', type: 'npc', campaignId, hpMax: 7, hpCurrent: 7, str: 10 },
+      dm.cookie,
+    );
+    goblinActorId = goblin.actor.id;
+
+    const weapon = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${goblinActorId}/items`,
+      {
+        type: 'weapon', name: 'Test Scimitar',
+        system: { damageDice: '1d6', damageType: 'slashing', attackBonus: 10, proficient: false, ability: 'str' },
+      },
+      dm.cookie,
+    );
+    scimitarId = weapon.item.id;
+
+    await api('PATCH', `/api/actors/${actorId}`, { hpCurrent: 40, armorClass: 10 }, alice.cookie);
+    dmSocket.emit('token:update', { tokenId, hp: 40, ac: 10 } as never);
+    await new Promise((r) => setTimeout(r, 400));
+  });
+
+  it('lands, and takes the hit points off without being asked', async () => {
+    const before = await pcTokenHp();
+    const attack = await dmSwingUntilHit();
+
+    expect(attack).not.toBeNull();
+    expect(attack.damage).toBeTruthy();
+    // The grant this whole test exists for: a DM's blow applies itself, the
+    // same way a player's landed swing at a monster does.
+    expect(attack.damage.applied).toBe(true);
+
+    const after = await pcTokenHp();
+    // The delta, never the resulting total - asserting a total is what made the
+    // halved-heal test order-dependent and let it pass on the bug.
+    expect(before! - after!).toBe(attack.damage.roll.total);
+  });
+
+  it('moves the sheet with the token, because a character token is linked', async () => {
+    const beforeSheet = await pcSheetHp();
+    const attack = await dmSwingUntilHit();
+    expect(attack).not.toBeNull();
+
+    const afterSheet = await pcSheetHp();
+    expect(beforeSheet - afterSheet).toBe(attack.damage.roll.total);
+  });
+
+  it('names both creatures and the weapon on the swing', async () => {
+    // `attacker` / `target` / `weapon`, read off the type rather than shaped
+    // from memory - the recurring way a test here is wrong.
+    const attack = await dmSwingUntilHit();
+    expect(attack.attacker).toMatch(/Test Goblin/i);
+    expect(attack.target).toMatch(/Alice PC/i);
+    expect(attack.weapon).toMatch(/Test Scimitar/i);
+  });
+
+  /**
+   * The control that proves the test above measures the DM's grant rather than
+   * damage merely arriving.
+   */
+  it('but a player swinging at a character rolls without applying', async () => {
+    const sword = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      { type: 'weapon', name: 'Test Sword', system: { damageDice: '1d8', attackBonus: 10, proficient: false } },
+      alice.cookie,
+    );
+
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const posted = new Promise<any>((resolve) => {
+        const timer = setTimeout(() => resolve(null), 4000);
+        const handler = (p: { message: { attackData: unknown } }) => {
+          if (!p.message.attackData) return;
+          clearTimeout(timer);
+          aliceSocket.off('chat:message', handler);
+          resolve(p.message);
+        };
+        aliceSocket.on('chat:message', handler);
+      });
+
+      aliceSocket.emit('chat:cardAction', {
+        itemId: sword.item.id, actorId, action: 'attack', targetTokenId: tokenId,
+      } as never);
+
+      const message = await posted;
+      const data = message?.attackData;
+      if (data?.outcome === 'hit' || data?.outcome === 'critical') {
+        expect(data.damage).toBeTruthy();
+        // `isFairGame` refuses a character, so the button is offered instead.
+        expect(data.damage.applied).toBe(false);
+        return;
+      }
+    }
+    expect.unreachable('no swing landed in 25 attempts');
+  });
+});
+
+/**
+ * A token carries the sheet's armour class, or nothing can ever hit it.
+ *
+ * `npm run seed` wrote its party tokens straight into the table rather than
+ * through `token:create`, so the demo characters had no AC at all - and
+ * `attackVerdict` correctly reads a creature with none on record as
+ * `unresolved`. Every goblin swing at the demo party was therefore a no-op,
+ * forever, and it looked exactly like a DM who could not fight back. Both
+ * callers share `tokenDefaultsFromActor` now; this guards the route's half.
+ */
+describe('a token stamped from a sheet inherits what it needs to be hit', () => {
+  it('takes armour class and hit points without being told them', async () => {
+    const sheet = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors',
+      { name: 'Inheritance Test', type: 'npc', campaignId, armorClass: 17, hpMax: 33, hpCurrent: 33 },
+      dm.cookie,
+    );
+
+    const created = next<{ token: WireToken }>(dmSocket, 'token:created', 3000);
+    // Deliberately no ac, hp or maxHp on the wire: this is the path the seed
+    // bypassed, and the whole question is what happens when nobody says.
+    dmSocket.emit('token:create', {
+      sceneId, actorId: sheet.actor.id, name: 'Inheritance Test', x: 12, y: 12,
+    } as never);
+
+    const token = (await created)?.token;
+    expect(token).toBeTruthy();
+    expect(token!.ac).toBe(17);
+    expect(token!.maxHp).toBe(33);
+    expect(token!.hp).toBe(33);
+  });
+});
