@@ -114,3 +114,108 @@ export function itemsFromMonster(data: Json, str: number): StampedItem[] {
 
   return out;
 }
+
+/* --------------------------------------------- damage and condition modifiers */
+
+/**
+ * The twelve damage types 5e actually has.
+ *
+ * A closed set, and the reason the parse below can be strict rather than
+ * clever: across all 334 monsters in the 2014 SRD there are exactly 19
+ * distinct strings in the three damage fields, and these twelve are all of
+ * them that name a type on their own.
+ */
+export const DAMAGE_TYPES = [
+  'acid', 'bludgeoning', 'cold', 'fire', 'force', 'lightning', 'necrotic',
+  'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder',
+] as const;
+
+const DAMAGE_TYPE_SET: ReadonlySet<string> = new Set(DAMAGE_TYPES);
+
+export interface MonsterModifiers {
+  resistances: string[];
+  vulnerabilities: string[];
+  immunities: string[];
+  conditionImmunities: string[];
+  /**
+   * The published lines this refused to turn into a modifier, verbatim.
+   *
+   * Surfaced on the sheet as a feature rather than dropped, so a DM reads
+   * "resistant to bludgeoning, piercing, and slashing from nonmagical weapons"
+   * and calls it - the same answer Multiattack and a published breath-weapon DC
+   * already get.
+   */
+  qualified: { field: string; text: string }[];
+}
+
+/**
+ * What a stat block says a creature shrugs off.
+ *
+ * `applyDamage` has read `actors.damageModifiers` and applied resistance,
+ * vulnerability and immunity since the schema was written. Nothing ever wrote
+ * the column: no sheet UI, and `stampMonster` never looked at the field. So a
+ * stamped Ancient Red Dragon took full fire damage, and 146 of the 334 monsters
+ * in the SRD lost a published fact the engine was already equipped to use.
+ *
+ * **A bare damage type is imported; a qualified one is not.** Seven of the
+ * nineteen published strings carry a condition the engine cannot evaluate -
+ * "bludgeoning, piercing, and slashing from nonmagical weapons that aren't
+ * silvered" depends on the weapon swung, which no part of this app models.
+ * Importing it as flat resistance to three physical types would halve every
+ * hit from a magic sword too: confidently wrong, which is the one thing this
+ * codebase refuses to be. They become prose the DM reads instead.
+ *
+ * Condition immunities need no such care. All thirteen index values the SRD
+ * publishes are exact members of `CONDITIONS`, so they are taken as they come.
+ */
+export function modifiersFromMonster(data: Json): MonsterModifiers {
+  const out: MonsterModifiers = {
+    resistances: [], vulnerabilities: [], immunities: [], conditionImmunities: [], qualified: [],
+  };
+
+  const fields = [
+    ['damage_resistances', 'resistances'],
+    ['damage_vulnerabilities', 'vulnerabilities'],
+    ['damage_immunities', 'immunities'],
+  ] as const;
+
+  for (const [published, key] of fields) {
+    for (const raw of (data?.[published] as unknown[]) ?? []) {
+      if (typeof raw !== 'string') continue;
+      const value = raw.trim().toLowerCase();
+      if (DAMAGE_TYPE_SET.has(value)) out[key].push(value);
+      else if (value) out.qualified.push({ field: key, text: raw.trim() });
+    }
+  }
+
+  // Published as `{ index, name, url }`, and every index is a real condition.
+  for (const entry of (data?.condition_immunities as unknown[]) ?? []) {
+    const index = (entry as Json)?.index;
+    if (typeof index === 'string' && index) out.conditionImmunities.push(index);
+  }
+
+  return out;
+}
+
+/**
+ * The qualified lines, as features to read.
+ *
+ * `field` is turned back into an English word so the row says what kind of
+ * modifier it was: "Resistant to" and "Immune to" are different facts and the
+ * prose alone does not distinguish them.
+ */
+export function modifierNotes(modifiers: MonsterModifiers): StampedItem[] {
+  const word: Record<string, string> = {
+    resistances: 'Resistant to', vulnerabilities: 'Vulnerable to', immunities: 'Immune to',
+  };
+  return modifiers.qualified.map(({ field, text }) => ({
+    type: 'feature' as const,
+    name: `${word[field] ?? 'Modifier'}: ${text}`,
+    system: {
+      description:
+        `${word[field] ?? 'Modifier'} ${text}.\n\n` +
+        'Applied by hand: this depends on the weapon or the source of the damage, ' +
+        'which the app does not track.',
+    },
+  }));
+}

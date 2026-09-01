@@ -871,6 +871,66 @@ decides whose hit points may move, so a player's swing at another player's
 character rolls, does not apply, and offers the button instead.
 `WireAttackDamage.applied` says which happened, so nothing can be applied twice.
 
+**A spell slot is spent when the card is posted, because that is the cast.**
+`spellSlots.used` only ever went *down*: a long rest reset it, `slotsAvailable`
+gated the target panel on it and `reachBands` skipped a spell "with no slots
+left" - and **nothing ever incremented it**. Both readers could therefore only
+be true, no screen in the app displayed a slot at all, and a wizard had
+infinite spells. Charged at `chat:card` rather than `chat:cardAction`: posting
+is the cast, and every button after it - an attack chaining into damage, a save
+and then damage - resolves that same cast, so per-action would spend two slots
+on a Hold Person. **Only where a slot exists**: `tracksSlots` charges a level
+the sheet has slots at and nothing else, which is what keeps stamped monsters
+casting - a stat block publishes no slot table, and gating on
+`type === 'character'` would be the same rule written less honestly. Refused at
+zero on the server, since a gate only the panel holds is a layout decision; the
+pips on the sheet are the undo, so a card posted to *read* a spell is one click
+back.
+
+**Resistance, vulnerability and immunity were applied and could never be set.**
+`applyDamage` has read `actors.damageModifiers` since the schema was written.
+Nothing wrote it - no UI anywhere, and `stampMonster` never looked at the
+field - so a stamped Ancient Red Dragon took full fire damage.
+`modifiersFromMonster` reads the blob `stampMonster` already holds, the way
+`publishedMonsterBonus` reads `data.proficiencies`. **A bare damage type is
+imported and a qualified one is not**: of the 19 distinct strings the SRD
+publishes, 12 name a type and 7 carry a condition the engine cannot evaluate -
+"...from nonmagical weapons that aren't silvered" depends on the weapon swung,
+and importing it as flat resistance to three physical types would halve every
+hit from a magic sword too. Those 7 become a feature carrying the prose, the
+same answer Multiattack gets. `auditDamageModifiers` runs inside `srd:import`
+and warns on any string outside the known 19, because a new bare type and a new
+prose form want opposite responses. Existing stamped NPCs keep their empty
+modifiers - stamping copies at stamp time by design, and the sheet editor is
+the honest fix rather than a migration guessing which rows came from where.
+
+**`conditionImmunities` is enforced where conditions are applied.** It sat in
+the schema read by nothing outside a test fixture, so a golem could be
+paralysed. `effect:apply` refuses rather than silently dropping - a button that
+appears to work and quietly does nothing is the worse failure - and partial
+application is deliberate: a fireball's worth of targets where one is immune
+still lands on the other five, and the line names who shrugged it off.
+
+**The rules engine finally reads `campaigns.ruleset`.** The column decided which
+compendium was imported and `rules5e.ts` never consulted it once, so every rule
+was 2014 in every campaign whatever the setting said. Two things actually differ
+and now branch: **species grant no ability increases in 2024** (they moved to the
+background, so the green chips would tell a 2024 player to add numbers their own
+rules do not give them), and **2024 encounter building has three bands and no
+crowd multiplier** - the allowance is inside `ENCOUNTER_BUDGETS_2024`, so
+multiplying as well counts it twice. `difficultyBands` is what the picker reads:
+2024 has no "deadly" and 2014 has no "moderate", and mapping one onto the other
+would be the app deciding two words mean the same thing. Everything else -
+proficiency bonus, ability modifiers, save DCs, death saves, XP by challenge
+rating, rest structure, `ASI_LEVELS` - is identical in both editions and is
+recorded in `docs/RULES-2024.md` so nobody re-audits it.
+
+**A control whose palette is bigger than its answer collapses.** The damage
+modifier editor drew all twelve types across three rows whether or not any was
+chosen: 187px of grey on every character sheet, measured, for a fact almost no
+character has. It shows what is set, with an Edit button that reveals the
+palette - the same rule the map panel's eight standing paragraphs were fixed by.
+
 **A hand-entered item fills the same `system` blob an imported one does.** The
 manual form's fields are the ones the attack table and target panel read, not a
 name and a description; anything left blank falls back to the Zod schema's

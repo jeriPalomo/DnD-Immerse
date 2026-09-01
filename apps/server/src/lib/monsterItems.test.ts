@@ -1,6 +1,14 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { attackExpression, damageExpression } from '@dnd/shared';
-import { itemsFromMonster, reachFromDescription } from './monsterItems.js';
+import { attackExpression, CONDITIONS, damageExpression } from '@dnd/shared';
+import {
+  DAMAGE_TYPES,
+  itemsFromMonster,
+  modifierNotes,
+  modifiersFromMonster,
+  reachFromDescription,
+} from './monsterItems.js';
 
 /** The goblin, as the SRD publishes it. STR 8 (-1), scimitar +4, 1d6+2. */
 const GOBLIN = {
@@ -103,5 +111,121 @@ describe('a stamped monster can be swung', () => {
     expect(items.every((i) => i.type === 'feature')).toBe(true);
     // The published DC survives in the prose the DM reads.
     expect(String(items[1].system.description)).toContain('DC 21');
+  });
+});
+
+/* --------------------------------------------- damage and condition modifiers */
+
+describe('what a stat block says a creature shrugs off', () => {
+  it('keeps a bare damage type', () => {
+    const m = modifiersFromMonster({ damage_immunities: ['fire'] });
+    expect(m.immunities).toEqual(['fire']);
+    expect(m.qualified).toEqual([]);
+  });
+
+  it('sorts each field into its own list', () => {
+    const m = modifiersFromMonster({
+      damage_resistances: ['cold'],
+      damage_vulnerabilities: ['thunder'],
+      damage_immunities: ['poison'],
+    });
+    expect(m.resistances).toEqual(['cold']);
+    expect(m.vulnerabilities).toEqual(['thunder']);
+    expect(m.immunities).toEqual(['poison']);
+  });
+
+  it('refuses a qualified line rather than guessing at it', () => {
+    // The whole reason this parser is strict. Read as flat resistance to three
+    // physical types, this would halve every hit from a magic sword too - the
+    // app being confidently wrong, which is worse than it being silent.
+    const m = modifiersFromMonster({
+      damage_resistances: ["bludgeoning, piercing, and slashing from nonmagical weapons that aren't silvered"],
+    });
+    expect(m.resistances).toEqual([]);
+    expect(m.qualified).toHaveLength(1);
+    expect(m.qualified[0].field).toBe('resistances');
+  });
+
+  it('keeps the bare types and refuses the prose in the same field', () => {
+    const m = modifiersFromMonster({
+      damage_resistances: ['fire', 'bludgeoning, piercing, and slashing from nonmagical weapons'],
+    });
+    expect(m.resistances).toEqual(['fire']);
+    expect(m.qualified).toHaveLength(1);
+  });
+
+  it('reads condition immunities off their index', () => {
+    const m = modifiersFromMonster({
+      condition_immunities: [{ index: 'poisoned', name: 'Poisoned' }, { index: 'charmed', name: 'Charmed' }],
+    });
+    expect(m.conditionImmunities).toEqual(['poisoned', 'charmed']);
+  });
+
+  it('survives a monster that declares none of it', () => {
+    const m = modifiersFromMonster({});
+    expect(m).toEqual({
+      resistances: [], vulnerabilities: [], immunities: [], conditionImmunities: [], qualified: [],
+    });
+  });
+
+  it('turns a refused line into a feature that names the kind of modifier', () => {
+    const notes = modifierNotes(
+      modifiersFromMonster({ damage_immunities: ['piercing from magic weapons wielded by good creatures'] }),
+    );
+    expect(notes).toHaveLength(1);
+    expect(notes[0].type).toBe('feature');
+    expect(notes[0].name).toMatch(/^Immune to: piercing from magic weapons/);
+    expect(String(notes[0].system.description)).toMatch(/applied by hand/i);
+  });
+});
+
+/**
+ * Against the compendium, not against itself.
+ *
+ * A curated set checked only by its own keys proves the lookup works and
+ * nothing about whether it matches anything real - the mistake
+ * `SPELL_CONDITIONS` made for a whole commit. This reads the dataset the
+ * import actually consumes.
+ */
+describe('the parser against the published bestiary', () => {
+  const file = path.join(process.cwd(), 'data', 'srd', '2014-5e-SRD-Monsters.json');
+  const monsters: Record<string, any>[] = fs.existsSync(file)
+    ? JSON.parse(fs.readFileSync(file, 'utf8'))
+    : [];
+
+  it.skipIf(monsters.length === 0)('imports a type for half the bestiary and invents nothing', () => {
+    let withType = 0;
+    let proseOnly = 0;
+    let withCondition = 0;
+
+    for (const monster of monsters) {
+      const m = modifiersFromMonster(monster);
+      const types = [...m.resistances, ...m.vulnerabilities, ...m.immunities];
+
+      // Nothing may leave this parser that is not one of the twelve.
+      for (const type of types) expect(DAMAGE_TYPES).toContain(type);
+
+      if (types.length > 0) withType += 1;
+      else if (m.qualified.length > 0) proseOnly += 1;
+      if (m.conditionImmunities.length > 0) withCondition += 1;
+    }
+
+    // Measured against the real file rather than asserted from memory. If
+    // upstream changes shape these numbers move, which is the point.
+    expect(monsters.length).toBe(334);
+    expect(withType).toBe(146);
+    expect(proseOnly).toBe(19);
+    expect(withCondition).toBe(92);
+  });
+
+  it.skipIf(monsters.length === 0)('publishes only condition names this app already knows', () => {
+    // All thirteen index values are exact members of CONDITIONS, which is why
+    // the import needs no mapping table. If that ever stops being true, an
+    // unmapped name would sit in the column matching nothing.
+    for (const monster of monsters) {
+      for (const name of modifiersFromMonster(monster).conditionImmunities) {
+        expect(CONDITIONS).toContain(name);
+      }
+    }
   });
 });

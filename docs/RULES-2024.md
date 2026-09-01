@@ -24,20 +24,29 @@ bestiary from the 2014 list, and will until the upstream data lands.
 
 ---
 
-## The headline: the engine never asks which edition it is
+## The headline: the engine never asked which edition it is — FIXED 2026-09-01
 
 `campaigns.ruleset` exists, is set at creation, and decides which compendium
-rows are imported. **`packages/shared/src/rules5e.ts` does not read it once.**
-Every rule below is 2014, in every campaign, whatever the setting says. That is
-the single change that makes the rest of this list tractable: until a rule can
-ask which edition it is in, every fix is a choice between breaking 2014 tables
-and leaving 2024 ones wrong.
+rows are imported. **`packages/shared/src/rules5e.ts` did not read it once.**
+Every rule below was 2014, in every campaign, whatever the setting said.
+
+`Ruleset` is now a shared type and the two tables that genuinely differ branch
+on it (#1 and #2 below). The route reads the campaign's column and the client
+reads the bands back, so no UI hardcodes a difficulty word again.
 
 ---
 
 ## Divergences, worst first
 
-### 1. Ability score increases come from the wrong place
+### 1. Ability score increases come from the wrong place — FIXED 2026-09-01
+
+`speciesBonuses(species, ruleset)` returns `{}` for 2024, and the ability block
+says where they come from instead — a 2024 sheet with no green chips otherwise
+looks exactly like one whose species was typed wrong. `SPECIES_2024` is a
+separate list, so Half-Elf and Half-Orc are absent from a 2024 game and Goliath
+and Orc are present; merging the two lists would offer every character a species
+their own edition does not have. The original note follows.
+
 
 `SPECIES_BONUSES` (`rules5e.ts:255`) is the 2014 table — Dragonborn +2 STR/+1
 CHA, Human +1 to everything. In 2024 **species grant no ability increases at
@@ -51,7 +60,16 @@ silently miscalculated, but the advice is wrong.
 
 The same table lists **Half-Elf and Half-Orc**, which 2024 does not have.
 
-### 2. Encounter building is the 2014 DMG
+### 2. Encounter building is the 2014 DMG — FIXED 2026-09-01
+
+`ENCOUNTER_BUDGETS_2024` is the flat per-character budget at low/moderate/high,
+and `encounterMultiplier` returns 1 for 2024 — the crowd allowance is already
+inside those numbers, so applying it as well counts it twice. `PartyBudget` is
+one shape for both editions (an ordered list of named bands) so `howManyFit`
+counts rather than knowing which words exist, and asking a 2024 party for a
+"deadly" fight returns 0 rather than being quietly mapped onto "high". The
+original note follows.
+
 
 `ENCOUNTER_THRESHOLDS` (`rules5e.ts:841`) is the four-column easy/medium/hard/
 deadly table, and `encounterMultiplier` (`:906`) scales the monsters' XP by
@@ -120,14 +138,21 @@ Worth recording so nobody re-audits it:
 
 ---
 
-## Suggested order
+## Where this stands
 
-1. Make the rules engine edition-aware — thread `ruleset` into `rules5e.ts` and
-   have the two tables above branch on it. Everything else depends on this.
-2. Species/background ability increases (#1) — small, and it is currently
-   giving wrong advice on screen.
-3. Encounter building (#2) — self-contained, and it changes numbers a DM plans
-   with.
-4. Exhaustion (#5) — small, and it turns a by-hand condition into an automated
-   one.
-5. Feats (#4) and weapon mastery (#3) — features, not fixes; both want design.
+**Done 2026-09-01:** the headline (the engine reads `ruleset`), #1 species
+ability increases, and #2 encounter building. Those were the two places the app
+put a wrong *number* on screen.
+
+**Still open, in the order worth doing them:**
+
+1. **Exhaustion (#5)** — small, and it turns a by-hand condition into an
+   automated one. Needs exhaustion to carry a *level* rather than be a boolean
+   condition, which is a schema change, and `CONDITION_EFFECTS` to become
+   edition-aware.
+2. **Feats (#4)** — an `itemTypeSchema` entry plus somewhere to grant one. The
+   honest workaround (writing a feat as a `feature`) still works today.
+3. **Weapon mastery (#3)** — the largest, and it needs the action economy the
+   app deliberately does not have. Design work rather than a patch.
+4. **#6** — grapple/shove, surprise, bonus-action potions, two-weapon fighting.
+   All need that same action economy.

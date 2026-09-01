@@ -141,6 +141,23 @@ export interface WireCard {
    * Null for an item that rolls nothing to hit and nothing for damage.
    */
   numbers: WireCardNumbers | null;
+  /**
+   * The slot this cast spent, when the sheet tracks one at that level.
+   *
+   * Named on the card because a resource that leaves silently is a resource
+   * nobody trusts: `Level 2 slot - 1 of 3 left` is the whole of what a player
+   * needs to see, at the moment it happened. Null for a cantrip, for a level
+   * the sheet has no slots at, and for every stamped monster - a stat block
+   * publishes no slot table, so a creature is charged for nothing.
+   */
+  slot: WireCardSlot | null;
+}
+
+export interface WireCardSlot {
+  level: number;
+  /** What is left after the spend. */
+  left: number;
+  max: number;
 }
 
 export interface WireCardNumbers {

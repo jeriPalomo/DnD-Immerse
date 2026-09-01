@@ -11,6 +11,7 @@ import {
   savingThrowBonus,
   skillBonus,
   speciesBonuses,
+  type Ruleset,
   type AbilityKey,
   type AbilityScores,
   type ProficiencyLevel,
@@ -30,18 +31,32 @@ export function AbilityScoresBlock({
   actor,
   editable,
   onChange,
+  ruleset = '2014',
 }: {
   actor: Actor;
   editable: boolean;
   onChange: (key: AbilityKey, value: number) => void;
+  /** The campaign's edition. Species grant nothing in 2024. */
+  ruleset?: Ruleset;
 }) {
   const scores = scoresOf(actor);
   // What the species grants, shown as a reminder. Never added to the score -
   // the handbook expects the number on the sheet to include it already, so
   // applying it here would count it twice.
-  const bonuses = speciesBonuses(actor.race);
+  const bonuses = speciesBonuses(actor.race, ruleset);
 
   return (
+    <>
+      {/* Said rather than left blank. 2024 moved ability increases off the
+          species and onto the background, so a 2024 sheet with no green chips
+          looks identical to one whose species was typed wrong - and a player
+          who knows the 2014 table would go looking for the bug. */}
+      {ruleset === '2024' && (
+        <p className="mb-2 text-[11px] text-ink-500">
+          2024 rules: species grant no ability increases — your background gives +2/+1
+          or three +1s, and your scores should already include them.
+        </p>
+      )}
     <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 lg:grid-cols-2">
       {ABILITIES.map((key) => {
         const modifier = abilityModifier(scores[key]);
@@ -82,6 +97,7 @@ export function AbilityScoresBlock({
         );
       })}
     </div>
+    </>
   );
 }
 

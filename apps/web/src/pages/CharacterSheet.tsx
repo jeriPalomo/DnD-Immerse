@@ -23,7 +23,7 @@ import {
   SavingThrows,
   SkillList,
 } from '../components/sheet/Abilities.js';
-import { AttackList, CombatStats, SpellcastingHeader } from '../components/sheet/Combat.js';
+import { AttackList, CombatStats, DamageModifierPanel, SpellcastingHeader } from '../components/sheet/Combat.js';
 import { FeaturePanel, InventoryPanel, SpellPanel } from '../components/sheet/ItemPanels.js';
 import { CampaignAssign } from '../components/sheet/CampaignAssign.js';
 import { ImportPdf } from '../components/sheet/ImportPdf.js';
@@ -192,6 +192,7 @@ export default function CharacterSheet() {
           <AbilityScoresBlock
             actor={actor}
             editable={statsEditable}
+            ruleset={sheet.ruleset}
             onChange={(key: AbilityKey, value) => sheet.patch({ [key]: value })}
           />
           <SavingThrows
@@ -234,6 +235,10 @@ export default function CharacterSheet() {
             }
           />
 
+          {/* Locked with the rest of a stamped stat block: immunity to fire is
+              what a red dragon *is*, unlike its hit points. */}
+          <DamageModifierPanel actor={actor} editable={statsEditable} onChange={sheet.patch} />
+
           <Section
             title="Attacks"
             action={
@@ -265,7 +270,7 @@ export default function CharacterSheet() {
               )
             }
           >
-            <SpellcastingHeader actor={actor} />
+            <SpellcastingHeader actor={actor} editable={editable} onChange={sheet.patch} />
             <SpellPanel
               spells={spells}
               editable={editable}

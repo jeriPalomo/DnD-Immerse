@@ -40,7 +40,7 @@ import { rollExpression } from '../lib/dice.js';
 import { newId } from '../lib/id.js';
 import { syncLinkedTokens } from '../lib/linkedTokens.js';
 import { itemNumbers } from '../lib/itemNumbers.js';
-import { itemsFromMonster } from '../lib/monsterItems.js';
+import { itemsFromMonster, modifierNotes, modifiersFromMonster } from '../lib/monsterItems.js';
 import { storeImage } from '../lib/uploads.js';
 import { deleteOrphanedUploads } from '../lib/orphans.js';
 import type { ActorInput } from '@dnd/shared';
@@ -78,6 +78,8 @@ export async function stampMonster(
   campaignId: string,
   ownerUserId: string,
 ): Promise<typeof actors.$inferSelect> {
+  const modifiers = modifiersFromMonster(monster.data as Record<string, unknown>);
+
   const input = actorInputSchema.parse({
     ...emptyActor(monster.name, 'npc'),
     name: monster.name,
@@ -99,6 +101,15 @@ export async function stampMonster(
     // URL shared by every copy of the monster, not an upload - deleting one
     // goblin must not take the goblin picture away from the other four.
     portraitUrl: monster.imageUrl,
+    // What the block says it shrugs off. `applyDamage` has read this column
+    // since the schema was written and nothing ever wrote it, so every stamped
+    // creature took full damage from the thing it is famously immune to.
+    damageModifiers: {
+      resistances: modifiers.resistances,
+      vulnerabilities: modifiers.vulnerabilities,
+      immunities: modifiers.immunities,
+      conditionImmunities: modifiers.conditionImmunities,
+    },
     // Monsters are unlinked so each copy tracks its own HP, and sized from
     // the stat block: a Gargantuan dragon lands as a 4x4 token.
     prototypeToken: {
@@ -133,7 +144,13 @@ export async function stampMonster(
   // Its attacks, traits and legendary actions. Without these the NPC arrives
   // with an empty attack table and the DM rolls a goblin's scimitar by hand
   // off a stat block the app would not show them.
-  const stamped = itemsFromMonster(monster.data as Record<string, unknown>, monster.str);
+  const stamped = [
+    ...itemsFromMonster(monster.data as Record<string, unknown>, monster.str),
+    // The published damage lines this refused to model, kept as prose. A
+    // resistance that depends on whether the sword is silvered is not a fact
+    // the engine can apply, and inventing one would halve every magic hit too.
+    ...modifierNotes(modifiers),
+  ];
   if (stamped.length > 0) {
     await db.insert(items).values(
       stamped.map((entry, index) => ({
@@ -310,6 +327,16 @@ export async function actorRoutes(app: FastifyInstance): Promise<void> {
       grants,
       subclassFeatures,
       publishedSubclass: published[0]?.name ?? null,
+      /**
+       * Which edition this character is played under.
+       *
+       * The sheet needs it for the species chips: 2024 grants no ability
+       * increases from species at all, so drawing the 2014 ones tells a 2024
+       * player to add numbers their own rules do not give them. Read off the
+       * campaign the character is assigned to, and 2014 for an unassigned
+       * sheet - which is what every rule in this app has always meant.
+       */
+      ruleset: assignments[0]?.ruleset ?? '2014',
     };
   });
 

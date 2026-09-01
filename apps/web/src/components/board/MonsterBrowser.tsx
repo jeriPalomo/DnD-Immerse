@@ -35,7 +35,14 @@ function params(query: string): URLSearchParams {
  * server's default of 60 with no way to reach the rest, which reads as "the
  * bestiary only has monsters up to C".
  */
-type Difficulty = 'off' | 'easy' | 'medium' | 'hard' | 'deadly';
+/**
+ * `off` plus whatever bands this campaign's edition has.
+ *
+ * Not a fixed union any more: 2014 offers easy/medium/hard/deadly and 2024
+ * offers low/moderate/high, and the two sets share not one word. The server
+ * says which, because the campaign's ruleset lives there.
+ */
+type Difficulty = string;
 
 /** One recommendation: a creature, and how many of it this party can take. */
 interface Suggestion {
@@ -75,6 +82,7 @@ export function MonsterBrowser({
    * be a confident recommendation about a table that does not exist.
    */
   const [difficulty, setDifficulty] = useState<Difficulty>('off');
+  const [bands, setBands] = useState<string[]>([]);
   const [suggested, setSuggested] = useState<Suggestion[] | null>(null);
   const [party, setParty] = useState<{ name: string; level: number }[]>([]);
   const [suggesting, setSuggesting] = useState(false);
@@ -125,6 +133,21 @@ export function MonsterBrowser({
     };
   }, [query]);
 
+  // The bands are needed before anything is chosen, or the picker opens empty
+  // and there is no way to choose the thing that would have loaded them.
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .get<{ bands: string[] }>(`/api/campaigns/${campaignId}/encounter-suggestions`)
+      .then((res) => {
+        if (!cancelled) setBands(res.bands ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId]);
+
   useEffect(() => {
     if (difficulty === 'off') {
       setSuggested(null);
@@ -137,11 +160,13 @@ export function MonsterBrowser({
     void api
       .get<{
         party: { name: string; level: number }[];
+        bands: string[];
         suggestions: Suggestion[];
       }>(`/api/campaigns/${campaignId}/encounter-suggestions?difficulty=${difficulty}`)
       .then((res) => {
         if (cancelled) return;
         setParty(res.party);
+        setBands(res.bands);
         setSuggested(res.suggestions);
       })
       .catch(() => {
@@ -215,17 +240,14 @@ export function MonsterBrowser({
               title="Sized against the levels of the characters in this campaign, using the handbook's thresholds"
               className="rounded border border-ink-600 bg-ink-850 px-2 py-1 text-xs text-ink-100 focus:border-arcane-400 focus:outline-none"
             >
-              {(
-                [
-                  ['off', 'Browse everything'],
-                  ['easy', 'Easy'],
-                  ['medium', 'Average'],
-                  ['hard', 'Hard'],
-                  ['deadly', 'Deadly'],
-                ] as const
-              ).map(([value, label]) => (
+              {/* The edition's own words, from the server. 2024 has no
+                  "deadly" and 2014 has no "moderate", so a hardcoded row of
+                  four buttons offered half this table a difficulty its own
+                  rules cannot answer. */}
+              <option value="off">Browse everything</option>
+              {bands.map((value) => (
                 <option key={value} value={value}>
-                  {label}
+                  {value[0].toUpperCase() + value.slice(1)}
                 </option>
               ))}
             </select>

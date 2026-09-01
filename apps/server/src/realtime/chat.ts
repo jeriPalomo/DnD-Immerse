@@ -16,6 +16,8 @@ import {
   sendMessageSchema,
   tokenDistanceInFeet,
   spellCondition,
+  spellLevelOf,
+  spendSlot,
   tokenDistance,
   spellSaveDC,
   userRoom,
@@ -31,6 +33,7 @@ import type {
   WireAttack,
   WireAttackDamage,
   WireCard,
+  WireCardSlot,
   WireChatMessage,
 } from '@dnd/shared';
 import {
@@ -257,7 +260,12 @@ function damageFor(
   return damageExpression(s, scores, options);
 }
 
-function buildCard(item: Item, actor: Actor, targetTokenId: string | null = null): WireCard {
+function buildCard(
+  item: Item,
+  actor: Actor,
+  targetTokenId: string | null = null,
+  slot: WireCardSlot | null = null,
+): WireCard {
   const s = item.system as Record<string, any>;
   const actions: WireCard['actions'] = [];
   let subtitle = '';
@@ -347,6 +355,7 @@ function buildCard(item: Item, actor: Actor, targetTokenId: string | null = null
     saveAbility,
     saveDC,
     targetTokenId,
+    slot,
   };
 }
 
@@ -631,6 +640,35 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
       ? await tokenIn(input.targetTokenId, campaignId)
       : null;
 
+    /**
+     * The cast is charged here, not on the button that resolves it.
+     *
+     * Posting the card is the moment the spell is cast; everything after it -
+     * attack chaining into damage, or a save and then damage - is resolving
+     * that one cast. Charging per action would spend two slots on a Hold
+     * Person and three on anything that rolls a save, a hit and damage. One
+     * event, one charge.
+     *
+     * The refusal is enforced here rather than left to the panel, which
+     * already greys a spell with no slots left: a gate the server does not
+     * hold is a layout decision, not a rule. The undo is the pips on the
+     * sheet - a card posted to read rather than to cast is one click back.
+     */
+    const level = spellLevelOf(item);
+    const spend = spendSlot(actor.spellSlots, level);
+    if (spend?.slots === null) {
+      socket.emit('error', {
+        message: `No level ${level} slots left. Take a long rest, or correct it on your sheet.`,
+      });
+      return;
+    }
+    if (spend) {
+      await db
+        .update(actors)
+        .set({ spellSlots: spend.slots, updatedAt: Date.now() })
+        .where(eq(actors.id, actor.id));
+    }
+
     await persistAndDeliver(
       io,
       campaignId,
@@ -639,7 +677,12 @@ export function registerChatHandlers(io: IOServer, socket: ChatSocket): void {
         actorId: actor.id,
         kind: 'card',
         body: item.name,
-        cardData: buildCard(item, actor, aimedAt?.id ?? null),
+        cardData: buildCard(
+          item,
+          actor,
+          aimedAt?.id ?? null,
+          spend ? { level, left: spend.state.left, max: spend.state.max } : null,
+        ),
       },
       { authorName: user.displayName, actorName: actor.name },
     );

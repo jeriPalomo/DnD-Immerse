@@ -5,7 +5,9 @@ import {
   itemCategorySchema,
   itemTypeSchema,
   parseItemSystem,
-  partyThresholds,
+  partyBudget,
+  difficultyBands,
+  type Ruleset,
 } from '@dnd/shared';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
@@ -14,6 +16,7 @@ import {
   actorCampaigns,
   actors,
   campaignMembers,
+  campaigns,
   items,
   srdItems,
   srdMonsters,
@@ -384,12 +387,31 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       throw new HttpError(403, 'Only the DM can build encounters');
     }
 
+    // Which edition this table plays. The column has decided which compendium
+    // is imported since the schema was written and the rules engine never once
+    // read it, so these numbers were the 2014 answer in every campaign.
+    const campaignRow = await db
+      .select({ ruleset: campaigns.ruleset })
+      .from(campaigns)
+      .where(eq(campaigns.id, campaignId))
+      .limit(1);
+    const ruleset: Ruleset = campaignRow[0]?.ruleset ?? '2014';
+    const bands = difficultyBands(ruleset);
+
     const query = z
       .object({
-        difficulty: z.enum(['easy', 'medium', 'hard', 'deadly']).default('medium'),
+        // Validated against the edition's own words rather than a fixed list:
+        // 2024 has no "deadly" and 2014 has no "moderate", and accepting a band
+        // an edition does not have would answer a question it cannot ask.
+        difficulty: z.string().optional(),
         limit: z.coerce.number().int().min(1).max(60).default(24),
       })
       .parse(request.query);
+
+    const difficulty = query.difficulty ?? bands[Math.floor(bands.length / 2)];
+    if (!bands.includes(difficulty)) {
+      throw new HttpError(400, `A ${ruleset} campaign has no "${difficulty}" difficulty`);
+    }
 
     const party = await db
       .select({ level: actors.level, name: actors.name })
@@ -400,10 +422,10 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
     if (party.length === 0) {
       // Said rather than guessed at. A default party of four level ones would
       // be a confident recommendation about a table that does not exist.
-      return { party: [], thresholds: null, suggestions: [] };
+      return { party: [], thresholds: null, ruleset, bands, suggestions: [] };
     }
 
-    const thresholds = partyThresholds(party.map((row) => row.level));
+    const budget = partyBudget(party.map((row) => row.level), ruleset);
 
     const rows = await db
       .select({
@@ -423,17 +445,15 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
 
     const suggestions = rows
       .map((monster) => {
-        const count = howManyFit(monster.xp, thresholds, query.difficulty);
+        const count = howManyFit(monster.xp, budget, difficulty);
         if (count === 0) return null;
 
         // Only creatures that actually LAND on the difficulty asked for. A rat
         // fits under "hard" a thousand at a time, and offering it would bury
         // every real answer under vermin.
-        const { difficulty, adjustedXp } = encounterDifficulty(
-          Array(count).fill(monster.xp),
-          thresholds,
-        );
-        if (difficulty !== query.difficulty) return null;
+        const landed = encounterDifficulty(Array(count).fill(monster.xp), budget);
+        if (landed.difficulty !== difficulty) return null;
+        const adjustedXp = landed.adjustedXp;
 
         return { ...monster, count, adjustedXp };
       })
@@ -445,7 +465,12 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
 
     return {
       party: party.map((row) => ({ name: row.name, level: row.level })),
-      thresholds,
+      // Kept under its old name so nothing downstream has to be rewritten, and
+      // sent as the edition's own bands so the picker can render what this
+      // table actually has rather than four hardcoded buttons.
+      thresholds: Object.fromEntries(budget.bands.map((b) => [b.name, b.xp])),
+      ruleset,
+      bands,
       suggestions,
     };
   });

@@ -28,6 +28,7 @@ import type { Socket } from 'socket.io';
 import type {
   AbilityScores,
   ClientToServerEvents,
+  DamageModifiers,
   ServerToClientEvents,
   WireEncounter,
   WireInitiativeEntry,
@@ -812,6 +813,35 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       }
     }
 
+    /**
+     * A creature immune to the condition does not get it.
+     *
+     * `damageModifiers.conditionImmunities` has been in the schema since it was
+     * written and was read by nothing outside a test fixture, so a golem could
+     * be paralysed and a skeleton poisoned. Refused rather than silently
+     * dropped: a button that appears to work and quietly does nothing is worse
+     * than one that says why, and "Iron Golem is immune to paralyzed" is the
+     * kind of thing a DM wants to hear out loud at the table.
+     *
+     * Partial application is allowed on purpose - a fireball's worth of targets
+     * where one is immune should still land on the other five, and the line
+     * names who shrugged it off.
+     */
+    const immune: string[] = [];
+    const susceptible: typeof targets = [];
+    for (const token of targets) {
+      if (await immuneToCondition(token, input.condition)) immune.push(token.name);
+      else susceptible.push(token);
+    }
+
+    if (susceptible.length === 0) {
+      socket.emit('error', {
+        message: `${immune.join(', ')} ${immune.length === 1 ? 'is' : 'are'} immune to ${input.condition}.`,
+      });
+      return;
+    }
+    targets = susceptible;
+
     // Timers are measured from the round in progress. With no encounter running
     // there is nothing to count, so it lasts until removed and says so.
     const round = await currentRound(ctx.campaignId);
@@ -835,7 +865,10 @@ export function registerCombatHandlers(io: IOServer, socket: CombatSocket): void
       io,
       ctx.campaignId,
       user.id,
-      `${targets.map((t) => t.name).join(', ')} ${targets.length === 1 ? 'is' : 'are'} ${input.condition}${lasting}.`,
+      `${targets.map((t) => t.name).join(', ')} ${targets.length === 1 ? 'is' : 'are'} ${input.condition}${lasting}.` +
+        (immune.length > 0
+          ? ` ${immune.join(', ')} ${immune.length === 1 ? 'is' : 'are'} immune.`
+          : ''),
     );
 
     await broadcastEffects(ctx.campaignId, targets.map((token) => token.sceneId));
@@ -1096,10 +1129,22 @@ async function effectIn(
 }
 
 /** Resistances and immunities come from the token's actor sheet. */
-async function damageModifiersFor(token: Token) {
+async function damageModifiersFor(token: Token): Promise<Partial<DamageModifiers>> {
   if (!token.actorId) return {};
   const found = await db.select().from(actors).where(eq(actors.id, token.actorId)).limit(1);
   return found[0]?.damageModifiers ?? {};
+}
+
+/**
+ * Whether the stat block says this creature cannot be given that condition.
+ *
+ * A bare token with no sheet behind it is immune to nothing - there is no block
+ * to consult, and refusing on a missing sheet would make the DM's own scratch
+ * tokens unconditionable.
+ */
+async function immuneToCondition(token: Token, condition: string): Promise<boolean> {
+  const modifiers = await damageModifiersFor(token);
+  return (modifiers.conditionImmunities ?? []).includes(condition);
 }
 
 /**

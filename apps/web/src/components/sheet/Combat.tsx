@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   attackBonusParts,
   bonusTotal,
@@ -129,6 +130,11 @@ export function CombatStats({
   );
 }
 
+/** 1st, 2nd, 3rd, 4th... Nine levels, so the three irregulars are the whole rule. */
+function ordinal(n: number): string {
+  return `${n}${['th', 'st', 'nd', 'rd'][n] ?? 'th'}`;
+}
+
 function Stat({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-ink-700 bg-ink-850 px-2 py-2 text-center">
@@ -256,25 +262,262 @@ export function AttackList({ actor, weapons }: { actor: Actor; weapons: Item[] }
   );
 }
 
-export function SpellcastingHeader({ actor }: { actor: Actor }) {
+export function SpellcastingHeader({
+  actor,
+  editable = false,
+  onChange,
+}: {
+  actor: Actor;
+  editable?: boolean;
+  onChange?: (fields: Partial<Actor>) => void;
+}) {
   if (!actor.spellcastingAbility) return null;
 
   const scores = { str: actor.str, dex: actor.dex, con: actor.con, int: actor.int, wis: actor.wis, cha: actor.cha };
   const ability = actor.spellcastingAbility;
 
   return (
-    <div className="mb-3 grid grid-cols-3 gap-2">
-      <Stat label="Ability">
-        <div className="font-display text-lg text-ink-100 uppercase">{ability}</div>
-      </Stat>
-      <Stat label="Save DC">
-        <div className="font-display text-lg text-ink-100">{spellSaveDC(scores, actor.level, ability)}</div>
-      </Stat>
-      <Stat label="Attack">
-        <div className="font-display text-lg text-ink-100">
-          {formatModifier(spellAttackBonus(scores, actor.level, ability))}
-        </div>
-      </Stat>
+    <>
+      <div className="mb-3 grid grid-cols-3 gap-2">
+        <Stat label="Ability">
+          <div className="font-display text-lg text-ink-100 uppercase">{ability}</div>
+        </Stat>
+        <Stat label="Save DC">
+          <div className="font-display text-lg text-ink-100">{spellSaveDC(scores, actor.level, ability)}</div>
+        </Stat>
+        <Stat label="Attack">
+          <div className="font-display text-lg text-ink-100">
+            {formatModifier(spellAttackBonus(scores, actor.level, ability))}
+          </div>
+        </Stat>
+      </div>
+      <SpellSlotTrack actor={actor} editable={editable} onChange={onChange} />
+    </>
+  );
+}
+
+/**
+ * Slots, as pips, one row per level the sheet has any at.
+ *
+ * There was no slot display anywhere in this app - not here, not in the table
+ * drawer, not on the board - while two pieces of logic read the count to decide
+ * whether a spell could be cast. So the resource governed play and could
+ * neither be seen nor spent. Casting a spell now spends one on the server; this
+ * is where it is read back, and where it is put right.
+ *
+ * Clicking a pip toggles it, which is deliberately the whole editing story. It
+ * is the undo for a card posted to read a spell rather than to cast it, and it
+ * is how a table houses-rules a slot back after a spell fizzled - so the server
+ * may refuse a cast outright without ever trapping anybody.
+ */
+export function SpellSlotTrack({
+  actor,
+  editable,
+  onChange,
+}: {
+  actor: Actor;
+  editable?: boolean;
+  onChange?: (fields: Partial<Actor>) => void;
+}) {
+  const slots = actor.spellSlots;
+  const levels = slots ? slots.max.map((max, i) => ({ level: i + 1, max, used: slots.used[i] ?? 0 })) : [];
+  const tracked = levels.filter((row) => row.max > 0);
+
+  // A caster with no slot table is a cantrip-only sheet or a stamped creature.
+  // An empty grid of headings would say less than nothing.
+  if (tracked.length === 0) return null;
+
+  function setUsed(level: number, used: number) {
+    if (!editable || !onChange || !slots) return;
+    const next = slots.used.slice();
+    next[level - 1] = used;
+    onChange({ spellSlots: { max: slots.max, used: next } });
+  }
+
+  return (
+    <div className="mb-3 rounded-lg border border-ink-700 bg-ink-850 px-3 py-2">
+      <div className="mb-1.5 text-[10px] tracking-wider text-ink-400 uppercase">Spell slots</div>
+      <div className="space-y-1">
+        {tracked.map(({ level, max, used }) => (
+          <div key={level} className="flex items-center gap-2">
+            <span className="w-7 shrink-0 font-display text-sm text-ink-400">{ordinal(level)}</span>
+            <div className="flex flex-wrap gap-1">
+              {Array.from({ length: max }, (_, i) => {
+                const spent = i < used;
+                // Clicking a pip sets `used` to everything up to and including
+                // it, or back to it - so one click both spends the next slot
+                // and recovers the last, rather than needing two controls.
+                const target = spent ? i : i + 1;
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    disabled={!editable}
+                    onClick={() => setUsed(level, target)}
+                    aria-label={`Level ${level} slot ${i + 1} of ${max}, ${spent ? 'spent' : 'available'}`}
+                    title={editable ? (spent ? 'Give this slot back' : 'Mark this slot spent') : undefined}
+                    className={`size-4 rounded-full border transition-colors ${
+                      spent
+                        ? 'border-ink-600 bg-ink-800'
+                        : 'border-arcane-400 bg-arcane-500/70'
+                    } ${editable ? 'cursor-pointer hover:border-arcane-300' : 'cursor-default'}`}
+                  />
+                );
+              })}
+            </div>
+            <span className="ml-auto shrink-0 text-[11px] text-ink-500">
+              {Math.max(0, max - used)}/{max}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
+  );
+}
+
+/** The twelve damage types 5e has. A closed set, so this is a picker not a text box. */
+const DAMAGE_TYPES = [
+  'acid', 'bludgeoning', 'cold', 'fire', 'force', 'lightning', 'necrotic',
+  'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder',
+] as const;
+
+const MODIFIER_ROWS = [
+  { key: 'resistances', label: 'Resistant to', hint: 'Takes half damage of this type.' },
+  { key: 'immunities', label: 'Immune to', hint: 'Takes none of this type.' },
+  { key: 'vulnerabilities', label: 'Vulnerable to', hint: 'Takes double damage of this type.' },
+] as const;
+
+/**
+ * What this creature shrugs off, and what it cannot be given.
+ *
+ * `applyDamage` has read `damageModifiers` since the schema was written, and
+ * `effect:apply` now honours `conditionImmunities` - but until this panel
+ * existed there was no way to *set* either. The mechanic was complete, tested
+ * and unreachable: a dwarf never resisted poison because nobody could say she
+ * did. The same shape as `spellSlots`, one column along.
+ *
+ * Read-only on a creature stamped from the bestiary, following the lock the
+ * rest of that sheet already carries. Unlike hit points, which the handbook
+ * expects a DM to vary, immunity to fire is what an Ancient Red Dragon *is* -
+ * and the compendium has already filled it in.
+ */
+export function DamageModifierPanel({
+  actor,
+  editable,
+  onChange,
+}: {
+  actor: Actor;
+  editable: boolean;
+  onChange: (fields: Partial<Actor>) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const mods = actor.damageModifiers ?? {};
+  const conditionImmunities = mods.conditionImmunities ?? [];
+  const anything =
+    MODIFIER_ROWS.some((row) => (mods[row.key] ?? []).length > 0) || conditionImmunities.length > 0;
+
+  // Nothing to say and no way to say it: a locked sheet with no modifiers gets
+  // no empty headings.
+  if (!editable && !anything) return null;
+
+  function toggle(key: (typeof MODIFIER_ROWS)[number]['key'], type: string) {
+    if (!editing) return;
+    const current = mods[key] ?? [];
+    const next = current.includes(type) ? current.filter((t) => t !== type) : [...current, type];
+    // A type is one thing at a time. Resisting and being immune to fire at once
+    // is not a state 5e has, and `applyDamage` would have to pick one.
+    const others = MODIFIER_ROWS.filter((r) => r.key !== key).map((r) => [
+      r.key,
+      (mods[r.key] ?? []).filter((t) => t !== type),
+    ]);
+    onChange({
+      damageModifiers: {
+        ...mods,
+        conditionImmunities,
+        ...Object.fromEntries(others),
+        [key]: next,
+      } as Actor['damageModifiers'],
+    });
+  }
+
+  return (
+    <section className="rounded-lg border border-ink-700 bg-ink-850 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-[10px] tracking-wider text-ink-500 uppercase">Damage & conditions</h3>
+        {editable && (
+          <button
+            type="button"
+            onClick={() => setEditing((on) => !on)}
+            className="rounded px-1.5 py-0.5 text-[11px] text-ink-400 hover:bg-ink-800 hover:text-ink-100"
+          >
+            {editing ? 'Done' : anything ? 'Edit' : 'Add'}
+          </button>
+        )}
+      </div>
+
+      {!editing && !anything && (
+        <p className="text-[11px] text-ink-600">
+          Nothing yet — most characters resist nothing, and a stat block fills this in itself.
+        </p>
+      )}
+
+      <div className="space-y-2">
+        {MODIFIER_ROWS.map(({ key, label, hint }) => {
+          const chosen = mods[key] ?? [];
+          // The full palette is thirty-six chips across three rows, and on a
+          // character who resists nothing - which is most of them - that is
+          // 187px of grey on every sheet. Shown only while editing; the rest
+          // of the time this is a list of facts, and usually an empty one.
+          if (!editing && chosen.length === 0) return null;
+          return (
+            <div key={key}>
+              <div className="mb-1 text-xs text-ink-400" title={hint}>
+                {label}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {(editing ? DAMAGE_TYPES : chosen).map((type) => {
+                  const on = chosen.includes(type);
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      disabled={!editing}
+                      onClick={() => toggle(key, type)}
+                      className={`rounded px-1.5 py-0.5 text-[11px] capitalize transition-colors ${
+                        on
+                          ? 'bg-arcane-500/25 text-arcane-200 ring-1 ring-arcane-400/50'
+                          : 'bg-ink-800 text-ink-500 hover:text-ink-300'
+                      } ${editing ? 'cursor-pointer' : 'cursor-default'}`}
+                    >
+                      {type}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+
+        {conditionImmunities.length > 0 && (
+          <div>
+            {/* Read-only even on an editable sheet: these come from a stat block,
+                and a character with condition immunities is rare enough that
+                typing one is the DM's job on the NPC rather than a control
+                every player meets. */}
+            <div className="mb-1 text-xs text-ink-400">Cannot be</div>
+            <div className="flex flex-wrap gap-1">
+              {conditionImmunities.map((condition) => (
+                <span
+                  key={condition}
+                  className="rounded bg-ink-800 px-1.5 py-0.5 text-[11px] text-ink-300 capitalize"
+                >
+                  {condition}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

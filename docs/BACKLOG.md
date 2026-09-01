@@ -1870,6 +1870,66 @@ Recorded because the answer has three surprises in it.
 
 ---
 
+## Three mechanics that were built and could not fire — 2026-09-01
+
+Asked what the app still needed before going live. The answer was not a missing
+feature: it was this codebase's own signature bug, three more times. A rule
+written, tested, reachable in the engine, and wired to nothing that sets its
+input — the shape of `movementBlocked`, `deriveActor`, `guards.ts`, `subclass`,
+`XP_THRESHOLDS` and `actingTokenId` before it.
+
+**Spell slots were never spent.** `spellSlots.used` went down on a long rest and
+was read twice — `slotsAvailable` gated the target panel, `reachBands` skipped a
+spell "with no slots left" — and nothing anywhere incremented it. `grep -r slot
+apps/web/src` found no slot display at all: not the sheet, not the drawer, not
+the board. So a wizard had infinite spells, could not see a count, and both
+readers could only ever be true. Charged at `chat:card` because posting the card
+*is* the cast; pips on the sheet are the undo.
+
+**Resistance and immunity could not be set.** `applyDamage` has applied
+`damageModifiers` since the schema was written, and no UI wrote it and
+`stampMonster` never read it. A stamped Ancient Red Dragon took full fire
+damage. 146 of the 334 published monsters carry a damage type this can now
+apply and 92 carry condition immunities — all of it sitting unread in the same
+`data` blob that held `image` for a year.
+
+**`conditionImmunities` was read by nothing** outside one test fixture, so a
+golem could be paralysed.
+
+Two things worth recording beyond the fixes.
+
+**The dataset answered the hard question rather than a guess doing it.** Across
+all 334 monsters there are exactly 19 distinct damage strings: 12 bare types and
+7 qualified ("...from nonmagical weapons that aren't silvered"). Importing the
+7 would halve every hit from a magic sword, so they become prose the DM reads.
+All 13 published `condition_immunities` indexes are exact members of
+`CONDITIONS`, so no mapping table was needed — measured, not assumed.
+
+**Three of my own checks passed for the wrong reason, and one hid a real one.**
+The runthrough's fire-immunity check read the *actor's* hit points, but a
+stamped monster is unlinked so damage writes to the token — it would have read
+256/256 with no immunity and no damage arriving either. The browser check read
+the resistance panel's text with the palette *open*, where "Resistant to acid
+bludgeoning cold fire…" appears whether or not anything is chosen, so its clear
+branch toggled fire on and straight back off and then blamed the app. Both were
+caught by running them twice and by reverting the fix; a check that has not been
+seen to fail is not yet a check.
+
+**Also:** `campaigns.ruleset` is finally read by the rules engine (see
+[RULES-2024.md](RULES-2024.md)), and login and register are rate limited. The
+limiter's rationale was trimmed after measuring: 64 concurrent argon2 hashes
+cost 134 MiB rather than 64 × 19, because the hashing runs on a bounded thread
+pool. The pool also serves file I/O, so the plausible damage is the table going
+unresponsive, not the process dying — which is a different claim and worth
+having written down accurately.
+
+**Still absent, deliberately:** concentration is broken correctly by damage and
+is never applied automatically, so a DM adds it by hand; `actors.currency` has
+no UI; there is no upcasting; and a hand-written NPC cannot be given condition
+immunities (only a stamped one brings them). None is a regression.
+
+---
+
 ## Later: Online mode and Local mode
 
 A direction, not a task yet.

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { api } from '../lib/api.js';
-import type { ActorInput, ItemType, OwnershipLevel } from '@dnd/shared';
+import type { ActorInput, ItemType, OwnershipLevel, Ruleset } from '@dnd/shared';
 
 export type Actor = ActorInput & {
   id: string;
@@ -64,6 +64,13 @@ interface SheetState {
   subclassFeatures: SubclassFeature[];
   /** The subclass the compendium carries for this class, for the field to suggest. */
   publishedSubclass: string | null;
+  /**
+   * The edition this character's campaign is played under.
+   *
+   * 2014 for an unassigned sheet, which is what every rule in this app meant
+   * before the engine could ask.
+   */
+  ruleset: Ruleset;
   campaigns: SheetCampaign[];
   access: OwnershipLevel;
   grants: { userId: string; level: number }[];
@@ -97,6 +104,7 @@ export const useSheet = create<SheetState>((set, get) => ({
   items: [],
   subclassFeatures: [],
   publishedSubclass: null,
+  ruleset: '2014',
   campaigns: [],
   access: 0,
   grants: [],
@@ -121,6 +129,7 @@ export const useSheet = create<SheetState>((set, get) => ({
         grants: { userId: string; level: number }[];
         subclassFeatures: SubclassFeature[];
         publishedSubclass: string | null;
+        ruleset: Ruleset;
       }>(`/api/actors/${id}`);
       set({ ...res, loading: false });
     } catch (err) {
@@ -140,6 +149,7 @@ export const useSheet = create<SheetState>((set, get) => ({
       grants: [],
       subclassFeatures: [],
       publishedSubclass: null,
+      ruleset: '2014',
       error: null,
     });
   },

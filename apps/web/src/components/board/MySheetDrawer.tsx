@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { OWNERSHIP, type AbilityKey, type ProficiencyLevel, type SkillKey } from '@dnd/shared';
 import { AbilityScoresBlock, DerivedStats, SavingThrows, SkillList } from '../sheet/Abilities.js';
-import { AttackList, CombatStats, SpellcastingHeader } from '../sheet/Combat.js';
+import { AttackList, CombatStats, DamageModifierPanel, SpellcastingHeader } from '../sheet/Combat.js';
 import { FeaturePanel, InventoryPanel, SpellPanel } from '../sheet/ItemPanels.js';
 import { RestControl } from '../sheet/RestControl.js';
 import { useSheet } from '../../store/sheet.js';
@@ -114,9 +114,12 @@ export function MySheetDrawer({ actorId, onClose }: { actorId: string; onClose: 
 
               <DerivedStats actor={actor} />
 
+              <DamageModifierPanel actor={actor} editable={editable} onChange={sheet.patch} />
+
               <AbilityScoresBlock
                 actor={actor}
                 editable={editable}
+                ruleset={sheet.ruleset}
                 onChange={(key: AbilityKey, value) => sheet.patch({ [key]: value })}
               />
 
@@ -146,7 +149,7 @@ export function MySheetDrawer({ actorId, onClose }: { actorId: string; onClose: 
 
               {actor.spellcastingAbility && (
                 <Block title="Spells">
-                  <SpellcastingHeader actor={actor} />
+                  <SpellcastingHeader actor={actor} editable={editable} onChange={sheet.patch} />
                   <SpellPanel
                     spells={spells}
                     editable={editable}

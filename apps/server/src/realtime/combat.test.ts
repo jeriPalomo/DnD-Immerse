@@ -1256,3 +1256,199 @@ describe('a save halves damage and never a heal', () => {
     expect(await move({ amount: 8, damageType: '', healing: true, halved: true })).toBe(8);
   });
 });
+
+/**
+ * Casting spends a slot, and a sheet with no slots is charged for nothing.
+ *
+ * `spellSlots.used` was a column that only ever went *down*: a long rest reset
+ * it, `slotsAvailable` and `reachBands` read it to decide whether a spell could
+ * be cast at all, and nothing in the codebase ever incremented it. So both
+ * readers could only be true, no screen displayed a slot, and a wizard had
+ * infinite spells.
+ *
+ * Charged when the card is posted rather than when a button on it is pressed:
+ * posting is the cast, and everything after it - an attack chaining into
+ * damage, or a save and then damage - resolves that same cast. Per-action would
+ * spend two slots on a Hold Person.
+ */
+describe('casting spends a spell slot', () => {
+  let magicMissileId: string;
+  let lightId: string;
+
+  /** The card as posted, so the slot can be read off the wire. */
+  async function cast(itemId: string) {
+    const posted = new Promise<any>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 3000);
+      const handler = (p: { message: { cardData: unknown } }) => {
+        if (!p.message.cardData) return;
+        clearTimeout(timer);
+        dmSocket.off('chat:message', handler);
+        resolve(p.message.cardData);
+      };
+      dmSocket.on('chat:message', handler);
+    });
+    aliceSocket.emit('chat:card', { itemId, actorId, targetTokenId: null } as never);
+    return posted;
+  }
+
+  /** What the server has stored, never what the client believes. */
+  async function slotsOnServer(): Promise<{ max: number[]; used: number[] }> {
+    const { actor } = await api<{ actor: { spellSlots: { max: number[]; used: number[] } } }>(
+      'GET', `/api/actors/${actorId}`, undefined, alice.cookie,
+    );
+    return actor.spellSlots;
+  }
+
+  beforeAll(async () => {
+    const missile = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      { type: 'spell', name: 'Magic Missile', system: { level: 1, damageDice: '3d4', damageType: 'force' } },
+      alice.cookie,
+    );
+    magicMissileId = missile.item.id;
+
+    const light = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      { type: 'spell', name: 'Light', system: { level: 0 } },
+      alice.cookie,
+    );
+    lightId = light.item.id;
+
+    await api('PATCH', `/api/actors/${actorId}`,
+      { spellSlots: { max: [2, 0, 0, 0, 0, 0, 0, 0, 0], used: [0, 0, 0, 0, 0, 0, 0, 0, 0] } },
+      alice.cookie);
+  });
+
+  it('takes one, and says so on the card', async () => {
+    const card = await cast(magicMissileId);
+    expect(card.slot).toEqual({ level: 1, left: 1, max: 2 });
+    expect((await slotsOnServer()).used[0]).toBe(1);
+  });
+
+  it('takes another, and then refuses', async () => {
+    const second = await cast(magicMissileId);
+    expect(second.slot.left).toBe(0);
+
+    // The panel already greys a spell with no slots left. A gate the server
+    // does not hold is a layout decision, not a rule.
+    const refusal = next<{ message: string }>(aliceSocket, 'error', 3000);
+    aliceSocket.emit('chat:card', { itemId: magicMissileId, actorId, targetTokenId: null } as never);
+    expect((await refusal)?.message).toMatch(/no level 1 slots left/i);
+
+    // And the refusal spent nothing: two used, not three.
+    expect((await slotsOnServer()).used[0]).toBe(2);
+  });
+
+  it('never charges for a cantrip', async () => {
+    const before = (await slotsOnServer()).used.slice();
+    const card = await cast(lightId);
+    expect(card.slot).toBeNull();
+    expect((await slotsOnServer()).used).toEqual(before);
+  });
+
+  it('charges nothing at a level the sheet has no slots at', async () => {
+    // The rule that keeps stamped monsters casting: a stat block publishes no
+    // slot table, so charging every caster would make every NPC spell
+    // unusable. Gating on `type === 'character'` would be the same rule
+    // written less honestly.
+    const fireball = await api<{ item: { id: string } }>(
+      'POST', `/api/actors/${actorId}/items`,
+      { type: 'spell', name: 'Fireball', system: { level: 3, damageDice: '8d6' } },
+      alice.cookie,
+    );
+    const card = await cast(fireball.item.id);
+    expect(card.slot).toBeNull();
+    expect((await slotsOnServer()).used[2]).toBe(0);
+  });
+
+  it('gives them all back on a long rest', async () => {
+    await api('POST', `/api/actors/${actorId}/rest`, { type: 'long' }, alice.cookie);
+    expect((await slotsOnServer()).used).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  });
+});
+
+/**
+ * A creature the stat block says cannot be given a condition is not given it.
+ *
+ * `damageModifiers.conditionImmunities` sat in the schema read by nothing
+ * outside a test fixture, so a golem could be paralysed and a skeleton
+ * poisoned. Refused rather than silently dropped: a button that appears to
+ * work and quietly does nothing is the worse failure, and "immune to poisoned"
+ * is what a DM wants said out loud.
+ */
+describe('condition immunity is honoured', () => {
+  let golemToken: string;
+  let goblinToken: string;
+
+  beforeAll(async () => {
+    const golem = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors',
+      { name: 'Iron Golem', type: 'npc', campaignId, hpMax: 40, hpCurrent: 40 },
+      dm.cookie,
+    );
+    await api('PATCH', `/api/actors/${golem.actor.id}`, {
+      damageModifiers: {
+        resistances: [], vulnerabilities: [], immunities: ['poison'],
+        conditionImmunities: ['paralyzed', 'poisoned'],
+      },
+    }, dm.cookie);
+
+    const plain = await api<{ actor: { id: string } }>(
+      'POST', '/api/actors',
+      { name: 'Plain Goblin', type: 'npc', campaignId, hpMax: 7, hpCurrent: 7 },
+      dm.cookie,
+    );
+
+    let created = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, actorId: golem.actor.id, name: 'Iron Golem', x: 7, y: 7, hp: 40, maxHp: 40,
+    } as never);
+    golemToken = (await created)!.token.id;
+
+    created = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, actorId: plain.actor.id, name: 'Plain Goblin', x: 8, y: 7, hp: 7, maxHp: 7,
+    } as never);
+    goblinToken = (await created)!.token.id;
+  });
+
+  it('refuses, and says which creature and which condition', async () => {
+    const refusal = next<{ message: string }>(dmSocket, 'error', 3000);
+    dmSocket.emit('effect:apply', { tokenIds: [golemToken], condition: 'paralyzed', rounds: null } as never);
+    expect((await refusal)?.message).toMatch(/Iron Golem.*immune to paralyzed/i);
+  });
+
+  it('still applies a condition it is not immune to', async () => {
+    // The immunity is per condition, not a blanket shield. Read off the
+    // scene state, which is what `broadcastEffects` actually pushes - there
+    // is no `effect:state` event, and asserting one would have been a test
+    // shaped from memory rather than from the handler.
+    const pushed = next<{ tokens: WireToken[] }>(dmSocket, 'scene:state', 3000);
+    dmSocket.emit('effect:apply', { tokenIds: [golemToken], condition: 'prone', rounds: null } as never);
+    const golem = (await pushed)?.tokens.find((t) => t.id === golemToken);
+    expect(golem?.conditions).toContain('prone');
+  });
+
+  it('lands on everyone else when one of a group is immune', async () => {
+    // A fireball's worth of targets where one shrugs it off must still catch
+    // the other five, and the log names who did not take it.
+    const posted = new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 3000);
+      const handler = (p: { message: { body: string; kind: string } }) => {
+        if (p.message.kind !== 'system' || !/poisoned/i.test(p.message.body)) return;
+        clearTimeout(timer);
+        dmSocket.off('chat:message', handler);
+        resolve(p.message.body);
+      };
+      dmSocket.on('chat:message', handler);
+    });
+
+    dmSocket.emit('effect:apply', {
+      tokenIds: [golemToken, goblinToken], condition: 'poisoned', rounds: null,
+    } as never);
+
+    const body = await posted;
+    expect(body).toMatch(/Plain Goblin is poisoned/i);
+    expect(body).toMatch(/Iron Golem is immune/i);
+  });
+});

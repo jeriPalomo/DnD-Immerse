@@ -1009,6 +1009,13 @@ function ItemCard({
     <div className="mt-1 rounded-lg border border-ink-700 bg-ink-850 px-3 py-2">
       <div className="font-display text-ink-100">{card.itemName}</div>
       <div className="text-xs text-ink-500">{card.subtitle}</div>
+      {/* A resource that leaves silently is one nobody trusts. Named at the
+          moment it is spent, beside the spell that spent it. */}
+      {card.slot && (
+        <div className="mt-0.5 text-xs text-arcane-300">
+          Level {card.slot.level} slot spent — {card.slot.left} of {card.slot.max} left
+        </div>
+      )}
 
       {/*
         What the buttons will roll, before anybody presses one.

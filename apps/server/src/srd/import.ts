@@ -17,6 +17,7 @@ import {
   auditSpellConditions,
   auditAsiLevels,
   auditXpByCr,
+  CONDITIONS,
   ASI_LEVELS,
   XP_BY_CR,
   parseRange,
@@ -33,6 +34,7 @@ import {
   srdTraits,
 } from '../db/schema.js';
 import { paths } from '../env.js';
+import { modifiersFromMonster } from '../lib/monsterItems.js';
 
 const BASE_2014 = 'https://raw.githubusercontent.com/5e-bits/5e-database/main/src/2014/en';
 const BASE_2024 = 'https://raw.githubusercontent.com/5e-bits/5e-database/main/src/2024/en';
@@ -725,6 +727,7 @@ export async function importSrd(): Promise<void> {
   );
 
   reportXpByCr(monsterRows);
+  reportDamageModifiers(monsterRows.map((row) => row.data as Record<string, unknown>));
   console.log('  2024 spells are not published in the SRD dataset; 2024 campaigns use the 2014 list');
 
   console.log(
@@ -832,6 +835,61 @@ function reportXpByCr(monsters: { name: string; challengeRating: string; xp: num
     // Not a failure - nothing is published at CR 29 - but worth saying, since
     // an unchecked number is a hand-entered one nothing can verify.
     console.log(`    no published monster to check against: CR ${audit.unchecked.join(', ')}`);
+  }
+}
+
+/**
+ * What the bestiary says creatures shrug off, and what this refused to model.
+ *
+ * `damageModifiers` is applied by `applyDamage` and was written by nothing for
+ * the life of the project, exactly as `image` sat unread in the same blob. Now
+ * that `stampMonster` reads it, the counts are worth printing for the reason
+ * `auditXpByCr` prints its own: they are the tell that upstream has changed
+ * shape underneath us.
+ *
+ * The loud half is the unknown string. Nineteen distinct values exist today,
+ * twelve of them bare damage types and seven qualified prose. A twentieth is
+ * either a new type - which belongs in `DAMAGE_TYPES` and is currently being
+ * silently discarded - or new prose, which is correctly becoming a note. Those
+ * want opposite responses, and only naming it tells them apart.
+ */
+function reportDamageModifiers(monsters: Record<string, unknown>[]): void {
+  let withType = 0;
+  let proseOnly = 0;
+  let withCondition = 0;
+  const unknownConditions = new Set<string>();
+  const prose = new Set<string>();
+
+  for (const monster of monsters) {
+    const m = modifiersFromMonster(monster);
+    const types = [...m.resistances, ...m.vulnerabilities, ...m.immunities];
+    if (types.length > 0) withType += 1;
+    else if (m.qualified.length > 0) proseOnly += 1;
+    if (m.conditionImmunities.length > 0) withCondition += 1;
+    for (const line of m.qualified) prose.add(line.text);
+    for (const name of m.conditionImmunities) {
+      if (!CONDITIONS.includes(name as (typeof CONDITIONS)[number])) unknownConditions.add(name);
+    }
+  }
+
+  console.log(
+    `  damage modifiers: ${withType} of ${monsters.length} monsters carry a damage type this can apply, ` +
+      `${withCondition} carry condition immunities`,
+  );
+  console.log(
+    `    ${proseOnly} publish only qualified prose ("...from nonmagical weapons"), ` +
+      `kept as a feature to read rather than guessed at`,
+  );
+
+  // A condition name with no match can never fire and nothing else would notice.
+  for (const name of unknownConditions) {
+    console.log(`    WARNING: condition immunity "${name}" matches no condition this app knows`);
+  }
+  if (prose.size > 7) {
+    console.log(
+      `    NOTE: ${prose.size} distinct qualified lines, up from the 7 this was written against — ` +
+        `check whether any is now a bare damage type that belongs in DAMAGE_TYPES`,
+    );
   }
 }
 

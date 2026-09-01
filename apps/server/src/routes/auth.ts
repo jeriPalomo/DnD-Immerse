@@ -11,6 +11,7 @@ import {
   sessionCookieOptions,
 } from '../auth/session.js';
 import { HttpError, assertUser, requireAuth } from '../auth/guards.js';
+import { rateLimitLogin } from '../auth/rateLimit.js';
 import { newId } from '../lib/id.js';
 import { deleteUpload, storeImage } from '../lib/uploads.js';
 import type { User } from '../db/schema.js';
@@ -55,6 +56,7 @@ async function isDmOfAny(userId: string): Promise<boolean> {
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/auth/register', async (request, reply) => {
+    rateLimitLogin(request);
     const input = registerSchema.parse(request.body);
     const email = input.email.toLowerCase().trim();
 
@@ -79,6 +81,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/api/auth/login', async (request, reply) => {
+    // Before the parse, and well before argon2 is asked to spend 19 MiB: the
+    // cost this protects is the hash, so counting after it would be counting
+    // the thing that already happened.
+    rateLimitLogin(request);
     const input = loginSchema.parse(request.body);
     const email = input.email.toLowerCase().trim();
 

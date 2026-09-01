@@ -264,8 +264,48 @@ export const SPECIES_BONUSES = {
   Tiefling: { int: 1, cha: 2 },
 } as const satisfies Record<(typeof SPECIES)[number], Partial<Record<AbilityKey, number>>>;
 
-/** What a species adds, looked up loosely. Empty for anything unrecognised. */
-export function speciesBonuses(species: string): Partial<Record<AbilityKey, number>> {
+/**
+ * The 2024 species list.
+ *
+ * Half-Elf and Half-Orc are gone - not renamed, removed - and Goliath and Orc
+ * are new. Kept apart from the 2014 array rather than merged, because a list
+ * that is the union of both editions offers every character a species their
+ * own game does not have.
+ */
+export const SPECIES_2024 = [
+  'Aasimar',
+  'Dragonborn',
+  'Dwarf',
+  'Elf',
+  'Gnome',
+  'Goliath',
+  'Halfling',
+  'Human',
+  'Orc',
+  'Tiefling',
+] as const;
+
+export function speciesFor(ruleset: Ruleset): readonly string[] {
+  return ruleset === '2024' ? SPECIES_2024 : SPECIES;
+}
+
+/**
+ * What a species adds, looked up loosely. Empty for anything unrecognised.
+ *
+ * **2024 grants no ability increases from species at all** - they moved to the
+ * character's background, which is a different field this app does not carry a
+ * table for. So the honest answer for a 2024 campaign is none, and the sheet
+ * says where they come from instead of drawing chips that are wrong.
+ *
+ * Defaulted to 2014 rather than made a required argument on purpose: every
+ * caller that has not been told which edition it is in is, by definition, a
+ * caller from before this existed, and 2014 is what it has always meant.
+ */
+export function speciesBonuses(
+  species: string,
+  ruleset: Ruleset = '2014',
+): Partial<Record<AbilityKey, number>> {
+  if (ruleset === '2024') return {};
   const wanted = (species ?? '').trim().toLowerCase();
   const found = SPECIES.find((s) => s.toLowerCase() === wanted);
   return found ? SPECIES_BONUSES[found] : {};
@@ -827,6 +867,27 @@ export function auditXpByCr(
   return audit;
 }
 
+/* ------------------------------------------------------------- editions */
+
+/**
+ * Which edition a campaign is played under.
+ *
+ * `campaigns.ruleset` has decided which compendium rows get imported since the
+ * schema was written, and **the rules engine never once read it** - so every
+ * rule in this file was 2014 in every campaign, whatever the setting said.
+ * That is the change the two tables below depend on: until a rule can ask which
+ * edition it is in, fixing one is a choice between breaking 2014 tables and
+ * leaving 2024 ones wrong.
+ *
+ * Most of 5e did not move. Proficiency bonus by level, ability modifiers, save
+ * DCs, death saves, concentration DCs, XP by challenge rating and the shape of
+ * a rest are identical in both, and `ASI_LEVELS` is audited against the
+ * published data. Only what genuinely differs branches.
+ */
+export type Ruleset = '2014' | '2024';
+
+export const RULESETS: readonly Ruleset[] = ['2014', '2024'];
+
 /* ------------------------------------------------- building an encounter */
 
 /**
@@ -875,36 +936,118 @@ export interface PartyThresholds {
 }
 
 /**
- * The party's thresholds, summed over the characters actually at the table.
+ * The 2024 DMG's XP budget, per character, per level.
+ *
+ * A different table and a different shape: three bands rather than four, and
+ * **no multiplier for the number of monsters** - the 2024 rules dropped it
+ * outright and fold the crowd allowance into these numbers. Reading a 2024
+ * party's budget off the 2014 table and then multiplying by 2.5 for a pack of
+ * goblins overstates a fight badly, which is what this app did in every
+ * campaign until the engine learned to ask.
+ */
+export const ENCOUNTER_BUDGETS_2024: readonly {
+  low: number;
+  moderate: number;
+  high: number;
+}[] = [
+  { low: 0, moderate: 0, high: 0 }, // index 0 is unused
+  { low: 50, moderate: 75, high: 100 },
+  { low: 100, moderate: 150, high: 200 },
+  { low: 150, moderate: 225, high: 400 },
+  { low: 250, moderate: 375, high: 500 },
+  { low: 500, moderate: 750, high: 1100 },
+  { low: 600, moderate: 1000, high: 1400 },
+  { low: 750, moderate: 1300, high: 1700 },
+  { low: 1000, moderate: 1700, high: 2100 },
+  { low: 1300, moderate: 2000, high: 2600 },
+  { low: 1600, moderate: 2300, high: 3100 },
+  { low: 1900, moderate: 2900, high: 4100 },
+  { low: 2200, moderate: 3700, high: 4700 },
+  { low: 2600, moderate: 4200, high: 5400 },
+  { low: 2900, moderate: 4900, high: 6200 },
+  { low: 3300, moderate: 5400, high: 7800 },
+  { low: 3800, moderate: 6100, high: 9800 },
+  { low: 4500, moderate: 7200, high: 11700 },
+  { low: 5000, moderate: 8700, high: 14200 },
+  { low: 5500, moderate: 10700, high: 17200 },
+  { low: 6400, moderate: 13200, high: 22000 },
+];
+
+/**
+ * The difficulty words an edition uses, easiest first.
+ *
+ * Not interchangeable, and deliberately not mapped onto one another: 2024's
+ * "moderate" is not 2014's "medium" with a new label, and there is no 2024
+ * word for "deadly". A UI reads this rather than hardcoding four buttons, so a
+ * 2024 campaign is never offered a band its own rules do not have.
+ */
+export const DIFFICULTY_BANDS = {
+  '2014': ['easy', 'medium', 'hard', 'deadly'],
+  '2024': ['low', 'moderate', 'high'],
+} as const satisfies Record<Ruleset, readonly string[]>;
+
+export function difficultyBands(ruleset: Ruleset): readonly string[] {
+  return DIFFICULTY_BANDS[ruleset];
+}
+
+/**
+ * What the party can take, band by band, in the edition they are playing.
+ *
+ * One shape for both editions - an ordered list of named bands - so everything
+ * downstream counts rather than knowing which words exist. `trivial` is not a
+ * band: it is what "below the first one" is called, in both editions.
+ */
+export interface PartyBudget {
+  ruleset: Ruleset;
+  /** Easiest first, so an index comparison is a difficulty comparison. */
+  bands: { name: string; xp: number }[];
+}
+
+/**
+ * The party's budget, summed over the characters actually at the table.
  *
  * Levels outside 1-20 are clamped rather than dropped: a sheet with a nonsense
  * level should shift the answer, not silently shrink the party.
  */
-export function partyThresholds(levels: readonly number[]): PartyThresholds {
-  const total: PartyThresholds = { easy: 0, medium: 0, hard: 0, deadly: 0 };
+export function partyBudget(levels: readonly number[], ruleset: Ruleset = '2014'): PartyBudget {
+  const names = difficultyBands(ruleset);
+  const totals = new Map<string, number>(names.map((name) => [name, 0]));
 
   for (const raw of levels) {
     const level = Math.max(1, Math.min(20, Math.round(raw) || 1));
-    const row = ENCOUNTER_THRESHOLDS[level];
-    total.easy += row.easy;
-    total.medium += row.medium;
-    total.hard += row.hard;
-    total.deadly += row.deadly;
+    const row: Record<string, number> =
+      ruleset === '2024' ? ENCOUNTER_BUDGETS_2024[level] : ENCOUNTER_THRESHOLDS[level];
+    for (const name of names) totals.set(name, (totals.get(name) ?? 0) + row[name]);
   }
 
-  return total;
+  return { ruleset, bands: names.map((name) => ({ name, xp: totals.get(name) ?? 0 })) };
+}
+
+/**
+ * The party's 2014 thresholds, kept for anything that wants the four numbers
+ * by name rather than as an ordered list.
+ */
+export function partyThresholds(levels: readonly number[]): PartyThresholds {
+  const budget = partyBudget(levels, '2014');
+  const xp = (name: string) => budget.bands.find((b) => b.name === name)?.xp ?? 0;
+  return { easy: xp('easy'), medium: xp('medium'), hard: xp('hard'), deadly: xp('deadly') };
 }
 
 /**
  * The DMG's multiplier for fighting several things at once.
  *
  * Six goblins are worth far more trouble than six times one goblin, and this is
- * the handbook's way of saying so. Applied to the monsters' XP before it is
- * compared with a threshold - never to the threshold itself, which is a common
- * way to get this backwards.
+ * the 2014 handbook's way of saying so. Applied to the monsters' XP before it
+ * is compared with a threshold - never to the threshold itself, which is a
+ * common way to get this backwards.
+ *
+ * **2024 has no such multiplier at all**, so this is 1 there. Not an oversight
+ * and not a simplification: the crowd allowance is already inside
+ * `ENCOUNTER_BUDGETS_2024`, and applying it again would count it twice.
  */
-export function encounterMultiplier(monsterCount: number): number {
+export function encounterMultiplier(monsterCount: number, ruleset: Ruleset = '2014'): number {
   if (monsterCount <= 0) return 0;
+  if (ruleset === '2024') return 1;
   if (monsterCount === 1) return 1;
   if (monsterCount === 2) return 1.5;
   if (monsterCount <= 6) return 2;
@@ -920,27 +1063,28 @@ export function encounterMultiplier(monsterCount: number): number {
  * answer: a single rat against four level 10s is not an "easy encounter", it is
  * scenery, and saying "easy" would suggest it is worth rolling for.
  */
-export type EncounterDifficulty = 'trivial' | 'easy' | 'medium' | 'hard' | 'deadly';
+export type EncounterDifficulty = string;
 
+/**
+ * How hard a fight is, in whichever edition's words the party is playing.
+ *
+ * Walks the bands from hardest down, so the answer is the highest one the
+ * adjusted XP clears. `trivial` is what falls off the bottom - not a DMG term
+ * in either edition, but a real answer: one rat against four level 10s is not
+ * an "easy encounter", it is scenery, and saying "easy" would suggest it was
+ * worth rolling for.
+ */
 export function encounterDifficulty(
   monsterXp: readonly number[],
-  thresholds: PartyThresholds,
+  budget: PartyBudget,
 ): { difficulty: EncounterDifficulty; adjustedXp: number } {
   const raw = monsterXp.reduce((sum, xp) => sum + xp, 0);
-  const adjustedXp = Math.round(raw * encounterMultiplier(monsterXp.length));
+  const adjustedXp = Math.round(raw * encounterMultiplier(monsterXp.length, budget.ruleset));
 
-  const difficulty: EncounterDifficulty =
-    adjustedXp >= thresholds.deadly
-      ? 'deadly'
-      : adjustedXp >= thresholds.hard
-        ? 'hard'
-        : adjustedXp >= thresholds.medium
-          ? 'medium'
-          : adjustedXp >= thresholds.easy
-            ? 'easy'
-            : 'trivial';
-
-  return { difficulty, adjustedXp };
+  for (let i = budget.bands.length - 1; i >= 0; i -= 1) {
+    if (adjustedXp >= budget.bands[i].xp) return { difficulty: budget.bands[i].name, adjustedXp };
+  }
+  return { difficulty: 'trivial', adjustedXp };
 }
 
 /**
@@ -956,16 +1100,17 @@ export function encounterDifficulty(
  */
 export function howManyFit(
   monsterXp: number,
-  thresholds: PartyThresholds,
+  budget: PartyBudget,
   ceiling: EncounterDifficulty,
   max = 12,
 ): number {
-  const order: EncounterDifficulty[] = ['trivial', 'easy', 'medium', 'hard', 'deadly'];
+  const order: EncounterDifficulty[] = ['trivial', ...budget.bands.map((b) => b.name)];
   const limit = order.indexOf(ceiling);
+  if (limit < 0) return 0;
 
   let fits = 0;
   for (let count = 1; count <= max; count++) {
-    const { difficulty } = encounterDifficulty(Array(count).fill(monsterXp), thresholds);
+    const { difficulty } = encounterDifficulty(Array(count).fill(monsterXp), budget);
     if (order.indexOf(difficulty) > limit) break;
     fits = count;
   }

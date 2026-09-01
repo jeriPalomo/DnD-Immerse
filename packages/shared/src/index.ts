@@ -16,3 +16,4 @@ export * from './colors.js';
 export * from './movement.js';
 export * from './conditions.js';
 export * from './deathSaves.js';
+export * from './spellSlots.js';

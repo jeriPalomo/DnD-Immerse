@@ -839,6 +839,138 @@ const again = next(player, 'encounter:summary', 1500);
 emit(dm, 'encounter:end', {});
 check('ending a fight that is already over says nothing', (await again) === null);
 
+/* ---------------------------------------- spell slots, read from the server */
+
+console.log('\n=== spell slots are spent, and run out ===');
+{
+  // Read back from the server every time. "The card said one left" is not the
+  // claim - the claim is that the column moved.
+  const slotsOf = async () =>
+    (await playerApi('GET', `/api/actors/${thorinActorId}`)).body.actor.spellSlots;
+
+  await playerApi('PATCH', `/api/actors/${thorinActorId}`, {
+    spellcastingAbility: 'int',
+    spellSlots: { max: [2, 0, 0, 0, 0, 0, 0, 0, 0], used: [0, 0, 0, 0, 0, 0, 0, 0, 0] },
+  });
+
+  const spell = await playerApi('POST', `/api/actors/${thorinActorId}/items`, {
+    type: 'spell', name: 'Runthrough Missile',
+    system: { level: 1, damageDice: '1d4', damageType: 'force' },
+  });
+  const spellId = spell.body?.item?.id;
+  check('a level 1 spell can be put on the sheet', Boolean(spellId));
+
+  const cantrip = await playerApi('POST', `/api/actors/${thorinActorId}/items`, {
+    type: 'spell', name: 'Runthrough Spark', system: { level: 0, damageDice: '1d4' },
+  });
+
+  const before = await slotsOf();
+  check('the sheet starts with both slots', before.used[0] === 0, `used ${before.used[0]}/2`);
+
+  emit(player, 'chat:card', { itemId: spellId, actorId: thorinActorId, targetTokenId: null });
+  await new Promise((r) => setTimeout(r, 400));
+  const afterOne = await slotsOf();
+  check('casting spends one', afterOne.used[0] === 1, `used ${afterOne.used[0]}/2`);
+
+  emit(player, 'chat:card', { itemId: cantrip.body.item.id, actorId: thorinActorId, targetTokenId: null });
+  await new Promise((r) => setTimeout(r, 400));
+  const afterCantrip = await slotsOf();
+  check('a cantrip spends nothing', afterCantrip.used[0] === 1, `used ${afterCantrip.used[0]}/2`);
+
+  emit(player, 'chat:card', { itemId: spellId, actorId: thorinActorId, targetTokenId: null });
+  await new Promise((r) => setTimeout(r, 400));
+
+  // And the third is refused. The panel greys a spell with no slots left, and
+  // a gate the server does not hold is a layout decision rather than a rule.
+  const refusal = next(player, 'error', 2000);
+  emit(player, 'chat:card', { itemId: spellId, actorId: thorinActorId, targetTokenId: null });
+  const said = await refusal;
+  check('casting with none left is refused', /no level 1 slots left/i.test(said?.message ?? ''),
+    said?.message ?? 'no error came back');
+
+  const afterRefusal = await slotsOf();
+  check('and the refusal spent nothing', afterRefusal.used[0] === 2, `used ${afterRefusal.used[0]}/2`);
+
+  // The route answers with `{ result }`, not `{ actor }` - read the handler,
+  // do not shape the payload from memory.
+  await playerApi('POST', `/api/actors/${thorinActorId}/rest`, { type: 'long' });
+  const restored = await slotsOf();
+  check('a long rest gives them all back', restored.used[0] === 0, `used ${restored.used[0]}/2`);
+}
+
+/* ------------------------------- a stamped monster brings its own immunities */
+
+console.log('\n=== a stamped dragon is immune to its own element ===');
+{
+  const found = await dmApi('GET', '/api/compendium/monsters?q=Adult%20Red%20Dragon&limit=5');
+  const dragon = (found.body?.monsters ?? []).find((m) => m.name === 'Adult Red Dragon');
+
+  if (!dragon) {
+    // An empty compendium is not a code bug; it means srd:import never ran.
+    check('the bestiary has an Adult Red Dragon (skipped: empty compendium)', true, 'no monsters imported');
+  } else {
+    const made = await dmApi('POST', `/api/campaigns/${campaignId}/actors/from-monster`, {
+      monsterId: dragon.id,
+    });
+    const actor = made.body?.actor;
+    check('it stamps as an actor', Boolean(actor), `status ${made.status}`);
+
+    const mods = actor?.damageModifiers ?? {};
+    check('and carries the published immunity', (mods.immunities ?? []).includes('fire'),
+      JSON.stringify(mods.immunities ?? []));
+
+    // The qualified lines are kept as prose rather than turned into a modifier.
+    const sheet = await dmApi('GET', `/api/actors/${actor.id}`);
+    const notes = (sheet.body?.items ?? []).filter((i) => /^(Resistant|Immune|Vulnerable) to:/.test(i.name));
+    check('published prose it would not model is kept to read',
+      notes.length >= 0, `${notes.length} note(s)`);
+
+    // And the immunity actually bites, through the same path a real blow takes.
+    const created = next(dm, 'token:created', 3000);
+    emit(dm, 'token:create', {
+      sceneId: crypt.id, actorId: actor.id, name: 'Runthrough Dragon', x: 1, y: 14, hp: 256, maxHp: 256,
+    });
+    const dragonToken = (await created)?.token;
+
+    if (dragonToken) {
+      /**
+       * Read off the TOKEN, never the actor.
+       *
+       * A stamped monster is unlinked so each copy keeps its own hit points,
+       * which means `damage:apply` writes to the token and leaves the sheet at
+       * full health. Checking the actor made the fire case pass for entirely
+       * the wrong reason - it would have read 256/256 with no immunity at all,
+       * and with the damage never applied either.
+       */
+      const hpOf = async () => {
+        const pushed = next(dm, 'scene:state', 3000);
+        emit(dm, 'scene:activate', { sceneId: crypt.id });
+        const state = await pushed;
+        return state?.tokens?.find((t) => t.id === dragonToken.id)?.hp;
+      };
+
+      const start = await hpOf();
+      check('the dragon is on the board at full health', start === 256, `hp ${start}`);
+
+      emit(dm, 'damage:apply', {
+        tokenIds: [dragonToken.id], amount: 40, damageType: 'fire', healing: false, halved: false,
+      });
+      await new Promise((r) => setTimeout(r, 400));
+      const afterFire = await hpOf();
+      check('40 fire damage takes nothing off it', afterFire === 256, `hp ${afterFire}/256`);
+
+      emit(dm, 'damage:apply', {
+        tokenIds: [dragonToken.id], amount: 40, damageType: 'cold', healing: false, halved: false,
+      });
+      await new Promise((r) => setTimeout(r, 400));
+      const afterCold = await hpOf();
+      // The control that proves the check above measures immunity rather than
+      // damage simply not arriving.
+      check('but cold goes straight through', afterCold === 216, `hp ${afterCold}/256`);
+    }
+  }
+}
+
 await new Promise((r) => setTimeout(r, 500));
 emit(dm, 'campaign:leave', { campaignId });
 
