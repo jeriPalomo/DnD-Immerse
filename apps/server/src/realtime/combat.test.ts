@@ -1218,3 +1218,41 @@ describe('a quiet DM adjustment says nothing', () => {
     expect(await line).toMatch(/Quiet dummy takes 2 damage/);
   });
 });
+
+/**
+ * Halving belongs to damage, and to nothing else.
+ *
+ * `halved` is what a successful saving throw does to a fireball. Applied to
+ * healing it handed back half of what was typed - a wrong number with nothing
+ * on screen to explain it, since the flag is set by an area-damage control the
+ * healer never touched.
+ */
+describe('a save halves damage and never a heal', () => {
+  let patientId: string;
+
+  beforeAll(async () => {
+    const created = next<{ token: WireToken }>(dmSocket, 'token:created');
+    dmSocket.emit('token:create', {
+      sceneId, name: 'Patient', x: 11, y: 11, hp: 10, maxHp: 40,
+    } as never);
+    patientId = (await created)!.token.id;
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  /** Measured as a delta, so neither check depends on the other running. */
+  async function move(payload: Record<string, unknown>): Promise<number> {
+    const before = (await boardTokenById(patientId))!.hp!;
+    dmSocket.emit('damage:apply', { tokenIds: [patientId], ...payload } as never);
+    await new Promise((r) => setTimeout(r, 500));
+    const after = (await boardTokenById(patientId))!.hp!;
+    return after - before;
+  }
+
+  it('halves damage on a save', async () => {
+    expect(await move({ amount: 8, damageType: 'fire', healing: false, halved: true })).toBe(-4);
+  });
+
+  it('heals the whole amount even when the flag rides along', async () => {
+    expect(await move({ amount: 8, damageType: '', healing: true, halved: true })).toBe(8);
+  });
+});

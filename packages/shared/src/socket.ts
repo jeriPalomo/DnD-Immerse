@@ -510,7 +510,13 @@ export const damageApplySchema = z.object({
   damageType: z.string().max(30).default(''),
   /** Healing shares the path so one flow covers both directions. */
   healing: z.boolean().default(false),
-  /** Half on a successful save, for area spells. */
+  /**
+   * Half on a successful save, for area spells.
+   *
+   * Damage only. A save is a thing you make against a fireball, not against
+   * being healed, and halving a heal is a wrong number with nothing on screen
+   * to explain it.
+   */
   halved: z.boolean().default(false),
   /**
    * Do it without telling the table.

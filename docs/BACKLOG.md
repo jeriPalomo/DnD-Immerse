@@ -1857,8 +1857,11 @@ Recorded because the answer has three surprises in it.
   successes or failures. The only code that removes `unconscious` is the natural
   20 on a death save. A DM healing a downed character has to clear the condition
   by hand.
-- `halved` applies to healing as well as damage, which is almost certainly not
-  intended — it exists for a saved-against fireball.
+- `halved` applied to healing as well as damage — **fixed**, it is damage-only
+  now. It exists for a saved-against fireball, and halving a heal was a wrong
+  number with nothing on screen to explain it. Worth recording how the test was
+  wrong first: asserting the resulting total made it order-dependent, so run on
+  its own it passed on the bug. It measures the delta instead.
 - Only the DM may heal through `damage:apply`. **Rests are the exception** and
   deliberately so: `POST /api/actors/:id/rest` is gated on `requireActorWrite`,
   so a player rests their own character. A long rest restores everything

@@ -961,7 +961,13 @@ export async function applyDamageTo(
   for (const token of targets) {
     if (token.hp === null || token.maxHp === null) continue;
 
-    const amount = options.halved ? Math.floor(options.amount / 2) : options.amount;
+    // Halving is what a successful save does to a fireball, so it belongs to
+    // damage and nothing else. Applied to healing it quietly gave back half of
+    // what was typed - a wrong number that looks like a right one, since there
+    // is no save to explain it and the flag is set by an area-damage button
+    // the healer never pressed.
+    const amount =
+      options.halved && !options.healing ? Math.floor(options.amount / 2) : options.amount;
 
     let after: number;
     let reason = 'normal';

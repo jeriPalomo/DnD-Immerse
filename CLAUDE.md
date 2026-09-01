@@ -788,6 +788,13 @@ Players get `amount`; the DM gets the pool, on the DM room, with `.except` so
 they are not handed both. Two tests asserted the leak rather than the rule
 (`after < before` on a *player's* payload) and now assert the redaction.
 
+**A save halves damage, and never a heal.** `halved` is what a successful
+saving throw does to a fireball, and it was applied before the healing branch -
+so a heal sent with the flag still set handed back half of what was typed. A
+wrong number with nothing on screen to explain it, since the flag belongs to an
+area-damage control the healer never pressed. The test measures the delta rather
+than the resulting total, or it passes on the bug whenever it runs alone.
+
 **A DM's correction is not an announcement.** `damage:apply` carries a `quiet`
 flag, honoured for the DM alone — a player asking for quiet would be asking to
 hit somebody without it being written down. It suppresses the chat line and the
