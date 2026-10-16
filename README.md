@@ -4,6 +4,10 @@ A self-hosted virtual tabletop for D&D 5e, built for one friend group. Draws its
 architecture from Foundry VTT: a long-running Node process you own, rather than a
 hosted service you rent.
 
+## Status
+
+   ![CI](https://github.com/jeriPalomo/DnD-Immerse/actions/workflows/ci.yml/badge.svg)
+   
 ## Running it
 
 **To play:**
