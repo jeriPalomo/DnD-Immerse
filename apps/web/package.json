@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@dnd/shared": "*",
-    "konva": "^9.3.20",
+    "konva": "^10.8.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-konva": "^19.0.3",
