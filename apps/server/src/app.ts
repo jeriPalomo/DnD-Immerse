@@ -114,8 +114,6 @@ async function serveClient(app: FastifyInstance): Promise<void> {
     },
   });
 
-const html = fs.readFileSync(index, 'utf8');
-
   const html = fs.readFileSync(index, 'utf8');
 
   app.setNotFoundHandler((request, reply) => {
