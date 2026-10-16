@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
+import sharp, { type Metadata, type Sharp } from 'sharp';
 import { newId } from './id.js';
 import { paths } from '../env.js';
 import { HttpError } from '../auth/guards.js';
@@ -50,8 +50,8 @@ export async function storeImage(
    *
    * Both are wrapped, because they throw from different places.
    */
-  let pipeline: sharp.Sharp;
-  let meta: sharp.Metadata;
+  let pipeline: Sharp;
+  let meta: Metadata;
   try {
     pipeline = sharp(buffer, { limitInputPixels: 400_000_000 }).rotate();
     meta = await pipeline.metadata();
