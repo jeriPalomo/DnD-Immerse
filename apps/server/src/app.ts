@@ -109,13 +109,14 @@ async function serveClient(app: FastifyInstance): Promise<void> {
     // writes its own default over the top.
     cacheControl: false,
     // Hashed asset filenames can be cached hard; index.html must not be.
-    setHeaders(response, filePath) {
-      if (filePath.endsWith('index.html')) response.setHeader('cache-control', 'no-cache');
-      else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
-        response.setHeader('cache-control', 'public, max-age=31536000, immutable');
-      }
-    },
-  });
+     // @fastify/static v10 passes a Fastify reply here (it was a raw Node
+     // response before), so headers are set with reply.header().
+     setHeaders(reply, filePath) {
+       if (filePath.endsWith('index.html')) reply.header('cache-control', 'no-cache');
+       else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+         reply.header('cache-control', 'public, max-age=31536000, immutable');
+       }
+     },
 
   const html = fs.readFileSync(index, 'utf8');
 
