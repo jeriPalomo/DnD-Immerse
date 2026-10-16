@@ -1,0 +1,72 @@
+# Continuous integration for DnD Immerse.
+# Runs on every push to main, on every pull request, and on demand.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: the workflow can read the code and nothing else.
+permissions:
+  contents: read
+
+# If you push twice in a row, cancel the older run instead of running both.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Actions are pinned to exact commit SHAs, not tags, so a compromised
+      # or moved tag can't change what runs in this pipeline.
+      - name: Check out code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      # npm ci installs exactly what package-lock.json specifies.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (shared, web, server)
+        run: npm run build
+
+      # Unit tests plus the realtime integration tests (Vitest).
+      - name: Run tests
+        run: npm test
+
+  dependency-audit:
+    name: Dependency security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # Gate: fail the build if any package the running app depends on
+      # has a CRITICAL known vulnerability. Tighten to "high" once the
+      # remaining high-severity upgrades are done.
+      - name: Fail on critical vulnerabilities in runtime dependencies
+        run: npm audit --omit=dev --audit-level=critical
+
+      # Report: list every advisory (including dev tools) in the job log
+      # without failing the build, so nothing is hidden.
+      - name: Report all advisories
+        if: always()
+        continue-on-error: true
+        run: npm audit
