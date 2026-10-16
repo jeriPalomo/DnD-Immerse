@@ -10,6 +10,12 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    # Major upgrades (like TypeScript 7, Zod 4 or Konva 10) can break things,
+    # so they're planned and tested by hand instead of opened automatically.
+    # Security fixes still arrive through Dependabot security updates.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
