@@ -101,19 +101,16 @@ async function serveClient(app: FastifyInstance): Promise<void> {
     return;
   }
 
-async function serveClient(app: FastifyInstance): Promise<void> {
-  const index = path.join(paths.webDist, 'index.html');
-
-  if (!fs.existsSync(index)) {
-    app.log.info('No client build found - run `npm run build` to serve it from here');
-    return;
-  }
-
   await app.register(fastifyStatic, {
     root: paths.webDist,
     prefix: '/',
     decorateReply: false,
+    // Off, so setHeaders owns the header outright - otherwise the plugin
+    // writes its own default over the top.
     cacheControl: false,
+    // Hashed asset filenames can be cached hard; index.html must not be.
+    // @fastify/static v10 passes a Fastify reply here (it was a raw Node
+    // response before), so headers are set with reply.header().
     setHeaders(reply, filePath) {
       if (filePath.endsWith('index.html')) reply.header('cache-control', 'no-cache');
       else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
@@ -125,6 +122,9 @@ async function serveClient(app: FastifyInstance): Promise<void> {
   const html = fs.readFileSync(index, 'utf8');
 
   app.setNotFoundHandler((request, reply) => {
+    // A missing asset path must 404, not fall through to the SPA shell: an
+    // <img> that receives index.html renders as a broken image with a 200,
+    // which is a great deal harder to diagnose than a 404.
     if (
       request.method !== 'GET' ||
       request.url.startsWith('/api') ||
