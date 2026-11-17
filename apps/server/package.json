@@ -16,7 +16,7 @@
     "backup": "tsx src/backup.ts"
   },
   "dependencies": {
-    "@dice-roller/rpg-dice-roller": "^5.5.1",
+    "@dice-roller/rpg-dice-roller": "^5.5.3",
     "@dnd/shared": "*",
     "@fastify/cookie": "^11.1.5",
     "@fastify/multipart": "^9.0.3",
